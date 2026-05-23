@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Slippy</string>
+    <string name="login_title">เข้าสู่ระบบ</string>
+    <string name="documents_title">เอกสาร</string>
+    <string name="dashboard_title">แดชบอร์ด</string>
+    <string name="analytics_title">รายงาน</string>
+    <string name="profile_title">โปรไฟล์</string>
+    <string name="camera_title">สแกนเอกสาร</string>
+</resources>

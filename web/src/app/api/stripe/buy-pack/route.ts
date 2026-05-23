@@ -1,0 +1,45 @@
+import { NextRequest, NextResponse } from "next/server"
+import { createClient } from "@/lib/supabase/server"
+import { stripe } from "@/lib/stripe/server"
+
+const DOC_PACKS = {
+  pack_100: { priceId: process.env.NEXT_PUBLIC_STRIPE_PRICE_PACK_100!, docs: 100,  label: "100 เอกสาร" },
+  pack_300: { priceId: process.env.NEXT_PUBLIC_STRIPE_PRICE_PACK_300!, docs: 300,  label: "300 เอกสาร" },
+  pack_500: { priceId: process.env.NEXT_PUBLIC_STRIPE_PRICE_PACK_500!, docs: 500,  label: "500 เอกสาร" },
+} as const
+
+export async function POST(req: NextRequest) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  const { packId, orgId } = await req.json() as { packId: string; orgId: string }
+
+  const pack = DOC_PACKS[packId as keyof typeof DOC_PACKS]
+  if (!pack) return NextResponse.json({ error: "Invalid pack" }, { status: 400 })
+
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("stripe_customer_id")
+    .eq("id", orgId)
+    .single()
+
+  const session = await stripe.checkout.sessions.create({
+    mode:                 "payment",           // one-time, not subscription
+    payment_method_types: ["card"],
+    customer:             org?.stripe_customer_id ?? undefined,
+    line_items:           [{ price: pack.priceId, quantity: 1 }],
+    success_url:          `${process.env.NEXT_PUBLIC_APP_URL}/billing?pack_success=true`,
+    cancel_url:           `${process.env.NEXT_PUBLIC_APP_URL}/billing`,
+    metadata: {
+      type:     "doc_pack",
+      org_id:   orgId,
+      user_id:  user.id,
+      pack_id:  packId,
+      docs_add: String(pack.docs),
+    },
+    locale: "th",
+  })
+
+  return NextResponse.json({ url: session.url })
+}

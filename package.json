@@ -1,0 +1,19 @@
+{
+  "name": "slipify",
+  "private": true,
+  "workspaces": ["web", "api", "packages/*"],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=web",
+    "dev:api": "npm run dev --workspace=api",
+    "dev": "concurrently \"npm:dev:web\" \"npm:dev:api\"",
+    "build": "npm run build --workspace=web && npm run build --workspace=api",
+    "db:migrate": "supabase db push",
+    "db:reset": "supabase db reset",
+    "db:types": "supabase gen types typescript --local > packages/types/database.ts",
+    "stripe:listen": "stripe listen --forward-to localhost:3000/api/webhooks/stripe"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.4.0"
+  }
+}

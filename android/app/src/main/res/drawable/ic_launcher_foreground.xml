@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Slippy "S" lettermark on indigo background -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 44,32 C 38,32 33,37 33,43 C 33,49 38,53 44,53 L 54,53 C 58,53 58,56 58,57 C 58,59 57,61 54,61 L 36,61 L 36,70 L 54,70 C 61,70 67,65 67,57 C 67,50 62,47 56,47 L 46,47 C 42,47 42,44 42,43 C 42,41 43,40 46,40 L 63,40 L 63,32 Z"
+        android:strokeWidth="0"/>
+</vector>

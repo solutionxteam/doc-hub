@@ -1,0 +1,29 @@
+import { NextRequest, NextResponse } from "next/server"
+import { createClient }        from "@/lib/supabase/server"
+
+const API_BASE     = process.env.API_BASE_URL    ?? "http://localhost:4000"
+const INTERNAL_KEY = process.env.INTERNAL_API_KEY ?? ""
+
+/** POST /api/integrations/[id]/sync */
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  const { id } = await params
+
+  const res = await fetch(`${API_BASE}/integrations/${id}/sync`, {
+    method:  "POST",
+    headers: {
+      "Content-Type":   "application/json",
+      "x-internal-key": INTERNAL_KEY,
+      "x-user-id":      user.id,
+    },
+  })
+
+  const data = await res.json()
+  return NextResponse.json(data, { status: res.status })
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Slippy — ระบบจัดการเอกสารบัญชี",
+  "short_name": "Slippy",
+  "description": "ระบบจัดการเอกสารบัญชีอัจฉริยะ ด้วย AI OCR",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#6366f1",
+  "lang": "th",
+  "icons": [
+    { "src": "/icon.svg",         "type": "image/svg+xml", "sizes": "any", "purpose": "maskable any" },
+    { "src": "/apple-icon.svg",   "type": "image/svg+xml", "sizes": "any" }
+  ],
+  "categories": ["finance", "business", "productivity"]
+}
