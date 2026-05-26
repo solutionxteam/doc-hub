@@ -1,46 +1,75 @@
-<svg viewBox="0 0 300 300" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- LINE OA profile image — square 300×300 -->
+<svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    LINE OA / LINE Messaging channel icon — 1024×1024
+    LINE displays this as a circle, so keep important content within the inner 80% (≈820px).
+  -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="300" y2="300" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7c3aed"/>
-      <stop offset="0.5" stop-color="#6366f1"/>
-      <stop offset="1" stop-color="#db2777"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#7c3aed"/>
+      <stop offset="48%"  stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#db2777"/>
     </linearGradient>
-    <radialGradient id="shine" cx="0.25" cy="0.15" r="0.85">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.4"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    <radialGradient id="shine" cx="22%" cy="14%" r="72%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.40"/>
+      <stop offset="60%"  stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="slip" x1="88" y1="80" x2="212" y2="210" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e8eaf6"/>
+    <linearGradient id="paper" x1="296" y1="210" x2="728" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"  stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8eaf6"/>
     </linearGradient>
+    <filter id="shadow" x="-15%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="20" stdDeviation="28" flood-color="#1e1b4b" flood-opacity="0.26"/>
+    </filter>
   </defs>
 
-  <!-- Background (no radius — LINE OA handles clipping) -->
-  <rect width="300" height="300" fill="url(#bg)"/>
-  <rect width="300" height="300" fill="url(#shine)"/>
+  <!-- Background (full bleed — LINE clips to circle) -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#shine)"/>
+  <!-- Decorative circle accents -->
+  <circle cx="850" cy="180" r="200" fill="#ffffff" fill-opacity="0.04"/>
+  <circle cx="180" cy="850" r="150" fill="#ffffff" fill-opacity="0.03"/>
 
-  <!-- Centered mascot -->
-  <g transform="translate(150,148) rotate(-8) translate(-150,-148)">
-    <!-- Receipt shadow -->
-    <path d="M104 78 L196 78 Q212 78 212 94 L212 188 L203 198 L194 188 L185 198 L176 188 L167 198 L158 188 L149 198 L140 188 L131 198 L122 188 L110 198 L88 198 L88 94 Q88 78 104 78 Z"
-          fill="#1e1b4b" fill-opacity="0.18" transform="translate(3.5 5)"/>
-    <!-- Receipt body -->
-    <path d="M104 78 L196 78 Q212 78 212 94 L212 188 L203 198 L194 188 L185 198 L176 188 L167 198 L158 188 L149 198 L140 188 L131 198 L122 188 L110 198 L88 198 L88 94 Q88 78 104 78 Z"
-          fill="url(#slip)"/>
+  <!-- Receipt mascot — centered slightly high to leave room for wordmark -->
+  <g transform="translate(512,470) rotate(-7) translate(-512,-470)" filter="url(#shadow)">
+    <!-- Shadow -->
+    <path d="M316 190 L708 190 Q764 190 764 246 L764 638
+             L728 680 L692 638 L656 680 L620 638 L584 680
+             L548 638 L512 680 L476 638 L440 680 L404 638 L368 680
+             L260 680 L260 246 Q260 190 316 190 Z"
+      fill="#1e1b4b" fill-opacity="0.20" transform="translate(8 18)"/>
+    <!-- Body -->
+    <path d="M316 190 L708 190 Q764 190 764 246 L764 638
+             L728 680 L692 638 L656 680 L620 638 L584 680
+             L548 638 L512 680 L476 638 L440 680 L404 638 L368 680
+             L260 680 L260 246 Q260 190 316 190 Z"
+      fill="url(#paper)"/>
+    <!-- Header lines -->
+    <rect x="296" y="242" width="260" height="10" rx="5"   fill="#6366f1" fill-opacity="0.17"/>
+    <rect x="296" y="264" width="180" height="7"  rx="3.5" fill="#6366f1" fill-opacity="0.10"/>
     <!-- Eyes -->
-    <circle cx="128" cy="130" r="9" fill="#1e1b4b"/>
-    <circle cx="172" cy="130" r="9" fill="#1e1b4b"/>
-    <circle cx="131" cy="127" r="2.5" fill="white" fill-opacity="0.65"/>
-    <circle cx="175" cy="127" r="2.5" fill="white" fill-opacity="0.65"/>
+    <circle cx="430" cy="400" r="40" fill="#1e1b4b"/>
+    <circle cx="594" cy="400" r="40" fill="#1e1b4b"/>
+    <circle cx="445" cy="383" r="13" fill="#ffffff" fill-opacity="0.70"/>
+    <circle cx="609" cy="383" r="13" fill="#ffffff" fill-opacity="0.70"/>
+    <circle cx="455" cy="393" r="5"  fill="#ffffff" fill-opacity="0.38"/>
+    <circle cx="619" cy="393" r="5"  fill="#ffffff" fill-opacity="0.38"/>
     <!-- Blush -->
-    <circle cx="115" cy="148" r="7.5" fill="#fb7185" fill-opacity="0.5"/>
-    <circle cx="185" cy="148" r="7.5" fill="#fb7185" fill-opacity="0.5"/>
+    <ellipse cx="378" cy="470" rx="36" ry="24" fill="#fb7185" fill-opacity="0.45"/>
+    <ellipse cx="646" cy="470" rx="36" ry="24" fill="#fb7185" fill-opacity="0.45"/>
     <!-- Smile -->
-    <path d="M128 152 Q150 170 172 152" stroke="#1e1b4b" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <path d="M430 484 Q512 556 594 484"
+          stroke="#1e1b4b" stroke-width="36" stroke-linecap="round" fill="none"/>
+    <!-- Footer lines -->
+    <rect x="296" y="580" width="210" height="8" rx="4" fill="#6366f1" fill-opacity="0.12"/>
+    <rect x="296" y="600" width="148" height="6" rx="3" fill="#6366f1" fill-opacity="0.08"/>
   </g>
 
-  <!-- "Slippy" wordmark at bottom -->
-  <text x="150" y="272" font-family="system-ui,-apple-system,sans-serif" font-size="28" font-weight="700"
-        fill="white" fill-opacity="0.92" text-anchor="middle" letter-spacing="1">Slippy</text>
+  <!-- Wordmark "Slippy" — bottom area, stays inside circle safe zone -->
+  <text
+    x="512" y="850"
+    font-family="system-ui, -apple-system, 'Helvetica Neue', sans-serif"
+    font-size="96" font-weight="800" letter-spacing="6"
+    fill="#ffffff" fill-opacity="0.94"
+    text-anchor="middle">Slippy</text>
 </svg>

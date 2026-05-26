@@ -1,7 +1,17 @@
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { slugify }           from "@/lib/utils"
+import { getDocQuota }       from "@/lib/plans"
 
 export async function POST(req: NextRequest) {
   // ── 1. Verify caller is authenticated (anon client reads session cookie) ──
@@ -56,7 +66,7 @@ export async function POST(req: NextRequest) {
       address:         address?.trim() || null,
       fiscal_year_end: fiscalYearEnd,
       plan:            "free",
-      doc_quota:       50,
+      doc_quota:       getDocQuota("free"),
       doc_used:        0,
     })
     .select("id")

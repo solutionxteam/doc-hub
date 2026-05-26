@@ -1,0 +1,96 @@
+<svg viewBox="0 0 1080 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Instagram Post — 1080×1080 (1:1) -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1080" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"  stop-color="#3b0764"/>
+      <stop offset="45%" stop-color="#4338ca"/>
+      <stop offset="100%" stop-color="#9d174d"/>
+    </linearGradient>
+    <radialGradient id="gTL" cx="20%" cy="20%" r="60%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gBR" cx="85%" cy="85%" r="50%">
+      <stop offset="0%" stop-color="#ec4899" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="560" y1="100" x2="1060" y2="980" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8eaf6"/>
+    </linearGradient>
+    <filter id="sh"><feDropShadow dx="0" dy="20" stdDeviation="36" flood-color="#1e1b4b" flood-opacity="0.30"/></filter>
+    <pattern id="dots" x="0" y="0" width="48" height="48" patternUnits="userSpaceOnUse">
+      <circle cx="24" cy="24" r="1.5" fill="#ffffff" fill-opacity="0.055"/>
+    </pattern>
+  </defs>
+
+  <rect width="1080" height="1080" fill="url(#bg)"/>
+  <rect width="1080" height="1080" fill="url(#gTL)"/>
+  <rect width="1080" height="1080" fill="url(#gBR)"/>
+  <rect width="1080" height="1080" fill="url(#dots)"/>
+
+  <!-- Top left: icon mark -->
+  <g transform="translate(72, 72)">
+    <rect width="120" height="120" rx="28" fill="#ffffff" fill-opacity="0.14"/>
+    <g transform="translate(60,58) rotate(-6) translate(-60,-58)">
+      <path d="M34 24 L86 24 Q96 24 96 34 L96 86 L90 93 L84 86 L78 93 L72 86 L66 93 L60 86 L54 93 L48 86 L42 93 L24 93 L24 34 Q24 24 34 24 Z" fill="#ffffff" fill-opacity="0.95"/>
+      <circle cx="46" cy="54" r="7.5" fill="#1e1b4b"/>
+      <circle cx="74" cy="54" r="7.5" fill="#1e1b4b"/>
+      <circle cx="49" cy="51" r="2.5" fill="#ffffff" fill-opacity="0.7"/>
+      <circle cx="77" cy="51" r="2.5" fill="#ffffff" fill-opacity="0.7"/>
+      <ellipse cx="38" cy="65" rx="7.5" ry="5" fill="#fb7185" fill-opacity="0.5"/>
+      <ellipse cx="82" cy="65" rx="7.5" ry="5" fill="#fb7185" fill-opacity="0.5"/>
+      <path d="M46 68 Q60 80 74 68" stroke="#1e1b4b" stroke-width="6" stroke-linecap="round" fill="none"/>
+    </g>
+  </g>
+
+  <!-- Left text block -->
+  <text x="72" y="560"
+    font-family="system-ui,-apple-system,'Helvetica Neue',sans-serif"
+    font-size="140" font-weight="800" letter-spacing="-3" fill="#ffffff">Slippy</text>
+
+  <text x="76" y="632"
+    font-family="system-ui,-apple-system,'Noto Sans Thai',sans-serif"
+    font-size="36" font-weight="500" fill="#ffffff" fill-opacity="0.80">
+    ระบบบัญชีอัจฉริยะด้วย AI
+  </text>
+
+  <!-- Feature pills -->
+  <g transform="translate(72, 668)">
+    <rect width="126" height="40" rx="20" fill="#ffffff" fill-opacity="0.14"/>
+    <text x="63" y="26" text-anchor="middle" font-family="system-ui,sans-serif" font-size="17" font-weight="600" fill="#ffffff">🤖 AI OCR</text>
+    <rect x="140" width="148" height="40" rx="20" fill="#ffffff" fill-opacity="0.14"/>
+    <text x="214" y="26" text-anchor="middle" font-family="system-ui,sans-serif" font-size="17" font-weight="600" fill="#ffffff">📊 Analytics</text>
+    <rect x="302" width="134" height="40" rx="20" fill="#10b981" fill-opacity="0.25"/>
+    <text x="369" y="26" text-anchor="middle" font-family="system-ui,sans-serif" font-size="17" font-weight="600" fill="#6ee7b7">✓ PDPA</text>
+  </g>
+
+  <!-- URL -->
+  <text x="76" y="980"
+    font-family="system-ui,monospace" font-size="28" font-weight="500"
+    fill="#ffffff" fill-opacity="0.40">slippy.app</text>
+
+  <!-- Receipt mascot — right -->
+  <g transform="translate(870,490) rotate(-9) translate(-870,-490)" filter="url(#sh)">
+    <path d="M720 100 L1020 100 Q1078 100 1078 158 L1078 850
+             L1056 876 L1034 850 L1012 876 L990 850 L968 876 L946 850
+             L924 876 L902 850 L880 876 L858 850 L700 850 L700 158 Q700 100 720 100 Z"
+      fill="#1e1b4b" fill-opacity="0.20" transform="translate(12 20)"/>
+    <path d="M720 100 L1020 100 Q1078 100 1078 158 L1078 850
+             L1056 876 L1034 850 L1012 876 L990 850 L968 876 L946 850
+             L924 876 L902 850 L880 876 L858 850 L700 850 L700 158 Q700 100 720 100 Z"
+      fill="url(#paper)"/>
+    <rect x="724" y="180" width="196" height="14" rx="7" fill="#6366f1" fill-opacity="0.18"/>
+    <rect x="724" y="204" width="138" height="10" rx="5" fill="#6366f1" fill-opacity="0.11"/>
+    <circle cx="818" cy="390" r="58" fill="#1e1b4b"/>
+    <circle cx="962" cy="390" r="58" fill="#1e1b4b"/>
+    <circle cx="836" cy="367" r="19" fill="#ffffff" fill-opacity="0.70"/>
+    <circle cx="980" cy="367" r="19" fill="#ffffff" fill-opacity="0.70"/>
+    <ellipse cx="752" cy="468" rx="48" ry="32" fill="#fb7185" fill-opacity="0.44"/>
+    <ellipse cx="1028" cy="468" rx="48" ry="32" fill="#fb7185" fill-opacity="0.44"/>
+    <path d="M818 494 Q890 570 962 494"
+          stroke="#1e1b4b" stroke-width="46" stroke-linecap="round" fill="none"/>
+    <rect x="724" y="780" width="176" height="12" rx="6" fill="#6366f1" fill-opacity="0.13"/>
+    <rect x="724" y="804" width="124" height="8"  rx="4" fill="#6366f1" fill-opacity="0.08"/>
+  </g>
+</svg>

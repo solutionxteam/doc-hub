@@ -1,5 +1,14 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -11,8 +20,8 @@ export function LoginForm() {
   const router   = useRouter()
   const supabase = createClient()
 
-  const [email,    setEmail]    = useState("demo@slippy.app")
-  const [password, setPassword] = useState("password")
+  const [email,    setEmail]    = useState("")
+  const [password, setPassword] = useState("")
   const [showPw,   setShowPw]   = useState(false)
   const [remember, setRemember] = useState(true)
   const [loading,  setLoading]  = useState(false)
@@ -153,13 +162,23 @@ export function LoginForm() {
       </p>
 
       {/* Demo info */}
-      <div className="mt-7 p-3 bg-muted rounded-[10px] text-[12px] text-muted-foreground flex gap-2.5">
-        <Icons.Info size={14} className="text-brand-500 shrink-0 mt-0.5" />
-        <span>
-          <b className="text-foreground">Demo:</b> ใช้{" "}
-          <code className="font-mono bg-background px-1 rounded">demo@slippy.app</code> /{" "}
-          <code className="font-mono bg-background px-1 rounded">password</code>
-        </span>
+      <div className="mt-7 p-3.5 bg-muted rounded-[10px] text-[12px] text-muted-foreground space-y-2.5">
+        <div className="flex gap-2.5">
+          <Icons.Info size={14} className="text-brand-500 shrink-0 mt-0.5" />
+          <span>
+            <b className="text-foreground">Demo Account</b>{" "}
+            — สำหรับทดลองใช้งานระบบโดยไม่ต้องสมัคร
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setEmail("demo@slippy.app"); setPassword("password") }}
+          className="w-full h-8 rounded-[8px] border border-brand-200 dark:border-brand-700
+            text-brand-600 dark:text-brand-400 text-[12px] font-medium
+            hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
+        >
+          เข้าสู่ระบบด้วย Demo Account
+        </button>
       </div>
     </div>
   )

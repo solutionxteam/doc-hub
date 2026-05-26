@@ -1,0 +1,72 @@
+<svg viewBox="0 0 640 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    WhatsApp Business Profile Photo — 640×640
+    WhatsApp displays as circle, crops to 640×640 recommended
+    Keep content within central ~560×560 safe zone
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="640" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"  stop-color="#3730a3"/>
+      <stop offset="50%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="38%" cy="32%" r="65%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="72%" cy="78%" r="48%">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#c084fc" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="190" y1="120" x2="490" y2="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8eaf6"/>
+    </linearGradient>
+    <filter id="sh"><feDropShadow dx="0" dy="12" stdDeviation="24" flood-color="#1e1b4b" flood-opacity="0.32"/></filter>
+    <pattern id="dots" x="0" y="0" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="16" cy="16" r="1.1" fill="#ffffff" fill-opacity="0.055"/>
+    </pattern>
+  </defs>
+
+  <rect width="640" height="640" fill="url(#bg)"/>
+  <rect width="640" height="640" fill="url(#glow)"/>
+  <rect width="640" height="640" fill="url(#glow2)"/>
+  <rect width="640" height="640" fill="url(#dots)"/>
+
+  <!-- Receipt mascot — centered -->
+  <g transform="translate(320,285) rotate(-5) translate(-320,-285)" filter="url(#sh)">
+    <!-- Shadow -->
+    <path d="M195 80 L445 80 Q490 80 490 125 L490 468
+             L472 490 L454 468 L436 490 L418 468 L400 490 L382 468
+             L364 490 L346 468 L328 490 L150 490 L150 125 Q150 80 195 80 Z"
+      fill="#1e1b4b" fill-opacity="0.20" transform="translate(10 16)"/>
+    <!-- Paper -->
+    <path d="M195 80 L445 80 Q490 80 490 125 L490 468
+             L472 490 L454 468 L436 490 L418 468 L400 490 L382 468
+             L364 490 L346 468 L328 490 L150 490 L150 125 Q150 80 195 80 Z"
+      fill="url(#paper)"/>
+    <!-- Lines -->
+    <rect x="175" y="142" width="138" height="11" rx="5.5" fill="#6366f1" fill-opacity="0.18"/>
+    <rect x="175" y="162" width="98" height="8" rx="4" fill="#6366f1" fill-opacity="0.11"/>
+    <!-- Eyes -->
+    <circle cx="258" cy="270" r="40" fill="#1e1b4b"/>
+    <circle cx="382" cy="270" r="40" fill="#1e1b4b"/>
+    <circle cx="271" cy="255" r="13" fill="#ffffff" fill-opacity="0.72"/>
+    <circle cx="395" cy="255" r="13" fill="#ffffff" fill-opacity="0.72"/>
+    <!-- Cheeks -->
+    <ellipse cx="200" cy="326" rx="36" ry="24" fill="#fb7185" fill-opacity="0.48"/>
+    <ellipse cx="440" cy="326" rx="36" ry="24" fill="#fb7185" fill-opacity="0.48"/>
+    <!-- Smile -->
+    <path d="M258 345 Q320 408 382 345"
+          stroke="#1e1b4b" stroke-width="28" stroke-linecap="round" fill="none"/>
+    <!-- Footer lines -->
+    <rect x="175" y="448" width="126" height="9" rx="4.5" fill="#6366f1" fill-opacity="0.13"/>
+    <rect x="175" y="464" width="88" height="6" rx="3" fill="#6366f1" fill-opacity="0.09"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="320" y="578"
+    text-anchor="middle"
+    font-family="system-ui,-apple-system,'Helvetica Neue',sans-serif"
+    font-size="64" font-weight="800" letter-spacing="-1.5" fill="#ffffff" fill-opacity="0.92">Slippy</text>
+</svg>

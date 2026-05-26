@@ -1,5 +1,17 @@
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
+import { useId } from "react"
+
 export function LogoMark({ size = 32, className = '', glow = false }: { size?: number; className?: string; glow?: boolean }) {
-  const uid = Math.random().toString(36).slice(2, 7)
+  // useId() is stable between server and client — Math.random() causes hydration mismatch
+  const uid = useId().replace(/:/g, "")
   return (
     <span className={"relative inline-flex shrink-0 " + className} style={{ width: size, height: size }}>
       {glow && <span className="absolute inset-0 rounded-[28%] bg-brand-500/50 blur-xl" />}

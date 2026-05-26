@@ -1,5 +1,14 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
@@ -26,18 +35,11 @@ const ROLE_TONE: Record<string, string> = {
   viewer:     "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
 }
 
-const SAMPLE_MEMBERS = [
-  { id: "m1", name: "นภัทร เจริญพร",     email: "napat@abc.co.th",   role: "owner",      joined: "2025-08-01", lastActive: "เพิ่งใช้" },
-  { id: "m2", name: "สมหญิง รักการบัญชี", email: "somying@abc.co.th", role: "admin",      joined: "2025-11-12", lastActive: "2 ชม. ที่แล้ว" },
-  { id: "m3", name: "Khun Mark (CPA)",     email: "mark@taxpro.co.th", role: "accountant", joined: "2026-01-05", lastActive: "3 วันที่แล้ว" },
-  { id: "m4", name: "พีท นักพัฒนา",       email: "pete@abc.co.th",    role: "member",     joined: "2026-03-21", lastActive: "3 วันที่แล้ว" },
-]
-
 export function MembersClient({ orgId, members, invitations, currentUserId: _currentUserId, userRole }: Props) {
   const supabase  = createClient()
   const canManage = ["owner", "admin"].includes(userRole)
 
-  const displayMembers = members.length > 0 ? members : SAMPLE_MEMBERS
+  const displayMembers = members
 
   const [email,    setEmail]    = useState("")
   const [role,     setRole]     = useState("accountant")
@@ -98,6 +100,19 @@ export function MembersClient({ orgId, members, invitations, currentUserId: _cur
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
+            {displayMembers.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-5 py-12 text-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                      <Mail className="w-5 h-5 text-muted-foreground" />
+                    </div>
+                    <p className="text-[13px] font-medium text-foreground">ยังไม่มีสมาชิกในองค์กร</p>
+                    <p className="text-[12px] text-muted-foreground">เชิญสมาชิกเพื่อเริ่มทำงานร่วมกัน</p>
+                  </div>
+                </td>
+              </tr>
+            )}
             {displayMembers.map((m: any) => {
               const name     = m.name ?? m.users?.full_name ?? m.users?.email ?? "—"
               const email    = m.email ?? m.users?.email ?? "—"

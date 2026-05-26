@@ -1,0 +1,93 @@
+<svg viewBox="0 0 1080 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Universal Square Profile Photo — 1080×1080
+    Used for: Facebook Page, Instagram, YouTube channel art (profile), LinkedIn company logo (crop to circle)
+    Each platform crops differently:
+      Facebook: circle crop shown, uploads square
+      Instagram: circle crop
+      YouTube: circle crop
+      LinkedIn: circle crop
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1080" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"  stop-color="#3730a3"/>
+      <stop offset="50%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="70%" cy="75%" r="50%">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#c084fc" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="300" y1="200" x2="780" y2="880" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8eaf6"/>
+    </linearGradient>
+    <filter id="sh">
+      <feDropShadow dx="0" dy="20" stdDeviation="40" flood-color="#1e1b4b" flood-opacity="0.35"/>
+    </filter>
+    <pattern id="dots" x="0" y="0" width="54" height="54" patternUnits="userSpaceOnUse">
+      <circle cx="27" cy="27" r="1.8" fill="#ffffff" fill-opacity="0.055"/>
+    </pattern>
+    <!-- Safe circle clip for platforms that crop to circle -->
+    <clipPath id="safe-circle">
+      <circle cx="540" cy="540" r="480"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1080" height="1080" fill="url(#bg)"/>
+  <rect width="1080" height="1080" fill="url(#glow)"/>
+  <rect width="1080" height="1080" fill="url(#glow2)"/>
+  <rect width="1080" height="1080" fill="url(#dots)"/>
+
+  <!-- Receipt mascot — centered, large -->
+  <g transform="translate(540,480) rotate(-6) translate(-540,-480)" filter="url(#sh)">
+    <!-- Shadow -->
+    <path d="M330 120 L750 120 Q820 120 820 190 L820 790
+             L791 826 L762 790 L733 826 L704 790 L675 826
+             L646 790 L617 826 L588 790 L559 826 L530 790
+             L501 826 L472 790 L260 790 L260 190 Q260 120 330 120 Z"
+      fill="#1e1b4b" fill-opacity="0.22" transform="translate(18 28)"/>
+    <!-- Paper -->
+    <path d="M330 120 L750 120 Q820 120 820 190 L820 790
+             L791 826 L762 790 L733 826 L704 790 L675 826
+             L646 790 L617 826 L588 790 L559 826 L530 790
+             L501 826 L472 790 L260 790 L260 190 Q260 120 330 120 Z"
+      fill="url(#paper)"/>
+
+    <!-- Lines on receipt -->
+    <rect x="292" y="218" width="216" height="18" rx="9" fill="#6366f1" fill-opacity="0.18"/>
+    <rect x="292" y="250" width="152" height="12" rx="6" fill="#6366f1" fill-opacity="0.11"/>
+
+    <!-- Eyes -->
+    <circle cx="426" cy="450" r="68" fill="#1e1b4b"/>
+    <circle cx="654" cy="450" r="68" fill="#1e1b4b"/>
+    <!-- Eye shine -->
+    <circle cx="448" cy="425" r="22" fill="#ffffff" fill-opacity="0.72"/>
+    <circle cx="676" cy="425" r="22" fill="#ffffff" fill-opacity="0.72"/>
+    <!-- Small shine -->
+    <circle cx="462" cy="440" r="9" fill="#ffffff" fill-opacity="0.45"/>
+    <circle cx="690" cy="440" r="9" fill="#ffffff" fill-opacity="0.45"/>
+
+    <!-- Cheeks -->
+    <ellipse cx="330" cy="544" rx="62" ry="42" fill="#fb7185" fill-opacity="0.48"/>
+    <ellipse cx="750" cy="544" rx="62" ry="42" fill="#fb7185" fill-opacity="0.48"/>
+
+    <!-- Smile -->
+    <path d="M426 570 Q540 680 654 570"
+          stroke="#1e1b4b" stroke-width="48" stroke-linecap="round" fill="none"/>
+
+    <!-- Footer lines -->
+    <rect x="292" y="726" width="196" height="16" rx="8" fill="#6366f1" fill-opacity="0.13"/>
+    <rect x="292" y="754" width="138" height="10" rx="5" fill="#6366f1" fill-opacity="0.08"/>
+  </g>
+
+  <!-- Wordmark at bottom — inside safe circle -->
+  <text x="540" y="960"
+    text-anchor="middle"
+    font-family="system-ui,-apple-system,'Helvetica Neue',sans-serif"
+    font-size="88" font-weight="800" letter-spacing="-2" fill="#ffffff" fill-opacity="0.92">Slippy</text>
+</svg>

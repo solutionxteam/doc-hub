@@ -1,10 +1,19 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { useState } from "react"
 import { Download, TrendingUp, TrendingDown } from "lucide-react"
 import { formatThb } from "@/lib/utils"
 
-/* ─── Static demo series (always shown; real data overlays when available) ─── */
+// ── Fallback demo data (shown only when real DB data is insufficient) ──────────
 const DEMO_MONTH_SERIES = [
   { m: "มิ.ย.",  spend: 84300,  vat: 5510 },
   { m: "ก.ค.",   spend: 92100,  vat: 6022 },
@@ -41,10 +50,16 @@ const DEMO_TOP_VENDORS = [
   { name: "Starbucks Coffee",           count: 18, total: 3420 },
 ]
 
-/* ─── Bar Chart (custom SVG) ─── */
-function BarChart({ series }: { series: typeof DEMO_MONTH_SERIES }) {
+// Color palette for real category data
+const CATEGORY_PALETTE = [
+  "#6366f1","#8b5cf6","#06b6d4","#10b981","#f97316",
+  "#f59e0b","#a855f7","#14b8a6","#ef4444","#94a3b8",
+]
+
+// ── Bar Chart (custom SVG) ──────────────────────────────────────────────────────
+function BarChart({ series }: { series: { m: string; spend: number; vat: number }[] }) {
   const w = 800, h = 220, pad = { l: 44, r: 12, t: 16, b: 28 }
-  const max = Math.max(...series.map(s => s.spend))
+  const max = Math.max(...series.map(s => s.spend), 1)
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
   const groupW = innerW / series.length
@@ -62,7 +77,7 @@ function BarChart({ series }: { series: typeof DEMO_MONTH_SERIES }) {
               <line x1={pad.l} x2={w - pad.r} y1={y} y2={y}
                 stroke="hsl(var(--border))" strokeDasharray="2 4" />
               <text x={pad.l - 6} y={y + 3} textAnchor="end" fontSize="9" fill="hsl(var(--muted-foreground))">
-                {Math.round(v / 1000)}k
+                {v >= 1000 ? `${Math.round(v / 1000)}k` : Math.round(v)}
               </text>
             </g>
           )
@@ -89,12 +104,22 @@ function BarChart({ series }: { series: typeof DEMO_MONTH_SERIES }) {
   )
 }
 
-/* ─── Donut Chart ─── */
-function DonutChart({ data }: { data: typeof DEMO_CATEGORY }) {
+// ── Donut Chart ─────────────────────────────────────────────────────────────────
+function DonutChart({ data }: { data: { name: string; value: number; color: string }[] }) {
   const total = data.reduce((s, d) => s + d.value, 0)
   let acc = 0
-  const r  = 70, cx = 100, cy = 100, stroke = 22
-  const C  = 2 * Math.PI * r
+  const r = 70, cx = 100, cy = 100, stroke = 22
+  const C = 2 * Math.PI * r
+
+  if (total === 0) {
+    return (
+      <div className="flex items-center justify-center my-4">
+        <div className="w-[200px] h-[200px] rounded-full border-[22px] border-muted flex items-center justify-center">
+          <span className="text-[11px] text-muted-foreground text-center">ยังไม่มีข้อมูล</span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex items-center justify-center my-4">
@@ -123,15 +148,15 @@ function DonutChart({ data }: { data: typeof DEMO_CATEGORY }) {
   )
 }
 
-/* ─── Line Chart (VAT trend) ─── */
-function LineChart({ series }: { series: typeof DEMO_MONTH_SERIES }) {
+// ── Line Chart (VAT trend) ───────────────────────────────────────────────────────
+function LineChart({ series }: { series: { m: string; spend: number; vat: number }[] }) {
   const w = 760, h = 200, pad = { l: 40, r: 12, t: 16, b: 28 }
-  const max    = Math.max(...series.map(s => s.vat))
+  const max    = Math.max(...series.map(s => s.vat), 1)
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
 
   const pts = series.map((s, i) => {
-    const x = pad.l + (innerW / (series.length - 1)) * i
+    const x = pad.l + (innerW / Math.max(series.length - 1, 1)) * i
     const y = pad.t + innerH - (s.vat / max) * innerH
     return [x, y] as [number, number]
   })
@@ -157,7 +182,7 @@ function LineChart({ series }: { series: typeof DEMO_MONTH_SERIES }) {
         <circle key={i} cx={p[0]} cy={p[1]} r={3.5} fill="white" stroke="#6366f1" strokeWidth={2} />
       ))}
       {series.map((s, i) => {
-        const x = pad.l + (innerW / (series.length - 1)) * i
+        const x = pad.l + (innerW / Math.max(series.length - 1, 1)) * i
         return (
           <text key={i} x={x} y={h - pad.b + 14} textAnchor="middle" fontSize="9.5" fill="hsl(var(--muted-foreground))">
             {s.m}
@@ -168,56 +193,80 @@ function LineChart({ series }: { series: typeof DEMO_MONTH_SERIES }) {
   )
 }
 
-/* ─── Mini stat card ─── */
+// ── Mini stat card ──────────────────────────────────────────────────────────────
 function MiniStat({ label, value, delta, tone = "brand" }: {
-  label: string; value: string; delta: string; tone?: "brand" | "emerald" | "purple" | "amber"
+  label: string; value: string; delta: string | null; tone?: "brand" | "emerald" | "purple" | "amber"
 }) {
-  const colors = {
-    brand:   "text-brand-600 dark:text-brand-300",
-    emerald: "text-emerald-600 dark:text-emerald-400",
-    purple:  "text-purple-600 dark:text-purple-400",
-    amber:   "text-amber-600 dark:text-amber-400",
-  }
-  const positive = !String(delta).startsWith("-")
+  const positive = delta === null ? true : !String(delta).startsWith("-")
   return (
     <div className="bg-card border border-border rounded-[12px] p-4">
       <div className="text-[11.5px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
       <div className="mt-2 text-[22px] font-bold text-foreground tabular-nums">{value}</div>
-      <div className={`mt-1 text-[12px] font-medium inline-flex items-center gap-1 ${positive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-        {positive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-        {delta}
-      </div>
+      {delta !== null && (
+        <div className={`mt-1 text-[12px] font-medium inline-flex items-center gap-1 ${positive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+          {positive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+          {delta}
+        </div>
+      )}
     </div>
   )
 }
 
-/* ─── Main Component ─── */
-interface Props { monthly: any[]; topVendors: any[] }
+// ── Main Component ──────────────────────────────────────────────────────────────
+interface Props {
+  monthly:    any[]
+  topVendors: any[]
+  categories: { name: string; value: number }[]
+}
 
-export function AnalyticsClient({ monthly, topVendors }: Props) {
+export function AnalyticsClient({ monthly, topVendors, categories }: Props) {
   const [range, setRange] = useState("12m")
 
-  const totalYear = DEMO_MONTH_SERIES.reduce((s, m) => s + m.spend, 0)
-  const totalVat  = DEMO_MONTH_SERIES.reduce((s, m) => s + m.vat, 0)
-  const totalDocs = 528
-  const ave       = Math.round(totalYear / DEMO_MONTH_SERIES.length)
-
-  /* Merge real data if available */
-  const series = monthly.length >= 3
+  // Build real series when >= 3 months of data available
+  const hasRealMonthly = monthly.length >= 3
+  const series = hasRealMonthly
     ? monthly.slice(-12).map(m => ({
         m:     (m.month as string).slice(5, 7) + "/" + (m.month as string).slice(2, 4),
         spend: Number(m.grand_total ?? 0),
-        vat:   Number(m.vat_total ?? 0),
+        vat:   Number(m.vat_total   ?? 0),
       }))
     : DEMO_MONTH_SERIES
 
+  // KPI stats from real series
+  const totalYear = series.reduce((s, m) => s + m.spend, 0)
+  const totalVat  = series.reduce((s, m) => s + m.vat,   0)
+  const totalDocs = hasRealMonthly
+    ? monthly.reduce((s, m) => s + Number(m.doc_count ?? 0), 0)
+    : 0
+  const ave = series.length > 0 ? Math.round(totalYear / series.length) : 0
+
+  // Month-over-month delta for main KPI
+  let momDelta: string | null = null
+  if (series.length >= 2) {
+    const last = series[series.length - 1].spend
+    const prev = series[series.length - 2].spend
+    if (prev > 0) {
+      const pct = ((last - prev) / prev) * 100
+      momDelta = `${pct >= 0 ? "+" : ""}${pct.toFixed(0)}% vs เดือนที่แล้ว`
+    }
+  }
+
+  // Real categories with palette colors
+  const hasRealCategories = categories.length > 0
+  const categoryData = hasRealCategories
+    ? categories.map((c, i) => ({ ...c, color: CATEGORY_PALETTE[i % CATEGORY_PALETTE.length] }))
+    : DEMO_CATEGORY
+
+  // Top vendors from real data or demo
   const vendors = topVendors.length > 0
     ? topVendors.slice(0, 5).map((v: any) => ({
         name:  v.vendor_name as string,
-        count: Number(v.doc_count ?? 0),
+        count: Number(v.doc_count  ?? 0),
         total: Number(v.total_paid ?? 0),
       }))
     : DEMO_TOP_VENDORS
+
+  const categoryTotal = categoryData.reduce((s, c) => s + c.value, 0)
 
   return (
     <div className="p-6 lg:p-7 space-y-5 max-w-[1600px] animate-fade-in">
@@ -225,7 +274,14 @@ export function AnalyticsClient({ monthly, topVendors }: Props) {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-[20px] font-bold text-foreground">รายงานและสถิติ</h2>
-          <p className="text-[12.5px] text-muted-foreground mt-0.5">ภาพรวมค่าใช้จ่ายและ VAT ของคุณ</p>
+          <p className="text-[12.5px] text-muted-foreground mt-0.5">
+            ภาพรวมค่าใช้จ่ายและ VAT ของคุณ
+            {!hasRealMonthly && (
+              <span className="ml-2 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 rounded-full font-medium">
+                ข้อมูลตัวอย่าง
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="inline-flex p-0.5 bg-muted rounded-[10px]">
@@ -244,10 +300,10 @@ export function AnalyticsClient({ monthly, topVendors }: Props) {
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MiniStat label="ยอดรวมปีนี้"        value={formatThb(totalYear)} delta="+18%" tone="brand" />
-        <MiniStat label="VAT ที่ขอคืนได้"    value={formatThb(totalVat)} delta="+12%" tone="purple" />
-        <MiniStat label="เอกสารทั้งหมด"      value={totalDocs.toLocaleString()} delta="+8%" tone="emerald" />
-        <MiniStat label="ค่าใช้จ่ายเฉลี่ย/เดือน" value={formatThb(ave)} delta="-3%" tone="amber" />
+        <MiniStat label="ยอดรวมปีนี้"             value={formatThb(totalYear)} delta={momDelta} tone="brand" />
+        <MiniStat label="VAT ที่ขอคืนได้"         value={formatThb(totalVat)} delta={null} tone="purple" />
+        <MiniStat label="เอกสารทั้งหมด"           value={hasRealMonthly ? totalDocs.toLocaleString() : "—"} delta={null} tone="emerald" />
+        <MiniStat label="ค่าใช้จ่ายเฉลี่ย/เดือน" value={formatThb(ave)} delta={null} tone="amber" />
       </div>
 
       {/* Bar chart */}
@@ -255,7 +311,9 @@ export function AnalyticsClient({ monthly, topVendors }: Props) {
         <div className="flex items-center justify-between mb-2">
           <div>
             <h3 className="text-[15px] font-semibold text-foreground">รายจ่ายรายเดือน</h3>
-            <p className="text-[12px] text-muted-foreground mt-0.5">12 เดือนล่าสุด</p>
+            <p className="text-[12px] text-muted-foreground mt-0.5">
+              {hasRealMonthly ? `${monthly.length} เดือนล่าสุด` : "12 เดือนล่าสุด (ตัวอย่าง)"}
+            </p>
           </div>
           <div className="flex items-center gap-3 text-[11.5px]">
             <span className="inline-flex items-center gap-1.5 text-muted-foreground">
@@ -273,10 +331,12 @@ export function AnalyticsClient({ monthly, topVendors }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="bg-card border border-border rounded-[12px] p-5 lg:col-span-1">
           <h3 className="text-[15px] font-semibold text-foreground">สัดส่วนตามหมวด</h3>
-          <p className="text-[12px] text-muted-foreground mt-0.5">เดือนนี้ · {formatThb(142380)}</p>
-          <DonutChart data={DEMO_CATEGORY} />
+          <p className="text-[12px] text-muted-foreground mt-0.5">
+            {hasRealCategories ? `ปีนี้ · ${formatThb(categoryTotal)}` : `ตัวอย่าง · ${formatThb(categoryTotal)}`}
+          </p>
+          <DonutChart data={categoryData} />
           <div className="mt-2 space-y-2">
-            {DEMO_CATEGORY.map(c => (
+            {categoryData.map(c => (
               <div key={c.name} className="flex items-center gap-2 text-[12.5px]">
                 <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ background: c.color }} />
                 <span className="flex-1 text-foreground truncate">{c.name}</span>
@@ -297,41 +357,49 @@ export function AnalyticsClient({ monthly, topVendors }: Props) {
       <div className="bg-card border border-border rounded-[12px] overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
           <h3 className="text-[15px] font-semibold text-foreground">ผู้ขายที่ใช้บ่อย</h3>
-          <p className="text-[12px] text-muted-foreground mt-0.5">5 อันดับแรกใน 30 วันที่ผ่านมา</p>
+          <p className="text-[12px] text-muted-foreground mt-0.5">
+            {topVendors.length > 0 ? "5 อันดับแรกใน 30 วันที่ผ่านมา" : "5 อันดับแรก (ตัวอย่าง)"}
+          </p>
         </div>
-        <table className="w-full text-sm">
-          <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="text-left py-2.5 px-5 font-medium">ผู้ขาย</th>
-              <th className="text-right px-3 py-2.5 font-medium">จำนวน</th>
-              <th className="text-right px-3 py-2.5 font-medium">ยอดรวม</th>
-              <th className="px-3 py-2.5 font-medium w-40 hidden sm:table-cell">สัดส่วน</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {vendors.map((v, i) => {
-              const maxTotal = Math.max(...vendors.map(x => x.total))
-              return (
-                <tr key={v.name} className="hover:bg-muted/30">
-                  <td className="px-5 py-3 flex items-center gap-2.5">
-                    <span className="h-7 w-7 rounded-full bg-brand-500/15 text-brand-600 dark:text-brand-300 text-[10px] font-bold flex items-center justify-center shrink-0">
-                      #{i + 1}
-                    </span>
-                    <span className="font-medium text-foreground">{v.name}</span>
-                  </td>
-                  <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">{v.count}</td>
-                  <td className="px-3 py-3 text-right tabular-nums font-medium text-foreground">{formatThb(v.total)}</td>
-                  <td className="px-3 py-3 hidden sm:table-cell">
-                    <div className="h-2 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-brand-400 to-brand-600 rounded-full transition-all"
-                        style={{ width: `${(v.total / maxTotal) * 100}%` }} />
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+        {vendors.length === 0 ? (
+          <div className="px-5 py-12 text-center text-[13px] text-muted-foreground">
+            ยังไม่มีข้อมูลผู้ขาย — เริ่มสแกนเอกสารเพื่อดูสถิติผู้ขาย
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr>
+                <th className="text-left py-2.5 px-5 font-medium">ผู้ขาย</th>
+                <th className="text-right px-3 py-2.5 font-medium">จำนวน</th>
+                <th className="text-right px-3 py-2.5 font-medium">ยอดรวม</th>
+                <th className="px-3 py-2.5 font-medium w-40 hidden sm:table-cell">สัดส่วน</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {vendors.map((v, i) => {
+                const maxTotal = Math.max(...vendors.map(x => x.total), 1)
+                return (
+                  <tr key={v.name} className="hover:bg-muted/30">
+                    <td className="px-5 py-3 flex items-center gap-2.5">
+                      <span className="h-7 w-7 rounded-full bg-brand-500/15 text-brand-600 dark:text-brand-300 text-[10px] font-bold flex items-center justify-center shrink-0">
+                        #{i + 1}
+                      </span>
+                      <span className="font-medium text-foreground">{v.name}</span>
+                    </td>
+                    <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">{v.count}</td>
+                    <td className="px-3 py-3 text-right tabular-nums font-medium text-foreground">{formatThb(v.total)}</td>
+                    <td className="px-3 py-3 hidden sm:table-cell">
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full bg-gradient-to-r from-brand-400 to-brand-600 rounded-full transition-all"
+                          style={{ width: `${(v.total / maxTotal) * 100}%` }} />
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   )

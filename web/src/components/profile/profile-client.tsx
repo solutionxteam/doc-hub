@@ -1,5 +1,14 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
@@ -13,14 +22,29 @@ import {
 import { toast } from "sonner"
 
 /* ─── Types ── */
+interface ActivityLog {
+  id:         string
+  action:     string
+  detail:     string | null
+  created_at: string
+}
+
+type LineConnection = {
+  id:           string
+  display_name: string | null
+  created_at:   string
+} | null
+
 interface ProfileProps {
-  userId:    string
-  name:      string
-  email:     string
-  role:      string
-  orgName:   string
-  orgPlan:   string
-  joinedAt?: string
+  userId:          string
+  name:            string
+  email:           string
+  role:            string
+  orgName:         string
+  orgPlan:         string
+  joinedAt?:       string
+  activityLogs:    ActivityLog[]
+  lineConnection:  LineConnection
 }
 
 /* ─── Helpers ── */
@@ -40,12 +64,27 @@ const roleBg: Record<string, string> = {
   viewer: "bg-slate-500/10 text-slate-500",
 }
 
-const ACTIVITY = [
-  { icon: CheckCircle2, color: "text-emerald-500", label: "อนุมัติเอกสาร", detail: "ใบเสร็จ AWS ฿8,750",      time: "2 ชม.ที่แล้ว" },
-  { icon: FileText,     color: "text-brand-500",   label: "อัปโหลดเอกสาร", detail: "ค่าไฟฟ้า MEA ฿1,230",   time: "เมื่อวาน" },
-  { icon: AlertCircle,  color: "text-amber-500",   label: "รีวิวเอกสาร",   detail: "Grab Thailand ฿450",     time: "2 วันที่แล้ว" },
-  { icon: CheckCircle2, color: "text-emerald-500", label: "ส่ง FlowAccount", detail: "3 เอกสารถูกส่งแล้ว",  time: "3 วันที่แล้ว" },
-]
+// Activity label mapping from action keys
+const ACTION_LABEL: Record<string, { label: string; icon: typeof FileText; color: string }> = {
+  login:                  { label: "ลงชื่อเข้าใช้",          icon: CheckCircle2, color: "text-emerald-500" },
+  consent_update:         { label: "อัปเดตความยินยอม PDPA",  icon: FileText,     color: "text-brand-500"   },
+  security_update:        { label: "อัปเดตการตั้งค่าความปลอดภัย", icon: Shield,  color: "text-purple-500"  },
+  export_request:         { label: "ขอส่งออกข้อมูล",         icon: FileText,     color: "text-amber-500"   },
+  session_revoke:         { label: "ออกจากระบบอุปกรณ์",      icon: AlertCircle,  color: "text-rose-500"    },
+  session_revoke_all:     { label: "ออกจากระบบทุกอุปกรณ์",   icon: AlertCircle,  color: "text-rose-500"    },
+  account_delete_request: { label: "ขอลบบัญชี",              icon: AlertCircle,  color: "text-rose-600"    },
+}
+
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const m = Math.floor(diff / 60000)
+  if (m < 1)  return "เมื่อกี้"
+  if (m < 60) return `${m} นาทีที่แล้ว`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h} ชม.ที่แล้ว`
+  const d = Math.floor(h / 24)
+  return d === 1 ? "เมื่อวาน" : `${d} วันที่แล้ว`
+}
 
 /* ─── Avatar section ── */
 function AvatarSection({ name }: { name: string }) {
@@ -179,7 +218,9 @@ function NotifPrefs() {
 }
 
 /* ─── Main component ── */
-export function ProfileClient({ userId, name, email, role, orgName, orgPlan, joinedAt }: ProfileProps) {
+export function ProfileClient({
+  userId, name, email, role, orgName, orgPlan, joinedAt, activityLogs, lineConnection,
+}: ProfileProps) {
   const [tab, setTab]           = useState<"info"|"notif"|"security">("info")
   const [isPending, startTrans] = useTransition()
   const router                  = useRouter()
@@ -297,47 +338,73 @@ export function ProfileClient({ userId, name, email, role, orgName, orgPlan, joi
             </div>
           </div>
 
-          {/* Linked accounts */}
+          {/* Linked accounts — real data */}
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">บัญชีที่เชื่อมต่อ</p>
-            {[
-              { icon: MessageCircle, label: "LINE",   color: "text-[#06C755]", bg: "bg-[#06C755]/10", connected: true,  detail: "@slippy_bot เชื่อมแล้ว" },
-              { icon: Smartphone,    label: "Mobile", color: "text-brand-500",  bg: "bg-brand-500/10", connected: false, detail: "ยังไม่ได้เชื่อมต่อ" },
-            ].map(({ icon: Icon, label, color, bg, connected, detail }) => (
-              <div key={label} className="flex items-center gap-3 p-4 rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors">
-                <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center shrink-0", bg)}>
-                  <Icon className={cn("w-4 h-4", color)} />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{label}</p>
-                  <p className="text-xs text-muted-foreground">{detail}</p>
-                </div>
-                <button className={cn(
-                  "text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors",
-                  connected
-                    ? "border-destructive/30 text-destructive hover:bg-destructive/10"
-                    : "hover:bg-muted"
-                )}>
-                  {connected ? "ยกเลิก" : "เชื่อมต่อ"}
-                </button>
+            {/* LINE connection */}
+            <div className="flex items-center gap-3 p-4 rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors">
+              <div className="w-9 h-9 rounded-xl bg-[#06C755]/10 flex items-center justify-center shrink-0">
+                <MessageCircle className="w-4 h-4 text-[#06C755]" />
               </div>
-            ))}
+              <div className="flex-1">
+                <p className="text-sm font-medium">LINE</p>
+                <p className="text-xs text-muted-foreground">
+                  {lineConnection
+                    ? `${lineConnection.display_name ?? "@LINE"} · เชื่อมเมื่อ ${new Date(lineConnection.created_at).toLocaleDateString("th-TH", { month: "short", year: "2-digit" })}`
+                    : "ยังไม่ได้เชื่อมต่อ"}
+                </p>
+              </div>
+              <button className={cn(
+                "text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors",
+                lineConnection
+                  ? "border-destructive/30 text-destructive hover:bg-destructive/10"
+                  : "hover:bg-muted"
+              )}>
+                {lineConnection ? "ยกเลิก" : "เชื่อมต่อ"}
+              </button>
+            </div>
+            {/* Mobile */}
+            <div className="flex items-center gap-3 p-4 rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors">
+              <div className="w-9 h-9 rounded-xl bg-brand-500/10 flex items-center justify-center shrink-0">
+                <Smartphone className="w-4 h-4 text-brand-500" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium">Mobile App</p>
+                <p className="text-xs text-muted-foreground">เร็วๆ นี้</p>
+              </div>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                เร็วๆ นี้
+              </span>
+            </div>
           </div>
 
-          {/* Recent activity */}
+          {/* Recent activity — real from user_activity_logs */}
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">กิจกรรมล่าสุด</p>
             <div className="rounded-xl border bg-card overflow-hidden divide-y">
-              {ACTIVITY.map((a, i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
-                  <a.icon className={cn("w-4 h-4 shrink-0", a.color)} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{a.label}</p>
-                    <p className="text-xs text-muted-foreground truncate">{a.detail}</p>
-                  </div>
-                  <span className="text-[11px] text-muted-foreground shrink-0">{a.time}</span>
+              {activityLogs.length === 0 ? (
+                <div className="px-4 py-8 text-center text-[12px] text-muted-foreground">
+                  ยังไม่มีกิจกรรม
                 </div>
-              ))}
+              ) : (
+                activityLogs.map((a) => {
+                  const meta = ACTION_LABEL[a.action]
+                  const Icon = meta?.icon ?? FileText
+                  const color = meta?.color ?? "text-muted-foreground"
+                  return (
+                    <div key={a.id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
+                      <Icon className={cn("w-4 h-4 shrink-0", color)} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{meta?.label ?? a.action}</p>
+                        {a.detail && (
+                          <p className="text-xs text-muted-foreground truncate">{a.detail}</p>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-muted-foreground shrink-0">{relTime(a.created_at)}</span>
+                    </div>
+                  )
+                })
+              )}
             </div>
           </div>
         </div>

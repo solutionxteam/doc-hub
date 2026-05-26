@@ -1,3 +1,8 @@
+-- ---------------------------------------------------------------------------
+-- Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+-- All rights reserved. Proprietary and confidential.
+-- ---------------------------------------------------------------------------
+
 -- ══════════════════════════════════════════════════════════════
 --  002_rls_policies.sql
 --  Row Level Security — data isolation per organization

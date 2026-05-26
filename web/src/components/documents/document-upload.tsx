@@ -1,5 +1,14 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { useCallback, useState } from "react"
 import { useDropzone } from "react-dropzone"
 import { useTranslations } from "next-intl"
@@ -64,15 +73,10 @@ export function DocumentUpload({ orgId }: DocumentUploadProps) {
 
     // Trigger API extraction
     setStatus("processing")
-    await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/documents/${doc.id}/process`,
-      { method: "POST" }
-    )
+    await fetch(`/api/documents/${doc.id}/process`, { method: "POST" })
 
     // Poll for completion via SSE
-    const es = new EventSource(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/documents/${doc.id}/progress`
-    )
+    const es = new EventSource(`/api/documents/${doc.id}/progress`)
 
     es.onmessage = (e) => {
       const payload = JSON.parse(e.data)

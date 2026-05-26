@@ -1,5 +1,14 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -8,6 +17,7 @@ import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 import { slugify } from "@/lib/utils"
+import { getDocQuota } from "@/lib/plans"
 
 export function RegisterForm() {
   const t        = useTranslations("auth")
@@ -54,12 +64,18 @@ export function RegisterForm() {
       return
     }
 
-    // 2. Create organization
+    // 2. Create organization — Free plan, no expiry, upgrade anytime
     const slug = slugify(form.orgName || form.fullName) + "-" + Date.now().toString(36)
 
     const { data: org, error: orgError } = await supabase
       .from("organizations")
-      .insert({ name: form.orgName || `${form.fullName}'s Company`, slug })
+      .insert({
+        name:                form.orgName || `${form.fullName}'s Company`,
+        slug,
+        plan:                "free",
+        subscription_status: "active",
+        doc_quota:           getDocQuota("free"),  // 10 docs/month
+      })
       .select("id")
       .single()
 

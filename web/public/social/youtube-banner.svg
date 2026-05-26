@@ -1,0 +1,107 @@
+<svg viewBox="0 0 2560 1440" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    YouTube Channel Art — 2560×1440 (full canvas)
+    Safe zone for all devices: center 1546×423 px
+    TV area: full 2560×1440
+    Desktop cropped: 2560×423
+    Tablet: ~1855×423
+    Mobile: ~1546×423
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="2560" y2="1440" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"  stop-color="#3b0764"/>
+      <stop offset="42%" stop-color="#4338ca"/>
+      <stop offset="100%" stop-color="#9d174d"/>
+    </linearGradient>
+    <radialGradient id="gTL" cx="15%" cy="25%" r="55%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gBR" cx="88%" cy="78%" r="42%">
+      <stop offset="0%" stop-color="#ec4899" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="1800" y1="200" x2="2480" y2="1240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8eaf6"/>
+    </linearGradient>
+    <filter id="sh"><feDropShadow dx="0" dy="30" stdDeviation="50" flood-color="#1e1b4b" flood-opacity="0.28"/></filter>
+    <pattern id="dots" x="0" y="0" width="60" height="60" patternUnits="userSpaceOnUse">
+      <circle cx="30" cy="30" r="2" fill="#ffffff" fill-opacity="0.05"/>
+    </pattern>
+    <!-- Circle decorations -->
+    <radialGradient id="circ1" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="2560" height="1440" fill="url(#bg)"/>
+  <rect width="2560" height="1440" fill="url(#gTL)"/>
+  <rect width="2560" height="1440" fill="url(#gBR)"/>
+  <rect width="2560" height="1440" fill="url(#dots)"/>
+
+  <!-- Decorative circles (TV edges — not visible on mobile/desktop) -->
+  <circle cx="280" cy="720" r="420" fill="url(#circ1)"/>
+  <circle cx="2280" cy="720" r="380" fill="url(#circ1)"/>
+
+  <!-- ── SAFE ZONE: 507–2053 x, 509–932 y (center 1546×423) ── -->
+
+  <!-- Icon mark -->
+  <g transform="translate(507, 556)">
+    <rect width="170" height="170" rx="38" fill="#ffffff" fill-opacity="0.13"/>
+    <g transform="translate(85,82) rotate(-6) translate(-85,-82)">
+      <path d="M47 33 L123 33 Q135 33 135 45 L135 120 L128 130 L121 120 L114 130 L107 120 L100 130 L93 120 L86 130 L79 120 L72 130 L54 130 L35 130 L35 45 Q35 33 47 33 Z" fill="#ffffff" fill-opacity="0.95"/>
+      <circle cx="63"  cy="73" r="8.5" fill="#1e1b4b"/>
+      <circle cx="107" cy="73" r="8.5" fill="#1e1b4b"/>
+      <circle cx="66"  cy="70" r="2.8" fill="#ffffff" fill-opacity="0.7"/>
+      <circle cx="110" cy="70" r="2.8" fill="#ffffff" fill-opacity="0.7"/>
+      <ellipse cx="52"  cy="88" rx="8.5" ry="5.5" fill="#fb7185" fill-opacity="0.5"/>
+      <ellipse cx="118" cy="88" rx="8.5" ry="5.5" fill="#fb7185" fill-opacity="0.5"/>
+      <path d="M63 92 Q85 110 107 92" stroke="#1e1b4b" stroke-width="7" stroke-linecap="round" fill="none"/>
+    </g>
+  </g>
+
+  <!-- Wordmark — inside safe zone -->
+  <text x="507" y="820"
+    font-family="system-ui,-apple-system,'Helvetica Neue',sans-serif"
+    font-size="170" font-weight="800" letter-spacing="-4" fill="#ffffff">Slippy</text>
+
+  <!-- Tagline -->
+  <text x="510" y="892"
+    font-family="system-ui,-apple-system,'Noto Sans Thai',sans-serif"
+    font-size="42" font-weight="500" fill="#ffffff" fill-opacity="0.78">
+    ระบบจัดการเอกสารบัญชีอัจฉริยะ · AI OCR · PDPA Compliant
+  </text>
+
+  <!-- URL -->
+  <text x="510" y="942"
+    font-family="system-ui,monospace" font-size="32" font-weight="500"
+    fill="#ffffff" fill-opacity="0.40">slippy.app</text>
+
+  <!-- Receipt mascot — right side, partially outside desktop but visible on TV -->
+  <g transform="translate(2100,720) rotate(-9) translate(-2100,-720)" filter="url(#sh)">
+    <path d="M1880 300 L2320 300 Q2400 300 2400 380 L2400 1080
+             L2362 1128 L2324 1080 L2286 1128 L2248 1080 L2210 1128 L2172 1080
+             L2134 1128 L2096 1080 L2058 1128 L2020 1080 L1982 1128 L1800 1128
+             L1800 380 Q1800 300 1880 300 Z"
+      fill="#1e1b4b" fill-opacity="0.20" transform="translate(14 24)"/>
+    <path d="M1880 300 L2320 300 Q2400 300 2400 380 L2400 1080
+             L2362 1128 L2324 1080 L2286 1128 L2248 1080 L2210 1128 L2172 1080
+             L2134 1128 L2096 1080 L2058 1128 L2020 1080 L1982 1128 L1800 1128
+             L1800 380 Q1800 300 1880 300 Z"
+      fill="url(#paper)"/>
+    <rect x="1828" y="416" width="316" height="14" rx="7" fill="#6366f1" fill-opacity="0.17"/>
+    <rect x="1828" y="444" width="220" height="10" rx="5" fill="#6366f1" fill-opacity="0.10"/>
+    <circle cx="1968" cy="596" r="54" fill="#1e1b4b"/>
+    <circle cx="2132" cy="596" r="54" fill="#1e1b4b"/>
+    <circle cx="1987" cy="571" r="18" fill="#ffffff" fill-opacity="0.70"/>
+    <circle cx="2151" cy="571" r="18" fill="#ffffff" fill-opacity="0.70"/>
+    <ellipse cx="1906" cy="676" rx="44" ry="30" fill="#fb7185" fill-opacity="0.44"/>
+    <ellipse cx="2194" cy="676" rx="44" ry="30" fill="#fb7185" fill-opacity="0.44"/>
+    <path d="M1968 700 Q2050 784 2132 700"
+          stroke="#1e1b4b" stroke-width="52" stroke-linecap="round" fill="none"/>
+    <rect x="1828" y="988"  width="280" height="12" rx="6" fill="#6366f1" fill-opacity="0.12"/>
+    <rect x="1828" y="1012" width="196" height="8"  rx="4" fill="#6366f1" fill-opacity="0.08"/>
+  </g>
+</svg>

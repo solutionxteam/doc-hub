@@ -1,20 +1,164 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import Link           from "next/link"
 import { useState }   from "react"
 import { LogoMark }   from "@/components/ui/logo"
 import { Icons }      from "@/components/ui/icons"
+import { SecurityIcon, TRUST_BADGE_DATA } from "@/components/ui/security-icon"
+import { PLANS as APP_PLANS } from "@/lib/plans"
 
 // ─────────────────────────────────────────────
 // DATA
 // ─────────────────────────────────────────────
+// ─── Feature SVG icons — squircle gradient matching the Slippy logo ───────────
+function FeatureIcon({ id }: { id: number }) {
+  const uid = `fi-${id}`
+  const configs = [
+    // 0 — AI Scan: brain/sparkle
+    {
+      g1: ["#a78bfa","#6366f1"], g2: ["#6366f1","#818cf8"],
+      path: (
+        <>
+          {/* sparkle top-right */}
+          <path d="M30 10 L31.2 13.5 L35 14.5 L31.2 15.5 L30 19 L28.8 15.5 L25 14.5 L28.8 13.5 Z" fill="white" fillOpacity="0.9"/>
+          {/* document body */}
+          <rect x="14" y="16" width="14" height="18" rx="2" fill="white" fillOpacity="0.25"/>
+          <rect x="14" y="16" width="14" height="18" rx="2" fill="white" fillOpacity="0.15" stroke="white" strokeWidth="1.2"/>
+          {/* scan lines */}
+          <line x1="17" y1="22" x2="25" y2="22" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+          <line x1="17" y1="26" x2="23" y2="26" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+          <line x1="17" y1="30" x2="25" y2="30" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+          {/* eye/lens */}
+          <circle cx="31" cy="31" r="6" fill="white" fillOpacity="0.2" stroke="white" strokeWidth="1.5"/>
+          <circle cx="31" cy="31" r="2.5" fill="white" fillOpacity="0.7"/>
+          <line x1="35.2" y1="35.2" x2="37.5" y2="37.5" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+        </>
+      ),
+    },
+    // 1 — VAT/WHT Report: bar chart
+    {
+      g1: ["#34d399","#059669"], g2: ["#10b981","#34d399"],
+      path: (
+        <>
+          {/* bars */}
+          <rect x="13" y="26" width="5" height="12" rx="1.5" fill="white" fillOpacity="0.6"/>
+          <rect x="21" y="19" width="5" height="19" rx="1.5" fill="white" fillOpacity="0.9"/>
+          <rect x="29" y="22" width="5" height="16" rx="1.5" fill="white" fillOpacity="0.75"/>
+          {/* trend line */}
+          <polyline points="15.5,25 23.5,18 31.5,21" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" strokeDasharray="2 1"/>
+          {/* top dot */}
+          <circle cx="23.5" cy="17.5" r="2" fill="white"/>
+          {/* x-axis */}
+          <line x1="11" y1="38.5" x2="37" y2="38.5" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeOpacity="0.5"/>
+        </>
+      ),
+    },
+    // 2 — Connect FlowAccount: plug/link
+    {
+      g1: ["#f472b6","#ec4899"], g2: ["#db2777","#f472b6"],
+      path: (
+        <>
+          {/* link chain left */}
+          <rect x="10" y="20" width="11" height="8" rx="4" fill="none" stroke="white" strokeWidth="2.2"/>
+          {/* link chain right */}
+          <rect x="27" y="20" width="11" height="8" rx="4" fill="none" stroke="white" strokeWidth="2.2"/>
+          {/* connecting bar */}
+          <line x1="21" y1="24" x2="27" y2="24" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+          {/* arrow top */}
+          <path d="M22 15 L24 12 L26 15" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+          <line x1="24" y1="12" x2="24" y2="19" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
+          {/* arrow bottom */}
+          <path d="M22 33 L24 36 L26 33" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+          <line x1="24" y1="36" x2="24" y2="29" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
+        </>
+      ),
+    },
+    // 3 — Approval Workflow: checkmark shield
+    {
+      g1: ["#60a5fa","#3b82f6"], g2: ["#2563eb","#60a5fa"],
+      path: (
+        <>
+          {/* shield */}
+          <path d="M24 11 L36 16 L36 24 Q36 33 24 38 Q12 33 12 24 L12 16 Z" fill="white" fillOpacity="0.2" stroke="white" strokeWidth="1.5"/>
+          {/* bold check */}
+          <path d="M18 24 L22 28 L30 19" stroke="white" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+        </>
+      ),
+    },
+    // 4 — LINE Bot: chat bubble + bolt
+    {
+      g1: ["#4ade80","#16a34a"], g2: ["#15803d","#4ade80"],
+      path: (
+        <>
+          {/* chat bubble */}
+          <path d="M12 14 Q12 11 15 11 L33 11 Q36 11 36 14 L36 26 Q36 29 33 29 L26 29 L22 34 L22 29 L15 29 Q12 29 12 26 Z" fill="white" fillOpacity="0.25" stroke="white" strokeWidth="1.5"/>
+          {/* bolt/zap */}
+          <path d="M26 14 L21 22 L25 22 L22 30 L29 20 L25 20 Z" fill="white" fillOpacity="0.9"/>
+        </>
+      ),
+    },
+    // 5 — Multi-company: building blocks
+    {
+      g1: ["#fb923c","#ea580c"], g2: ["#c2410c","#fb923c"],
+      path: (
+        <>
+          {/* tall building left */}
+          <rect x="11" y="18" width="10" height="20" rx="1.5" fill="white" fillOpacity="0.25" stroke="white" strokeWidth="1.3"/>
+          <rect x="13" y="21" width="2.5" height="2.5" rx="0.5" fill="white" fillOpacity="0.7"/>
+          <rect x="17" y="21" width="2.5" height="2.5" rx="0.5" fill="white" fillOpacity="0.7"/>
+          <rect x="13" y="26" width="2.5" height="2.5" rx="0.5" fill="white" fillOpacity="0.7"/>
+          <rect x="17" y="26" width="2.5" height="2.5" rx="0.5" fill="white" fillOpacity="0.7"/>
+          {/* tall building right */}
+          <rect x="27" y="14" width="10" height="24" rx="1.5" fill="white" fillOpacity="0.3" stroke="white" strokeWidth="1.3"/>
+          <rect x="29" y="17" width="2.5" height="2.5" rx="0.5" fill="white" fillOpacity="0.85"/>
+          <rect x="33" y="17" width="2.5" height="2.5" rx="0.5" fill="white" fillOpacity="0.85"/>
+          <rect x="29" y="22" width="2.5" height="2.5" rx="0.5" fill="white" fillOpacity="0.85"/>
+          <rect x="33" y="22" width="2.5" height="2.5" rx="0.5" fill="white" fillOpacity="0.85"/>
+          <rect x="29" y="27" width="2.5" height="2.5" rx="0.5" fill="white" fillOpacity="0.85"/>
+          {/* base line */}
+          <line x1="10" y1="38.5" x2="38" y2="38.5" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeOpacity="0.55"/>
+        </>
+      ),
+    },
+  ]
+
+  const c = configs[id]
+  return (
+    <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-12 h-12">
+      <defs>
+        <linearGradient id={`${uid}-bg`} x1="2" y1="2" x2="46" y2="46" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor={c.g1[0]}/>
+          <stop offset="1" stopColor={c.g1[1]}/>
+        </linearGradient>
+        <radialGradient id={`${uid}-sh`} cx="0.2" cy="0.15" r="0.85">
+          <stop offset="0" stopColor="#ffffff" stopOpacity="0.35"/>
+          <stop offset="1" stopColor="#ffffff" stopOpacity="0"/>
+        </radialGradient>
+      </defs>
+      {/* squircle bg */}
+      <path d="M24 2C9.5 2 2 9.5 2 24S9.5 46 24 46 46 38.5 46 24 38.5 2 24 2z" fill={`url(#${uid}-bg)`}/>
+      <path d="M24 2C9.5 2 2 9.5 2 24S9.5 46 24 46 46 38.5 46 24 38.5 2 24 2z" fill={`url(#${uid}-sh)`}/>
+      {c.path}
+    </svg>
+  )
+}
+
 const FEATURES = [
-  { icon: "🤖", title: "AI อ่านเอกสารอัตโนมัติ",      desc: "รองรับใบเสร็จ ใบกำกับภาษี สลิปโอน PDF ความแม่นยำ 95%+ ไม่ต้องพิมพ์เอง" },
-  { icon: "📊", title: "รายงาน VAT & WHT พร้อมใช้",    desc: "คำนวณ ภ.พ.30 และ ภ.ง.ด.3/53 อัตโนมัติ Export Excel/PDF ยื่นสรรพากรได้เลย" },
-  { icon: "🔗", title: "เชื่อมต่อ FlowAccount & PEAK", desc: "Push เอกสารที่อนุมัติแล้วเข้าโปรแกรมบัญชีโดยตรง ไม่ต้องกรอกซ้ำ" },
-  { icon: "✅", title: "Approval Workflow",             desc: "ส่งรีวิว → อนุมัติ → Push ทีมงานทุกคนรู้สถานะแบบ real-time" },
-  { icon: "💬", title: "LINE Bot ส่งเอกสารทันที",      desc: "ถ่ายรูปแล้วส่งผ่าน @slippy_bot ในกลุ่มบริษัท อัพโหลดง่ายไม่ต้องเปิดเว็บ" },
-  { icon: "🏢", title: "จัดการหลายบริษัท",            desc: "ดูแลทุก entity ในที่เดียว แยก org แยก quota แยก report ได้อิสระ" },
+  { id: 0, title: "AI อ่านเอกสารอัตโนมัติ",      desc: "รองรับใบเสร็จ ใบกำกับภาษี สลิปโอน PDF ความแม่นยำ 95%+ ไม่ต้องพิมพ์เอง" },
+  { id: 1, title: "รายงาน VAT & WHT พร้อมใช้",    desc: "คำนวณ ภ.พ.30 และ ภ.ง.ด.3/53 อัตโนมัติ Export Excel/PDF ยื่นสรรพากรได้เลย" },
+  { id: 2, title: "เชื่อมต่อ FlowAccount & PEAK", desc: "Push เอกสารที่อนุมัติแล้วเข้าโปรแกรมบัญชีโดยตรง ไม่ต้องกรอกซ้ำ" },
+  { id: 3, title: "Approval Workflow",             desc: "ส่งรีวิว → อนุมัติ → Push ทีมงานทุกคนรู้สถานะแบบ real-time" },
+  { id: 4, title: "LINE Bot ส่งเอกสารทันที",      desc: "ถ่ายรูปแล้วส่งผ่าน @slippy_bot ในกลุ่มบริษัท อัพโหลดง่ายไม่ต้องเปิดเว็บ" },
+  { id: 5, title: "จัดการหลายบริษัท",            desc: "ดูแลทุก entity ในที่เดียว แยก org แยก quota แยก report ได้อิสระ" },
 ]
 
 const HOW_IT_WORKS = [
@@ -60,42 +204,13 @@ const COMPARISON = [
   { feature: "Export Excel/PDF",        manual: false, paypers: true,  slippy: true },
 ]
 
-const PLANS = [
-  {
-    name: "Starter",
-    price: "฿590",
-    period: "/เดือน",
-    desc: "เหมาะสำหรับ Freelancer และ SME เล็ก",
-    quota: "100 เอกสาร/เดือน",
-    highlight: false,
-    features: ["AI อ่านเอกสาร", "รายงาน VAT", "LINE Bot", "Mobile App", "1 บริษัท"],
-  },
-  {
-    name: "Pro",
-    price: "฿1,290",
-    period: "/เดือน",
-    desc: "เหมาะสำหรับ SME ที่ต้องการทุกฟีเจอร์",
-    quota: "500 เอกสาร/เดือน",
-    highlight: true,
-    features: ["ทุกอย่างใน Starter", "Approval Workflow", "FlowAccount / PEAK sync", "WHT Report", "5 บริษัท", "Priority Support"],
-  },
-  {
-    name: "Enterprise",
-    price: "ติดต่อ",
-    period: "",
-    desc: "สำหรับองค์กรขนาดใหญ่ ต้องการ custom",
-    quota: "ไม่จำกัด",
-    highlight: false,
-    features: ["ทุกอย่างใน Pro", "Unlimited บริษัท", "SLA 99.9%", "Dedicated support", "Custom integration", "On-premise option"],
-  },
-]
+// Pricing plans for landing page — imported from lib/plans.ts (single source of truth)
+// Show only paid plans + free on landing (skip enterprise detail here)
+const LANDING_PLANS = APP_PLANS.filter(p => p.id !== "enterprise").concat(
+  APP_PLANS.filter(p => p.id === "enterprise")
+)
 
-const TRUST_BADGES = [
-  { icon: "🛡️", label: "PDPA Compliant",      sub: "ปฏิบัติตาม พ.ร.บ. คุ้มครองข้อมูลส่วนบุคคล 2562" },
-  { icon: "🔒", label: "AES-256 Encrypted",   sub: "ข้อมูลทุกชิ้นถูกเข้ารหัสทั้งขณะส่งและจัดเก็บ" },
-  { icon: "☁️", label: "Google Cloud",        sub: "โครงสร้างพื้นฐานระดับ Enterprise บน GCP Asia" },
-  { icon: "🇹🇭", label: "บริษัทไทย",           sub: "จดทะเบียนในประเทศไทย ข้อมูลเก็บในไทย" },
-]
+// TRUST_BADGES now uses SecurityIcon — imported as TRUST_BADGE_DATA from security-icon.tsx
 
 // ─────────────────────────────────────────────
 // COMPONENT
@@ -319,9 +434,11 @@ export function LandingPage() {
             <p className="text-gray-500 max-w-xl mx-auto">Slippy ไม่ใช่แค่ที่เก็บเอกสาร แต่เป็น Accounting OS ที่พาคุณไปจนถึงตอนยื่นภาษี</p>
           </div>
           <div className="grid md:grid-cols-3 gap-5">
-            {FEATURES.map((f, i) => (
-              <div key={i} className="bg-white rounded-2xl p-7 border border-gray-100 hover:border-indigo-200 hover:shadow-sm transition-all group">
-                <div className="text-3xl mb-4">{f.icon}</div>
+            {FEATURES.map((f) => (
+              <div key={f.id} className="bg-white rounded-2xl p-7 border border-gray-100 hover:border-indigo-200 hover:shadow-md transition-all group">
+                <div className="mb-4 drop-shadow-sm group-hover:scale-105 transition-transform duration-200 inline-block">
+                  <FeatureIcon id={f.id} />
+                </div>
                 <h3 className="font-black text-gray-900 text-base mb-2 group-hover:text-indigo-700 transition-colors">{f.title}</h3>
                 <p className="text-sm text-gray-500 leading-relaxed">{f.desc}</p>
               </div>
@@ -413,52 +530,62 @@ export function LandingPage() {
           <div className="text-center mb-12">
             <p className="text-indigo-600 font-bold text-sm tracking-widest uppercase mb-3">ราคา</p>
             <h2 className="text-3xl md:text-4xl font-black text-gray-900 mb-4">เลือกแพลนที่เหมาะกับคุณ</h2>
-            <p className="text-gray-500">ทดลองใช้ฟรี 14 วัน ไม่ต้องใส่บัตรเครดิต</p>
+            <p className="text-gray-500">เริ่มต้นฟรี ไม่มีหมดอายุ · อัปเกรดได้เมื่อพร้อม</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-5 items-stretch">
-            {PLANS.map((plan, i) => (
-              <div key={i} className={`relative rounded-2xl p-8 flex flex-col border transition-all ${
-                plan.highlight
-                  ? "bg-indigo-600 text-white border-indigo-500 shadow-2xl shadow-indigo-200 scale-[1.02]"
-                  : "bg-white text-gray-900 border-gray-100 shadow-sm hover:shadow-md"
-              }`}>
-                {plan.highlight && (
-                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 bg-gradient-to-r from-amber-400 to-orange-400 rounded-full text-white text-xs font-black whitespace-nowrap">
-                    🔥 แนะนำ
+          <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-4 items-stretch">
+            {LANDING_PLANS.map((plan) => {
+              const isHighlight   = plan.highlighted === true
+              const isEnterprise  = plan.id === "enterprise"
+              const priceLabel    = plan.priceTHB === 0
+                ? (isEnterprise ? "ติดต่อ" : "ฟรี")
+                : `฿${plan.priceTHB.toLocaleString()}`
+              return (
+                <div key={plan.id} className={`relative rounded-2xl p-6 flex flex-col border transition-all ${
+                  isHighlight
+                    ? "bg-indigo-600 text-white border-indigo-500 shadow-2xl shadow-indigo-200 scale-[1.02]"
+                    : "bg-white text-gray-900 border-gray-100 shadow-sm hover:shadow-md"
+                }`}>
+                  {isHighlight && (
+                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 bg-gradient-to-r from-amber-400 to-orange-400 rounded-full text-white text-xs font-black whitespace-nowrap">
+                      🔥 แนะนำ
+                    </div>
+                  )}
+                  <div className={`text-xs font-black tracking-widest uppercase mb-3 ${isHighlight ? "text-indigo-200" : "text-indigo-600"}`}>
+                    {plan.nameTh}
                   </div>
-                )}
-                <div className={`text-xs font-black tracking-widest uppercase mb-3 ${plan.highlight ? "text-indigo-200" : "text-indigo-600"}`}>
-                  {plan.name}
+                  <div className="flex items-end gap-1 mb-2">
+                    <span className={`text-3xl font-black ${isHighlight ? "text-white" : "text-gray-900"}`}>{priceLabel}</span>
+                    {plan.priceTHB > 0 && (
+                      <span className={`text-sm pb-1 ${isHighlight ? "text-indigo-200" : "text-gray-400"}`}>/เดือน</span>
+                    )}
+                  </div>
+                  <p className={`text-xs font-semibold mb-4 ${isHighlight ? "text-indigo-200" : "text-indigo-600"}`}>
+                    {plan.docQuota === 0 ? "ไม่จำกัดเอกสาร" : `${plan.docQuota} เอกสาร/เดือน`}
+                  </p>
+                  <ul className="space-y-2 flex-1 mb-6">
+                    {plan.features.map((f, j) => (
+                      <li key={j} className="flex items-start gap-2 text-xs">
+                        <span className={`mt-0.5 ${isHighlight ? "text-indigo-200" : "text-indigo-500"}`}>✓</span>
+                        <span className={isHighlight ? "text-indigo-50" : "text-gray-600"}>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <Link href={isEnterprise ? "mailto:hello@slippy.app?subject=Enterprise" : "/register"}
+                    className={`block text-center py-2.5 rounded-xl font-bold text-sm transition-all ${
+                      isHighlight
+                        ? "bg-white text-indigo-700 hover:bg-indigo-50"
+                        : isEnterprise
+                          ? "bg-gray-900 text-white hover:bg-gray-800"
+                          : "bg-indigo-600 text-white hover:bg-indigo-700"
+                    }`}>
+                    {isEnterprise ? "ติดต่อทีม" : plan.id === "free" ? "เริ่มฟรี" : "เริ่มต้นใช้งาน"}
+                  </Link>
                 </div>
-                <div className="flex items-end gap-1 mb-2">
-                  <span className={`text-4xl font-black ${plan.highlight ? "text-white" : "text-gray-900"}`}>{plan.price}</span>
-                  <span className={`text-sm pb-1 ${plan.highlight ? "text-indigo-200" : "text-gray-400"}`}>{plan.period}</span>
-                </div>
-                <p className={`text-sm mb-1 ${plan.highlight ? "text-indigo-100" : "text-gray-500"}`}>{plan.desc}</p>
-                <p className={`text-xs font-semibold mb-6 ${plan.highlight ? "text-indigo-200" : "text-indigo-600"}`}>{plan.quota}</p>
-                <ul className="space-y-2.5 flex-1 mb-8">
-                  {plan.features.map((f, j) => (
-                    <li key={j} className="flex items-center gap-2.5 text-sm">
-                      <span className={`text-xs ${plan.highlight ? "text-indigo-200" : "text-indigo-500"}`}>✓</span>
-                      <span className={plan.highlight ? "text-indigo-50" : "text-gray-600"}>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <Link href="/register"
-                  className={`block text-center py-3 rounded-xl font-bold text-sm transition-all ${
-                    plan.highlight
-                      ? "bg-white text-indigo-700 hover:bg-indigo-50"
-                      : plan.price === "ติดต่อ"
-                        ? "bg-gray-900 text-white hover:bg-gray-800"
-                        : "bg-indigo-600 text-white hover:bg-indigo-700"
-                  }`}>
-                  {plan.price === "ติดต่อ" ? "ติดต่อทีม" : "เริ่มต้นใช้งาน"}
-                </Link>
-              </div>
-            ))}
+              )
+            })}
           </div>
           <p className="text-center text-xs text-gray-400 mt-6">
-            ทุกแพลนรองรับ PDPA · ชำระเป็นรายเดือนหรือรายปี (ประหยัด 20%) · ยกเลิกได้ทุกเมื่อ
+            ทุกแพลนรองรับ PDPA · ชำระรายเดือนหรือรายปี (ประหยัด ~17%) · ยกเลิกได้ทุกเมื่อ
           </p>
         </div>
       </section>
@@ -471,9 +598,14 @@ export function LandingPage() {
             <p className="text-indigo-300 text-sm">เราปฏิบัติตามมาตรฐานสากลทุกด้าน</p>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-            {TRUST_BADGES.map((b, i) => (
-              <div key={i} className="bg-white/5 border border-white/10 rounded-2xl p-5 text-center hover:bg-white/8 transition-colors">
-                <div className="text-3xl mb-3">{b.icon}</div>
+            {TRUST_BADGE_DATA.map((b) => (
+              <div key={b.label}
+                className="bg-white/5 border border-white/10 rounded-2xl p-5 text-center
+                  hover:bg-white/10 hover:border-white/20 transition-all group">
+                <div className="flex justify-center mb-3
+                  group-hover:scale-105 transition-transform duration-200 drop-shadow-lg">
+                  <SecurityIcon id={b.id} size={48} />
+                </div>
                 <div className="font-black text-white text-sm mb-1">{b.label}</div>
                 <div className="text-indigo-300 text-xs leading-snug">{b.sub}</div>
               </div>

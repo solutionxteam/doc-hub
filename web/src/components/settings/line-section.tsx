@@ -1,5 +1,14 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { useState, useEffect, useCallback } from "react"
 import { MessageCircle, RefreshCw, Trash2, Copy, Check, Loader2 } from "lucide-react"
 import { toast } from "sonner"
@@ -67,8 +76,12 @@ export function LineSection({ orgId, isAdmin }: Props) {
     toast.success("ยกเลิกการเชื่อมต่อแล้ว")
   }
 
-  const timeLeft = expiresAt
-    ? Math.max(0, Math.round((new Date(expiresAt).getTime() - Date.now()) / 60000))
+  // clientNow avoids Date.now() hydration mismatch — null on SSR, real value after mount
+  const [clientNow, setClientNow] = useState<number | null>(null)
+  useEffect(() => { setClientNow(Date.now()) }, [])
+
+  const timeLeft = expiresAt && clientNow
+    ? Math.max(0, Math.round((new Date(expiresAt).getTime() - clientNow) / 60000))
     : 0
 
   return (

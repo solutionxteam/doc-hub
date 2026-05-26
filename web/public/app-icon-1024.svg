@@ -1,56 +1,104 @@
 <svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- App Store / Play Store icon — 1024×1024 -->
   <defs>
+    <!-- Background gradient: violet → indigo → rose -->
     <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#8b5cf6"/>
-      <stop offset="0.45" stop-color="#6366f1"/>
-      <stop offset="1" stop-color="#ec4899"/>
+      <stop offset="0%"   stop-color="#7c3aed"/>
+      <stop offset="48%"  stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#db2777"/>
     </linearGradient>
-    <radialGradient id="shine" cx="0.22" cy="0.12" r="0.9">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.42"/>
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.06"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    <!-- Radial highlight top-left -->
+    <radialGradient id="shine" cx="22%" cy="14%" r="72%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.38"/>
+      <stop offset="55%"  stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="paper" x1="300" y1="270" x2="724" y2="754" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e8eaf6"/>
+    <!-- Receipt paper gradient -->
+    <linearGradient id="paper" x1="280" y1="240" x2="744" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"  stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8eaf6"/>
     </linearGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="8" dy="16" stdDeviation="20" flood-color="#1e1b4b" flood-opacity="0.22"/>
+    <!-- Subtle shadow filter -->
+    <filter id="shadow" x="-15%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="24" stdDeviation="32" flood-color="#1e1b4b" flood-opacity="0.28"/>
+    </filter>
+    <!-- Inner glow on paper -->
+    <filter id="glow" x="-5%" y="-5%" width="110%" height="110%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
 
-  <!-- Background -->
-  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
-  <rect width="1024" height="1024" rx="230" fill="url(#shine)"/>
+  <!-- Background squircle (clipped by OS) -->
+  <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="220" fill="url(#shine)"/>
 
-  <!-- Receipt mascot (centered, slightly rotated) -->
-  <g transform="translate(512,500) rotate(-8) translate(-512,-500)" filter="url(#shadow)">
-    <!-- Receipt shadow layer -->
-    <path d="M356 270 L668 270 Q724 270 724 326 L724 642 L693 676 L662 642 L631 676 L600 642 L569 676 L538 642 L507 676 L476 642 L445 676 L414 642 L374 676 L300 676 L300 326 Q300 270 356 270 Z"
-          fill="#1e1b4b" fill-opacity="0.16" transform="translate(12 18)"/>
+  <!-- Subtle noise dots for depth (top-right) -->
+  <circle cx="820" cy="160" r="180" fill="#ffffff" fill-opacity="0.04"/>
+  <circle cx="880" cy="120" r="80"  fill="#ffffff" fill-opacity="0.03"/>
+
+  <!-- Receipt mascot — rotated –8°, centered at (512, 510) -->
+  <g transform="translate(512,510) rotate(-8) translate(-512,-510)" filter="url(#shadow)">
+
+    <!-- Receipt shape: top-right rounded, zigzag bottom -->
+    <!-- Shadow layer -->
+    <path d="
+      M336 240
+      L688 240
+      Q752 240 752 304
+      L752 668
+      L716 710 L680 668
+      L644 710 L608 668
+      L572 710 L536 668
+      L500 710 L464 668
+      L428 710 L392 668
+      L356 710
+      L272 710
+      L272 304
+      Q272 240 336 240 Z"
+      fill="#1e1b4b" fill-opacity="0.20" transform="translate(10 20)"/>
+
     <!-- Receipt body -->
-    <path d="M356 270 L668 270 Q724 270 724 326 L724 642 L693 676 L662 642 L631 676 L600 642 L569 676 L538 642 L507 676 L476 642 L445 676 L414 642 L374 676 L300 676 L300 326 Q300 270 356 270 Z"
-          fill="url(#paper)"/>
+    <path d="
+      M336 240
+      L688 240
+      Q752 240 752 304
+      L752 668
+      L716 710 L680 668
+      L644 710 L608 668
+      L572 710 L536 668
+      L500 710 L464 668
+      L428 710 L392 668
+      L356 710
+      L272 710
+      L272 304
+      Q272 240 336 240 Z"
+      fill="url(#paper)"/>
 
-    <!-- Lines on receipt (decorative) -->
-    <rect x="336" y="316" width="220" height="8" rx="4" fill="#6366f1" fill-opacity="0.15"/>
-    <rect x="336" y="336" width="160" height="6" rx="3" fill="#6366f1" fill-opacity="0.10"/>
+    <!-- Header rule lines (top of receipt) -->
+    <rect x="312" y="284" width="248" height="10" rx="5" fill="#6366f1" fill-opacity="0.18"/>
+    <rect x="312" y="306" width="176" height="7"  rx="3.5" fill="#6366f1" fill-opacity="0.11"/>
 
     <!-- Eyes -->
-    <circle cx="436" cy="448" r="32" fill="#1e1b4b"/>
-    <circle cx="588" cy="448" r="32" fill="#1e1b4b"/>
+    <circle cx="432" cy="450" r="38" fill="#1e1b4b"/>
+    <circle cx="592" cy="450" r="38" fill="#1e1b4b"/>
     <!-- Eye shine -->
-    <circle cx="446" cy="438" r="9" fill="white" fill-opacity="0.65"/>
-    <circle cx="598" cy="438" r="9" fill="white" fill-opacity="0.65"/>
-    <!-- Blush -->
-    <circle cx="392" cy="508" r="26" fill="#fb7185" fill-opacity="0.48"/>
-    <circle cx="632" cy="508" r="26" fill="#fb7185" fill-opacity="0.48"/>
-    <!-- Smile -->
-    <path d="M436 524 Q512 582 588 524" stroke="#1e1b4b" stroke-width="30" stroke-linecap="round" fill="none"/>
+    <circle cx="446" cy="434" r="12" fill="#ffffff" fill-opacity="0.70"/>
+    <circle cx="606" cy="434" r="12" fill="#ffffff" fill-opacity="0.70"/>
+    <!-- Tiny pupil highlight -->
+    <circle cx="456" cy="444" r="5" fill="#ffffff" fill-opacity="0.40"/>
+    <circle cx="616" cy="444" r="5" fill="#ffffff" fill-opacity="0.40"/>
 
-    <!-- Decorative lines below smile -->
-    <rect x="336" y="614" width="180" height="6" rx="3" fill="#6366f1" fill-opacity="0.12"/>
-    <rect x="336" y="628" width="120" height="5" rx="2.5" fill="#6366f1" fill-opacity="0.08"/>
+    <!-- Cheek blush -->
+    <ellipse cx="386" cy="520" rx="34" ry="22" fill="#fb7185" fill-opacity="0.44"/>
+    <ellipse cx="638" cy="520" rx="34" ry="22" fill="#fb7185" fill-opacity="0.44"/>
+
+    <!-- Smile -->
+    <path d="M432 534 Q512 604 592 534"
+          stroke="#1e1b4b" stroke-width="34" stroke-linecap="round" fill="none"/>
+
+    <!-- Footer rule lines (below smile area) -->
+    <rect x="312" y="628" width="200" height="8"  rx="4" fill="#6366f1" fill-opacity="0.13"/>
+    <rect x="312" y="648" width="140" height="6"  rx="3" fill="#6366f1" fill-opacity="0.09"/>
+    <rect x="312" y="664" width="100" height="5"  rx="2.5" fill="#6366f1" fill-opacity="0.06"/>
   </g>
 </svg>

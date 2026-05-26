@@ -1,17 +1,56 @@
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved. Proprietary and confidential.
+ */
+
 import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
-import { createCheckoutSession, PLANS } from "@/lib/stripe/server"
+import { createClient }      from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { createCheckoutSession, STRIPE_PRICES } from "@/lib/stripe/server"
+import { PLAN_MAP } from "@/lib/plans"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const { planId, orgId } = await req.json()
+  const { planId, orgId, yearly = false } = await req.json()
 
-  const plan = PLANS[planId as keyof typeof PLANS]
-  if (!plan) return NextResponse.json({ error: "Invalid plan" }, { status: 400 })
+  // Validate plan exists in lib/plans.ts
+  const plan = PLAN_MAP[planId as keyof typeof PLAN_MAP]
+  if (!plan) {
+    return NextResponse.json({ error: "Invalid plan" }, { status: 400 })
+  }
+  if (!orgId) {
+    return NextResponse.json({ error: "orgId required" }, { status: 400 })
+  }
 
+  // ── Resolve Stripe Price ID ───────────────────────────────────────────────
+  // Priority: DB (pricing_plans) > env vars (STRIPE_PRICES)
+  // This allows admin panel to manage price IDs without env var changes.
+  const admin = createAdminClient()
+  const { data: dbPlan } = await admin
+    .from("pricing_plans")
+    .select("stripe_price_id_m, stripe_price_id_y")
+    .eq("id", planId)
+    .single()
+
+  const dbPriceId    = yearly ? dbPlan?.stripe_price_id_y : dbPlan?.stripe_price_id_m
+  const envPrices    = STRIPE_PRICES[planId]
+  const envPriceId   = yearly ? envPrices?.priceIdY : envPrices?.priceId
+  const priceId      = dbPriceId || envPriceId || ""
+
+  if (!priceId) {
+    return NextResponse.json(
+      {
+        error: `Stripe price not configured for plan "${planId}" (${yearly ? "yearly" : "monthly"}). ` +
+               `Set it via Admin → Plans or add STRIPE_PRICE_${planId.toUpperCase()}_${yearly ? "Y" : "M"} env var.`,
+      },
+      { status: 500 }
+    )
+  }
+
+  // Look up existing Stripe customer for the org
   const { data: org } = await supabase
     .from("organizations")
     .select("stripe_customer_id")
@@ -20,11 +59,11 @@ export async function POST(req: NextRequest) {
 
   const session = await createCheckoutSession({
     orgId,
-    userId:              user.id,
-    priceId:             plan.priceId,
-    successUrl:          `${process.env.NEXT_PUBLIC_APP_URL}/billing?success=true`,
-    cancelUrl:           `${process.env.NEXT_PUBLIC_APP_URL}/billing`,
-    existingCustomerId:  org?.stripe_customer_id ?? undefined,
+    userId:             user.id,
+    priceId,
+    successUrl:         `${process.env.NEXT_PUBLIC_APP_URL}/billing?success=true&plan=${planId}`,
+    cancelUrl:          `${process.env.NEXT_PUBLIC_APP_URL}/billing`,
+    existingCustomerId: org?.stripe_customer_id ?? undefined,
   })
 
   return NextResponse.json({ url: session.url })

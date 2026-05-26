@@ -1,5 +1,14 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { useState }                    from "react"
 import Link                            from "next/link"
 import { usePathname, useRouter }      from "next/navigation"
@@ -33,16 +42,17 @@ const bottomItems = [
 ]
 
 interface SidebarProps {
-  org:           { id: string; name: string; plan: string }
-  allOrgs:       OrgOption[]
-  user:          { full_name: string; email: string; avatar_url?: string }
-  collapsed:     boolean
-  mobileOpen:    boolean
-  onToggle:      () => void
-  onMobileClose: () => void
+  org:            { id: string; name: string; plan: string }
+  allOrgs:        OrgOption[]
+  user:           { full_name: string; email: string; avatar_url?: string }
+  collapsed:      boolean
+  mobileOpen:     boolean
+  onToggle:       () => void
+  onMobileClose:  () => void
+  isSuperadmin?:  boolean
 }
 
-export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, onMobileClose }: SidebarProps) {
+export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, onMobileClose, isSuperadmin = false }: SidebarProps) {
   const t        = useTranslations("nav")
   const pathname = usePathname()
   const router   = useRouter()
@@ -257,6 +267,23 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
             </Link>
           )
         })}
+
+        {/* Admin Console — superadmin only */}
+        {isSuperadmin && (
+          <Link
+            href="/admin/plans"
+            title={collapsed ? "Admin Console" : undefined}
+            className={cn(
+              "sidebar-item mt-1",
+              pathname.startsWith("/admin") && "active",
+              collapsed && "lg:justify-center lg:px-0",
+              "text-amber-500/80 hover:text-amber-400"
+            )}
+          >
+            <Icons.Settings className="w-[18px] h-[18px] shrink-0" />
+            <span className={cn("truncate", collapsed && "lg:hidden")}>Admin Console</span>
+          </Link>
+        )}
       </nav>
 
       {/* ── User footer ── */}

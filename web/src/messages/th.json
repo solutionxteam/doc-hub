@@ -93,6 +93,8 @@
     "upload": "อัปโหลดเอกสาร",
     "uploadDesc": "ลากไฟล์มาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์",
     "supportedFormats": "รองรับ PDF, JPG, PNG (สูงสุด 20MB)",
+    "uploading": "กำลังอัปโหลด...",
+    "uploadingDesc": "กำลังส่งไฟล์ขึ้นระบบ",
     "processing": "กำลังประมวลผล...",
     "processingDesc": "AI กำลังอ่านและวิเคราะห์เอกสาร",
     "vendor": "ผู้ขาย / Vendor",

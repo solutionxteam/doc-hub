@@ -1,0 +1,131 @@
+<svg viewBox="0 0 1080 1920" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Instagram Story / TikTok / Reels — 1080×1920 (9:16) -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1080" y2="1920" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"  stop-color="#1e1b4b"/>
+      <stop offset="35%" stop-color="#3730a3"/>
+      <stop offset="70%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <radialGradient id="gT" cx="50%" cy="15%" r="55%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.50"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gB" cx="50%" cy="90%" r="48%">
+      <stop offset="0%" stop-color="#ec4899" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="240" y1="550" x2="840" y2="1370" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8eaf6"/>
+    </linearGradient>
+    <filter id="sh"><feDropShadow dx="0" dy="30" stdDeviation="55" flood-color="#1e1b4b" flood-opacity="0.32"/></filter>
+    <pattern id="dots" x="0" y="0" width="54" height="54" patternUnits="userSpaceOnUse">
+      <circle cx="27" cy="27" r="1.8" fill="#ffffff" fill-opacity="0.05"/>
+    </pattern>
+    <!-- Decorative arc -->
+    <radialGradient id="arc" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1080" height="1920" fill="url(#bg)"/>
+  <rect width="1080" height="1920" fill="url(#gT)"/>
+  <rect width="1080" height="1920" fill="url(#gB)"/>
+  <rect width="1080" height="1920" fill="url(#dots)"/>
+
+  <!-- Decorative circle accents -->
+  <circle cx="540" cy="600" r="480" fill="url(#arc)"/>
+  <circle cx="540" cy="600" r="380" fill="none" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1.5"/>
+  <circle cx="540" cy="600" r="280" fill="none" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1.5"/>
+
+  <!-- Icon mark — top center -->
+  <g transform="translate(468, 140)">
+    <rect width="144" height="144" rx="34" fill="#ffffff" fill-opacity="0.14"/>
+    <g transform="translate(72,70) rotate(-6) translate(-72,-70)">
+      <path d="M41 28 L103 28 Q115 28 115 40 L115 104 L109 111 L103 104 L97 111 L91 104 L85 111 L79 104 L73 111 L67 104 L61 111 L29 111 L29 40 Q29 28 41 28 Z" fill="#ffffff" fill-opacity="0.95"/>
+      <circle cx="55" cy="64" r="9" fill="#1e1b4b"/>
+      <circle cx="89" cy="64" r="9" fill="#1e1b4b"/>
+      <circle cx="58" cy="61" r="3" fill="#ffffff" fill-opacity="0.7"/>
+      <circle cx="92" cy="61" r="3" fill="#ffffff" fill-opacity="0.7"/>
+      <ellipse cx="46"  cy="78" rx="9" ry="6" fill="#fb7185" fill-opacity="0.5"/>
+      <ellipse cx="98"  cy="78" rx="9" ry="6" fill="#fb7185" fill-opacity="0.5"/>
+      <path d="M55 82 Q72 96 89 82" stroke="#1e1b4b" stroke-width="7.5" stroke-linecap="round" fill="none"/>
+    </g>
+  </g>
+
+  <!-- Receipt mascot — center -->
+  <g transform="translate(540,840) rotate(-5) translate(-540,-840)" filter="url(#sh)">
+    <!-- Shadow -->
+    <path d="M290 550 L790 550 Q860 550 860 620 L860 1100
+             L835 1130 L810 1100 L785 1130 L760 1100 L735 1130 L710 1100
+             L685 1130 L660 1100 L635 1130 L610 1100 L220 1100 L220 620 Q220 550 290 550 Z"
+      fill="#1e1b4b" fill-opacity="0.22" transform="translate(16 24)"/>
+    <!-- Paper -->
+    <path d="M290 550 L790 550 Q860 550 860 620 L860 1100
+             L835 1130 L810 1100 L785 1130 L760 1100 L735 1130 L710 1100
+             L685 1130 L660 1100 L635 1130 L610 1100 L220 1100 L220 620 Q220 550 290 550 Z"
+      fill="url(#paper)"/>
+    <!-- Lines -->
+    <rect x="248" y="640" width="228" height="18" rx="9" fill="#6366f1" fill-opacity="0.18"/>
+    <rect x="248" y="672" width="160" height="12" rx="6" fill="#6366f1" fill-opacity="0.11"/>
+    <!-- Eyes -->
+    <circle cx="420" cy="820" r="64" fill="#1e1b4b"/>
+    <circle cx="660" cy="820" r="64" fill="#1e1b4b"/>
+    <circle cx="440" cy="797" r="21" fill="#ffffff" fill-opacity="0.72"/>
+    <circle cx="680" cy="797" r="21" fill="#ffffff" fill-opacity="0.72"/>
+    <!-- Cheeks -->
+    <ellipse cx="330" cy="902" rx="58" ry="38" fill="#fb7185" fill-opacity="0.48"/>
+    <ellipse cx="750" cy="902" rx="58" ry="38" fill="#fb7185" fill-opacity="0.48"/>
+    <!-- Smile -->
+    <path d="M420 928 Q540 1040 660 928"
+          stroke="#1e1b4b" stroke-width="46" stroke-linecap="round" fill="none"/>
+    <!-- Footer lines -->
+    <rect x="248" y="1040" width="200" height="14" rx="7" fill="#6366f1" fill-opacity="0.13"/>
+    <rect x="248" y="1066" width="140" height="10" rx="5" fill="#6366f1" fill-opacity="0.09"/>
+  </g>
+
+  <!-- Wordmark — below mascot -->
+  <text x="540" y="1310"
+    text-anchor="middle"
+    font-family="system-ui,-apple-system,'Helvetica Neue',sans-serif"
+    font-size="160" font-weight="800" letter-spacing="-4" fill="#ffffff">Slippy</text>
+
+  <!-- Tagline -->
+  <text x="540" y="1396"
+    text-anchor="middle"
+    font-family="system-ui,-apple-system,'Noto Sans Thai',sans-serif"
+    font-size="48" font-weight="500" fill="#ffffff" fill-opacity="0.78">
+    ระบบบัญชีอัจฉริยะ ด้วย AI OCR
+  </text>
+
+  <!-- Feature pills row -->
+  <g transform="translate(540,1440)" text-anchor="middle">
+    <!-- Centered group -->
+    <g transform="translate(-248,0)">
+      <rect width="158" height="52" rx="26" fill="#ffffff" fill-opacity="0.14"/>
+      <text x="79" y="34" text-anchor="middle" font-family="system-ui,sans-serif" font-size="22" font-weight="600" fill="#ffffff">🤖 AI OCR</text>
+    </g>
+    <g transform="translate(-74,0)">
+      <rect x="172" width="180" height="52" rx="26" fill="#ffffff" fill-opacity="0.14"/>
+      <text x="262" y="34" text-anchor="middle" font-family="system-ui,sans-serif" font-size="22" font-weight="600" fill="#ffffff">📊 Analytics</text>
+    </g>
+    <g transform="translate(112,0)">
+      <rect x="248" width="142" height="52" rx="26" fill="#10b981" fill-opacity="0.24"/>
+      <text x="319" y="34" text-anchor="middle" font-family="system-ui,sans-serif" font-size="22" font-weight="600" fill="#6ee7b7">✓ PDPA</text>
+    </g>
+  </g>
+
+  <!-- URL + CTA -->
+  <text x="540" y="1750"
+    text-anchor="middle"
+    font-family="system-ui,monospace" font-size="38" font-weight="500"
+    fill="#ffffff" fill-opacity="0.38">slippy.app</text>
+
+  <!-- Swipe up indicator -->
+  <g transform="translate(540, 1820)">
+    <path d="M540 0 L540 -40" stroke="#ffffff" stroke-opacity="0.40" stroke-width="2" stroke-dasharray="4 4" transform="translate(-540,0)"/>
+    <text x="0" y="30" text-anchor="middle" font-family="system-ui,sans-serif" font-size="26" font-weight="500" fill="#ffffff" fill-opacity="0.45">ดูเพิ่มเติม</text>
+  </g>
+</svg>

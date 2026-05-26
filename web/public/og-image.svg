@@ -1,0 +1,123 @@
+<svg viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Open Graph / Social share image — 1200×630
+    Used for: Facebook, Twitter/X, LinkedIn, LINE share preview
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#4c1d95"/>
+      <stop offset="45%"  stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#be185d"/>
+    </linearGradient>
+    <radialGradient id="glowL" cx="20%" cy="30%" r="60%">
+      <stop offset="0%"   stop-color="#8b5cf6" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowR" cx="85%" cy="70%" r="50%">
+      <stop offset="0%"   stop-color="#ec4899" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="780" y1="80" x2="1060" y2="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8eaf6"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="20" stdDeviation="30" flood-color="#1e1b4b" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glowL)"/>
+  <rect width="1200" height="630" fill="url(#glowR)"/>
+
+  <!-- Decorative grid dots (subtle) -->
+  <pattern id="dots" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+    <circle cx="20" cy="20" r="1.5" fill="#ffffff" fill-opacity="0.06"/>
+  </pattern>
+  <rect width="1200" height="630" fill="url(#dots)"/>
+
+  <!-- Left side: wordmark + tagline -->
+  <!-- Icon mark (small, 120px) -->
+  <g transform="translate(80, 100)">
+    <rect width="120" height="120" rx="28" fill="#ffffff" fill-opacity="0.15"/>
+    <rect width="120" height="120" rx="28" fill="none" stroke="#ffffff" stroke-opacity="0.2" stroke-width="1.5"/>
+    <!-- Mini mascot -->
+    <g transform="translate(60,58) rotate(-6) translate(-60,-58)">
+      <path d="M34 24 L86 24 Q94 24 94 32 L94 80 L89 86 L84 80 L79 86 L74 80 L69 86 L64 80 L59 86 L54 80 L49 86 L42 80 L26 80 L26 32 Q26 24 34 24 Z"
+            fill="#ffffff" fill-opacity="0.95"/>
+      <circle cx="46" cy="51" r="6"  fill="#1e1b4b"/>
+      <circle cx="74" cy="51" r="6"  fill="#1e1b4b"/>
+      <circle cx="48" cy="49" r="2"  fill="#ffffff" fill-opacity="0.7"/>
+      <circle cx="76" cy="49" r="2"  fill="#ffffff" fill-opacity="0.7"/>
+      <ellipse cx="38" cy="61" rx="6" ry="4" fill="#fb7185" fill-opacity="0.5"/>
+      <ellipse cx="82" cy="61" rx="6" ry="4" fill="#fb7185" fill-opacity="0.5"/>
+      <path d="M46 63 Q60 73 74 63" stroke="#1e1b4b" stroke-width="5" stroke-linecap="round" fill="none"/>
+    </g>
+  </g>
+
+  <!-- Product name -->
+  <text x="80" y="272"
+    font-family="system-ui, -apple-system, 'Helvetica Neue', sans-serif"
+    font-size="88" font-weight="800" fill="#ffffff" letter-spacing="-2">Slippy</text>
+
+  <!-- Tagline TH -->
+  <text x="83" y="324"
+    font-family="system-ui, -apple-system, 'Noto Sans Thai', sans-serif"
+    font-size="26" font-weight="500" fill="#ffffff" fill-opacity="0.80">
+    ระบบจัดการเอกสารบัญชีอัจฉริยะ ด้วย AI
+  </text>
+
+  <!-- Feature pills -->
+  <g transform="translate(82, 368)">
+    <!-- Pill 1 -->
+    <rect width="148" height="38" rx="19" fill="#ffffff" fill-opacity="0.14"/>
+    <text x="74" y="24" font-family="system-ui, sans-serif" font-size="16" font-weight="600"
+          fill="#ffffff" text-anchor="middle">🤖 AI OCR</text>
+    <!-- Pill 2 -->
+    <rect x="162" width="180" height="38" rx="19" fill="#ffffff" fill-opacity="0.14"/>
+    <text x="252" y="24" font-family="system-ui, sans-serif" font-size="16" font-weight="600"
+          fill="#ffffff" text-anchor="middle">📊 Analytics</text>
+    <!-- Pill 3 -->
+    <rect x="356" width="156" height="38" rx="19" fill="#ffffff" fill-opacity="0.14"/>
+    <text x="434" y="24" font-family="system-ui, sans-serif" font-size="16" font-weight="600"
+          fill="#ffffff" text-anchor="middle">🔗 LINE Bot</text>
+  </g>
+
+  <!-- PDPA badge -->
+  <g transform="translate(82, 430)">
+    <rect width="160" height="34" rx="8" fill="#10b981" fill-opacity="0.25"/>
+    <rect width="160" height="34" rx="8" fill="none" stroke="#10b981" stroke-opacity="0.5" stroke-width="1.5"/>
+    <text x="80" y="22" font-family="system-ui, sans-serif" font-size="14" font-weight="700"
+          fill="#6ee7b7" text-anchor="middle">✓ PDPA Compliant</text>
+  </g>
+
+  <!-- URL -->
+  <text x="82" y="590"
+    font-family="system-ui, 'Courier New', monospace"
+    font-size="20" font-weight="500" fill="#ffffff" fill-opacity="0.45">slippy.app</text>
+
+  <!-- Right side: Receipt mascot (large) -->
+  <g transform="translate(920, 315) rotate(-10) translate(-920,-315)" filter="url(#shadow)">
+    <path d="M786 80 L1054 80 Q1110 80 1110 136 L1110 516
+             L1082 550 L1054 516 L1026 550 L998 516 L970 550 L942 516 L914 550
+             L886 516 L858 550 L830 516 L760 550 L760 136 Q760 80 786 80 Z"
+      fill="#1e1b4b" fill-opacity="0.22" transform="translate(8 16)"/>
+    <path d="M786 80 L1054 80 Q1110 80 1110 136 L1110 516
+             L1082 550 L1054 516 L1026 550 L998 516 L970 550 L942 516 L914 550
+             L886 516 L858 550 L830 516 L760 550 L760 136 Q760 80 786 80 Z"
+      fill="url(#paper)"/>
+    <rect x="796" y="130" width="200" height="9"  rx="4.5" fill="#6366f1" fill-opacity="0.18"/>
+    <rect x="796" y="152" width="140" height="6"  rx="3"   fill="#6366f1" fill-opacity="0.11"/>
+    <circle cx="860" cy="284" r="34" fill="#1e1b4b"/>
+    <circle cx="980" cy="284" r="34" fill="#1e1b4b"/>
+    <circle cx="873" cy="269" r="11" fill="#ffffff" fill-opacity="0.70"/>
+    <circle cx="993" cy="269" r="11" fill="#ffffff" fill-opacity="0.70"/>
+    <ellipse cx="814" cy="342" rx="30" ry="20" fill="#fb7185" fill-opacity="0.46"/>
+    <ellipse cx="1026" cy="342" rx="30" ry="20" fill="#fb7185" fill-opacity="0.46"/>
+    <path d="M860 356 Q920 416 980 356"
+          stroke="#1e1b4b" stroke-width="30" stroke-linecap="round" fill="none"/>
+    <rect x="796" y="458" width="176" height="7" rx="3.5" fill="#6366f1" fill-opacity="0.12"/>
+    <rect x="796" y="476" width="120" height="5" rx="2.5" fill="#6366f1" fill-opacity="0.08"/>
+  </g>
+</svg>

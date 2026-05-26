@@ -1,5 +1,14 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { useState, useEffect } from "react"
 import { usePathname }         from "next/navigation"
 import { Sidebar }             from "./sidebar"
@@ -13,14 +22,15 @@ export interface OrgOption {
 }
 
 interface AppShellProps {
-  org:      { id: string; name: string; plan: string }
-  allOrgs:  OrgOption[]
-  user:     { full_name: string; email: string; avatar_url?: string }
-  locale:   string
-  children: React.ReactNode
+  org:            { id: string; name: string; plan: string }
+  allOrgs:        OrgOption[]
+  user:           { full_name: string; email: string; avatar_url?: string }
+  locale:         string
+  isSuperadmin?:  boolean
+  children:       React.ReactNode
 }
 
-export function AppShell({ org, allOrgs, user, locale, children }: AppShellProps) {
+export function AppShell({ org, allOrgs, user, locale, isSuperadmin = false, children }: AppShellProps) {
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mounted,    setMounted]    = useState(false)
@@ -66,6 +76,7 @@ export function AppShell({ org, allOrgs, user, locale, children }: AppShellProps
         mobileOpen={mobileOpen}
         onToggle={toggleDesktop}
         onMobileClose={() => setMobileOpen(false)}
+        isSuperadmin={isSuperadmin}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

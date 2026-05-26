@@ -93,6 +93,8 @@
     "upload": "Upload Document",
     "uploadDesc": "Drag and drop files here, or click to browse",
     "supportedFormats": "Supports PDF, JPG, PNG (max 20MB)",
+    "uploading": "Uploading...",
+    "uploadingDesc": "Sending file to server",
     "processing": "Processing...",
     "processingDesc": "AI is reading and analyzing your document",
     "vendor": "Vendor",

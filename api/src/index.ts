@@ -1,4 +1,5 @@
-import "dotenv/config"
+import { config } from "dotenv"
+config({ override: true })  // override empty env vars injected by Claude Desktop / shell
 import Fastify from "fastify"
 import cors from "@fastify/cors"
 import multipart from "@fastify/multipart"

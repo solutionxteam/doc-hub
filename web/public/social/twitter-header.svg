@@ -1,0 +1,83 @@
+<svg viewBox="0 0 1500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Twitter/X Header — 1500×500 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1500" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"  stop-color="#3b0764"/>
+      <stop offset="45%" stop-color="#4338ca"/>
+      <stop offset="100%" stop-color="#9d174d"/>
+    </linearGradient>
+    <radialGradient id="gL" cx="18%" cy="35%" r="52%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.65"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gR" cx="88%" cy="68%" r="40%">
+      <stop offset="0%" stop-color="#ec4899" stop-opacity="0.50"/>
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="1050" y1="30" x2="1460" y2="470" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8eaf6"/>
+    </linearGradient>
+    <filter id="sh"><feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#1e1b4b" flood-opacity="0.28"/></filter>
+    <pattern id="dots" x="0" y="0" width="36" height="36" patternUnits="userSpaceOnUse">
+      <circle cx="18" cy="18" r="1.2" fill="#ffffff" fill-opacity="0.055"/>
+    </pattern>
+  </defs>
+
+  <rect width="1500" height="500" fill="url(#bg)"/>
+  <rect width="1500" height="500" fill="url(#gL)"/>
+  <rect width="1500" height="500" fill="url(#gR)"/>
+  <rect width="1500" height="500" fill="url(#dots)"/>
+
+  <!-- Icon mark -->
+  <g transform="translate(88, 108)">
+    <rect width="108" height="108" rx="24" fill="#ffffff" fill-opacity="0.13"/>
+    <g transform="translate(54,52) rotate(-6) translate(-54,-52)">
+      <path d="M30 21 L78 21 Q86 21 86 29 L86 76 L81 82 L76 76 L71 82 L66 76 L61 82 L56 76 L51 82 L46 76 L41 82 L34 82 L22 82 L22 29 Q22 21 30 21 Z" fill="#ffffff" fill-opacity="0.95"/>
+      <circle cx="40" cy="46" r="5.5" fill="#1e1b4b"/>
+      <circle cx="68" cy="46" r="5.5" fill="#1e1b4b"/>
+      <circle cx="42" cy="44" r="1.8" fill="#ffffff" fill-opacity="0.7"/>
+      <circle cx="70" cy="44" r="1.8" fill="#ffffff" fill-opacity="0.7"/>
+      <ellipse cx="33" cy="56" rx="5.5" ry="3.5" fill="#fb7185" fill-opacity="0.5"/>
+      <ellipse cx="75" cy="56" rx="5.5" ry="3.5" fill="#fb7185" fill-opacity="0.5"/>
+      <path d="M40 59 Q54 70 68 59" stroke="#1e1b4b" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+    </g>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="88" y="290"
+    font-family="system-ui,-apple-system,'Helvetica Neue',sans-serif"
+    font-size="110" font-weight="800" letter-spacing="-2" fill="#ffffff">Slippy</text>
+
+  <!-- Tagline -->
+  <text x="91" y="346"
+    font-family="system-ui,-apple-system,'Noto Sans Thai',sans-serif"
+    font-size="28" font-weight="500" fill="#ffffff" fill-opacity="0.78">
+    ระบบจัดการเอกสารบัญชีอัจฉริยะ ด้วย AI OCR
+  </text>
+
+  <!-- URL -->
+  <text x="91" y="450"
+    font-family="system-ui,monospace" font-size="22" font-weight="500"
+    fill="#ffffff" fill-opacity="0.42">slippy.app</text>
+
+  <!-- Receipt mascot -->
+  <g transform="translate(1260,250) rotate(-10) translate(-1260,-250)" filter="url(#sh)">
+    <path d="M1100 48 L1420 48 Q1480 48 1480 108 L1480 424 L1453 458 L1426 424 L1399 458 L1372 424 L1345 458 L1318 424 L1291 458 L1264 424 L1237 458 L1210 424 L1183 458 L1080 458 L1080 108 Q1080 48 1140 48 Z"
+      fill="#1e1b4b" fill-opacity="0.20" transform="translate(10 18)"/>
+    <path d="M1100 48 L1420 48 Q1480 48 1480 108 L1480 424 L1453 458 L1426 424 L1399 458 L1372 424 L1345 458 L1318 424 L1291 458 L1264 424 L1237 458 L1210 424 L1183 458 L1080 458 L1080 108 Q1080 48 1140 48 Z"
+      fill="url(#paper)"/>
+    <rect x="1104" y="114" width="240" height="10" rx="5" fill="#6366f1" fill-opacity="0.17"/>
+    <rect x="1104" y="134" width="168" height="7"  rx="3.5" fill="#6366f1" fill-opacity="0.10"/>
+    <circle cx="1196" cy="224" r="38" fill="#1e1b4b"/>
+    <circle cx="1344" cy="224" r="38" fill="#1e1b4b"/>
+    <circle cx="1210" cy="207" r="13" fill="#ffffff" fill-opacity="0.70"/>
+    <circle cx="1358" cy="207" r="13" fill="#ffffff" fill-opacity="0.70"/>
+    <ellipse cx="1148" cy="274" rx="32" ry="22" fill="#fb7185" fill-opacity="0.44"/>
+    <ellipse cx="1392" cy="274" rx="32" ry="22" fill="#fb7185" fill-opacity="0.44"/>
+    <path d="M1196 288 Q1270 354 1344 288"
+          stroke="#1e1b4b" stroke-width="36" stroke-linecap="round" fill="none"/>
+    <rect x="1104" y="382" width="208" height="8"  rx="4" fill="#6366f1" fill-opacity="0.12"/>
+    <rect x="1104" y="402" width="146" height="6"  rx="3" fill="#6366f1" fill-opacity="0.08"/>
+  </g>
+</svg>

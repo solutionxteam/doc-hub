@@ -1,5 +1,15 @@
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import Link from "next/link"
 import { LogoMark } from "@/components/ui/logo"
+import { SecurityIcon, SECURITY_BADGES } from "@/components/ui/security-icon"
 import type { Metadata } from "next"
 
 export const metadata: Metadata = {
@@ -96,16 +106,16 @@ export default function PrivacyPolicyPage() {
 
           <PolicySection num="4" title="การรักษาความปลอดภัย">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-              {[
-                { icon: "🔒", label: "AES-256", sub: "เข้ารหัสข้อมูลทั้งหมด" },
-                { icon: "🔑", label: "TLS 1.3", sub: "การรับส่งข้อมูล" },
-                { icon: "☁️", label: "Google Cloud", sub: "SOC 2 Type II" },
-                { icon: "🛡️", label: "PDPA Ready", sub: "ตรวจสอบรายปี" },
-              ].map(b => (
-                <div key={b.label} className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 text-center">
-                  <div className="text-xl mb-1">{b.icon}</div>
-                  <div className="font-bold text-gray-900 text-xs">{b.label}</div>
-                  <div className="text-gray-500 text-[10px]">{b.sub}</div>
+              {SECURITY_BADGES.map(b => (
+                <div key={b.label}
+                  className="bg-white border border-gray-100 rounded-2xl p-4 text-center
+                    hover:border-indigo-200 hover:shadow-sm transition-all group">
+                  <div className="flex justify-center mb-3
+                    group-hover:scale-105 transition-transform duration-200">
+                    <SecurityIcon id={b.id} size={44} />
+                  </div>
+                  <div className="font-black text-gray-900 text-xs">{b.label}</div>
+                  <div className="text-gray-400 text-[10px] mt-0.5">{b.sub}</div>
                 </div>
               ))}
             </div>

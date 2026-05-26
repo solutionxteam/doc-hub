@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify"
 import { supabase } from "../lib/supabase"
-import { queueExtraction, queuePush } from "../queue/setup"
+import { queuePush } from "../queue/setup"
+import { runPipeline } from "../pipeline"
 
 export async function documentsRoutes(app: FastifyInstance) {
 
@@ -12,28 +13,34 @@ export async function documentsRoutes(app: FastifyInstance) {
 
       const { data: doc, error } = await supabase
         .from("documents")
-        .select("id, file_path, file_type, organization_id")
+        .select("id, file_path, file_type, organization_id, status")
         .eq("id", id)
         .single()
 
       if (error || !doc) return reply.status(404).send({ error: "Document not found" })
 
-      // Check quota
-      const { data: allowed } = await supabase
-        .rpc("increment_doc_used", { p_org_id: doc.organization_id })
+      // Skip quota increment on retry — document was already counted on first attempt
+      const isRetry = doc.status === "failed" || doc.status === "pending"
+      if (!isRetry) {
+        const { data: allowed } = await supabase
+          .rpc("increment_doc_used", { p_org_id: doc.organization_id })
 
-      if (!allowed) {
-        await supabase.from("documents").update({ status: "failed" }).eq("id", id)
-        return reply.status(402).send({ error: "Document quota exceeded" })
+        if (!allowed) {
+          await supabase.from("documents").update({ status: "failed" }).eq("id", id)
+          return reply.status(402).send({ error: "Document quota exceeded" })
+        }
       }
 
-      await supabase.from("documents").update({ status: "processing" }).eq("id", id)
+      await supabase.from("documents").update({ status: "processing", notes: null }).eq("id", id)
 
-      await queueExtraction({
-        documentId: id,
-        filePath:   doc.file_path,
-        fileType:   doc.file_type,
-        orgId:      doc.organization_id,
+      // Run pipeline directly in the background — no separate worker/Redis needed.
+      // Fire-and-forget: response returns immediately while extraction runs async.
+      runPipeline(id, doc.organization_id).catch(async (err) => {
+        console.error(`[pipeline] Unhandled error for ${id}:`, err)
+        await supabase
+          .from("documents")
+          .update({ status: "failed", notes: `Pipeline error: ${err?.message ?? err}` })
+          .eq("id", id)
       })
 
       return { queued: true, documentId: id }

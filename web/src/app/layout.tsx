@@ -1,3 +1,12 @@
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import type { Metadata }       from "next"
 import { Inter, Noto_Sans_Thai } from "next/font/google"
 import { getLocale, getMessages } from "next-intl/server"
@@ -22,8 +31,8 @@ const notoSansThai = Noto_Sans_Thai({
 
 export const metadata: Metadata = {
   title:       { default: "Slippy", template: "%s | Slippy" },
-  description: "ระบบจัดการเอกสารบัญชีอัจฉริยะ",
-  keywords:    ["slippy", "accounting", "document", "AI", "OCR", "FlowAccount", "บัญชี", "สลิป"],
+  description: "ระบบจัดการเอกสารบัญชีอัจฉริยะ ด้วย AI OCR — อ่านใบเสร็จ จัดหมวดหมู่ Export รายงาน",
+  keywords:    ["slippy", "accounting", "document", "AI", "OCR", "FlowAccount", "บัญชี", "สลิป", "ใบเสร็จ", "PDPA"],
   manifest:    "/manifest.json",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "Slippy" },
   themeColor:  [
@@ -31,8 +40,42 @@ export const metadata: Metadata = {
     { media: "(prefers-color-scheme: dark)",  color: "#312e81" },
   ],
   icons: {
-    icon:  [{ url: "/icon.svg", type: "image/svg+xml" }],
-    apple: [{ url: "/apple-icon.svg", type: "image/svg+xml" }],
+    icon: [
+      { url: "/icon.svg",             type: "image/svg+xml" },
+      { url: "/favicon-32x32.png",    type: "image/png", sizes: "32x32" },
+      { url: "/favicon-16x16.png",    type: "image/png", sizes: "16x16" },
+    ],
+    apple: [
+      { url: "/icons/ios/icon-60@3x.png",   sizes: "180x180" },
+      { url: "/icons/ios/icon-76@2x.png",   sizes: "152x152" },
+      { url: "/icons/ios/icon-83.5@2x.png", sizes: "167x167" },
+    ],
+    other: [
+      { rel: "mask-icon",       url: "/icon.svg", color: "#6366f1" },
+      { rel: "shortcut icon",   url: "/favicon-32x32.png" },
+    ],
+  },
+  openGraph: {
+    type:        "website",
+    locale:      "th_TH",
+    url:         "https://slippy.app",
+    siteName:    "Slippy",
+    title:       "Slippy — ระบบจัดการเอกสารบัญชีอัจฉริยะ",
+    description: "อ่านใบเสร็จด้วย AI · จัดหมวดหมู่อัตโนมัติ · Export รายงาน · เชื่อม LINE",
+    images: [
+      {
+        url:    "/og-image.png",
+        width:  1200,
+        height: 630,
+        alt:    "Slippy — ระบบจัดการเอกสารบัญชีอัจฉริยะ",
+      },
+    ],
+  },
+  twitter: {
+    card:        "summary_large_image",
+    title:       "Slippy — ระบบจัดการเอกสารบัญชีอัจฉริยะ",
+    description: "อ่านใบเสร็จด้วย AI · จัดหมวดหมู่อัตโนมัติ · Export รายงาน",
+    images:      ["/og-image.png"],
   },
 }
 

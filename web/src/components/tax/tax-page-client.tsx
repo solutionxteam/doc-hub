@@ -1,26 +1,56 @@
 "use client"
 
-import { useState }    from "react"
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
+import { useState, useEffect, useCallback } from "react"
 import { Download, Plus, ArrowUpRight, Send, CheckCircle, FileText } from "lucide-react"
 import { formatThb, formatDate } from "@/lib/utils"
 
-const VAT_ROWS = [
-  { m: "ม.ค.",  input: 7950, output: 6240 },
-  { m: "ก.พ.",  input: 7179, output: 5980 },
-  { m: "มี.ค.", input: 8324, output: 7100 },
-  { m: "เม.ย.", input: 9314, output: 8240 },
-  { m: "พ.ค.",  input: 9307, output: 8950, current: true },
-]
+// ── Types ──────────────────────────────────────────────────────────────────────
+type VatMonth = {
+  year:     number
+  month:    number
+  input:    { vat: number; base: number }
+  output:   { vat: number; base: number }
+  net_vat:  number
+  due_date: string | null
+}
 
-const WHT_ROWS = [
-  { date: "2026-05-08", payer: "บจก. ลูกค้าใหญ่",  amount: 50000, rate: 3, tax: 1500 },
-  { date: "2026-05-14", payer: "Acme Tech (TH)",    amount: 80000, rate: 3, tax: 2400 },
-  { date: "2026-04-22", payer: "XYZ Holding",        amount: 35000, rate: 5, tax: 1750 },
-]
+type WhtItem = {
+  date:   string
+  payer:  string
+  amount: number
+  rate:   number
+  tax:    number
+}
 
-function TaxStat({ label, value, sub, icon: Icon, tone }: {
+type WhtData = {
+  items:      WhtItem[]
+  total_base: number
+  total_wht:  number
+}
+
+// ── Thai month names ───────────────────────────────────────────────────────────
+const THAI_MONTHS = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]
+
+// ── Helper ─────────────────────────────────────────────────────────────────────
+function nowPeriod() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
+function TaxStat({ label, value, sub, icon: Icon, tone, loading }: {
   label: string; value: string; sub: string
   icon: React.ElementType; tone: "brand" | "purple" | "emerald" | "amber"
+  loading?: boolean
 }) {
   const tones = {
     brand:   "bg-brand-500/10 text-brand-600 dark:text-brand-300",
@@ -34,18 +64,85 @@ function TaxStat({ label, value, sub, icon: Icon, tone }: {
         <Icon className="w-4 h-4" />
       </div>
       <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
-      <div className="mt-1 text-[22px] font-bold text-foreground tabular-nums">{value}</div>
+      {loading ? (
+        <div className="mt-1.5 h-7 w-28 rounded-[6px] bg-muted animate-pulse" />
+      ) : (
+        <div className="mt-1 text-[22px] font-bold text-foreground tabular-nums">{value}</div>
+      )}
       <div className="text-[12px] text-muted-foreground mt-0.5">{sub}</div>
     </div>
   )
 }
 
-export function TaxPageClient({ orgId: _orgId }: { orgId: string }) {
-  const [period, setPeriod] = useState("2026-05")
+function SkeletonRow({ cols }: { cols: number }) {
+  return (
+    <tr className="border-b border-border">
+      {Array.from({ length: cols }).map((_, i) => (
+        <td key={i} className={`px-3 py-3 ${i === 0 ? "pl-5" : ""} ${i === cols - 1 ? "pr-5" : ""}`}>
+          <div className="h-4 rounded bg-muted animate-pulse" style={{ width: `${60 + Math.random() * 40}%` }} />
+        </td>
+      ))}
+    </tr>
+  )
+}
 
-  const totalInput  = VAT_ROWS.reduce((s, r) => s + r.input, 0)
-  const totalOutput = VAT_ROWS.reduce((s, r) => s + r.output, 0)
-  const net         = totalInput - totalOutput
+function EmptyState({ text }: { text: string }) {
+  return (
+    <tr>
+      <td colSpan={99} className="px-5 py-12 text-center text-[13px] text-muted-foreground">
+        {text}
+      </td>
+    </tr>
+  )
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────────
+export function TaxPageClient({ orgId }: { orgId: string }) {
+  const [period, setPeriod]       = useState(nowPeriod)
+  const [vatHistory, setVatHistory] = useState<VatMonth[]>([])
+  const [currentVat, setCurrentVat] = useState<VatMonth | null>(null)
+  const [whtData, setWhtData]     = useState<WhtData | null>(null)
+  const [loading, setLoading]     = useState(true)
+  const [whtLoading, setWhtLoading] = useState(true)
+
+  // Parse period
+  const [year, month] = period.split("-").map(Number)
+
+  const fetchAll = useCallback(async (y: number, m: number) => {
+    setLoading(true)
+    setWhtLoading(true)
+
+    // Fetch current month VAT + WHT + last 5 months history in parallel
+    const [vatRes, whtRes, historyRes] = await Promise.all([
+      fetch(`/api/tax/vat?orgId=${orgId}&year=${y}&month=${m}`)
+        .then(r => r.json()).catch(() => null),
+      fetch(`/api/tax/wht?orgId=${orgId}&year=${y}&month=${m}`)
+        .then(r => r.json()).catch(() => null),
+      fetch(`/api/tax/vat?orgId=${orgId}&year=${y}&month=${m}&history=5`)
+        .then(r => r.json()).catch(() => []),
+    ])
+
+    setCurrentVat(vatRes)
+    setWhtData(whtRes)
+    setVatHistory(Array.isArray(historyRes) ? historyRes : [])
+    setLoading(false)
+    setWhtLoading(false)
+  }, [orgId])
+
+  useEffect(() => {
+    fetchAll(year, month)
+  }, [year, month, fetchAll])
+
+  // Derived KPI values
+  const inputVat  = currentVat?.input.vat   ?? 0
+  const outputVat = currentVat?.output.vat  ?? 0
+  const netVat    = currentVat?.net_vat     ?? 0
+  const totalWht  = whtData?.total_wht      ?? 0
+  const whtCount  = whtData?.items.length   ?? 0
+
+  const totalInputAll  = vatHistory.reduce((s, r) => s + (r.input.vat ?? 0), 0)
+  const totalOutputAll = vatHistory.reduce((s, r) => s + (r.output.vat ?? 0), 0)
+  const totalNetAll    = vatHistory.reduce((s, r) => s + (r.net_vat ?? 0), 0)
 
   return (
     <div className="p-6 lg:p-7 space-y-5 max-w-[1600px] animate-fade-in">
@@ -70,10 +167,38 @@ export function TaxPageClient({ orgId: _orgId }: { orgId: string }) {
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <TaxStat label="VAT ซื้อ (Input)"  value={formatThb(9307)} sub="เดือนนี้"   icon={ArrowUpRight} tone="brand" />
-        <TaxStat label="VAT ขาย (Output)" value={formatThb(8950)} sub="เดือนนี้"   icon={Send}          tone="purple" />
-        <TaxStat label="VAT คงเหลือ"      value={formatThb(357)}  sub="ขอคืน"      icon={CheckCircle}   tone="emerald" />
-        <TaxStat label="WHT ที่ถูกหัก"    value={formatThb(5650)} sub="3 ใบที่ผ่านมา" icon={FileText}    tone="amber" />
+        <TaxStat
+          label="VAT ซื้อ (Input)"
+          value={formatThb(inputVat)}
+          sub="เดือนนี้"
+          icon={ArrowUpRight}
+          tone="brand"
+          loading={loading}
+        />
+        <TaxStat
+          label="VAT ขาย (Output)"
+          value={formatThb(outputVat)}
+          sub="เดือนนี้"
+          icon={Send}
+          tone="purple"
+          loading={loading}
+        />
+        <TaxStat
+          label={netVat >= 0 ? "VAT ที่ต้องชำระ" : "VAT คงเหลือ (ขอคืน)"}
+          value={formatThb(Math.abs(netVat))}
+          sub={currentVat?.due_date ? `ครบกำหนด ${formatDate(currentVat.due_date)}` : "เดือนนี้"}
+          icon={CheckCircle}
+          tone="emerald"
+          loading={loading}
+        />
+        <TaxStat
+          label="WHT ที่ถูกหัก"
+          value={formatThb(totalWht)}
+          sub={whtCount > 0 ? `${whtCount} รายการ` : "เดือนนี้"}
+          icon={FileText}
+          tone="amber"
+          loading={whtLoading}
+        />
       </div>
 
       {/* Monthly VAT table */}
@@ -81,10 +206,10 @@ export function TaxPageClient({ orgId: _orgId }: { orgId: string }) {
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
           <div>
             <h3 className="text-[15px] font-semibold text-foreground">ภาษีมูลค่าเพิ่ม (VAT) รายเดือน</h3>
-            <p className="text-[12px] text-muted-foreground mt-0.5">แบบนำส่ง ภพ.30</p>
+            <p className="text-[12px] text-muted-foreground mt-0.5">แบบนำส่ง ภพ.30 — 5 เดือนล่าสุด</p>
           </div>
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-brand-500" /> 2026
+            <span className="h-1.5 w-1.5 rounded-full bg-brand-500" /> {year}
           </span>
         </div>
         <div className="overflow-x-auto">
@@ -100,38 +225,64 @@ export function TaxPageClient({ orgId: _orgId }: { orgId: string }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {VAT_ROWS.map(r => {
-                const diff = r.input - r.output
-                return (
-                  <tr key={r.m} className="hover:bg-muted/30">
-                    <td className="px-5 py-3 font-medium text-foreground">{r.m} 2026</td>
-                    <td className="px-3 py-3 text-right tabular-nums text-foreground">{formatThb(r.input)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums text-foreground">{formatThb(r.output)}</td>
-                    <td className={`px-3 py-3 text-right tabular-nums font-semibold ${diff > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                      {diff > 0 ? "+" : ""}{formatThb(diff)}
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={6} />)
+              ) : vatHistory.length === 0 ? (
+                <EmptyState text="ไม่พบข้อมูล VAT — เริ่มสแกนเอกสารเพื่อดึงข้อมูลภาษีอัตโนมัติ" />
+              ) : (
+                <>
+                  {vatHistory.map(r => {
+                    const isCurrent = r.year === year && r.month === month
+                    const net = r.net_vat
+                    const hasData = r.input.vat > 0 || r.output.vat > 0
+                    return (
+                      <tr key={`${r.year}-${r.month}`} className={`hover:bg-muted/30 ${isCurrent ? "bg-brand-50/50 dark:bg-brand-500/5" : ""}`}>
+                        <td className="px-5 py-3 font-medium text-foreground">
+                          {THAI_MONTHS[r.month - 1]} {r.year}
+                          {isCurrent && (
+                            <span className="ml-2 text-[10px] font-semibold text-brand-600 dark:text-brand-400 bg-brand-100 dark:bg-brand-500/20 px-1.5 py-0.5 rounded-full">เดือนนี้</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-right tabular-nums text-foreground">{formatThb(r.input.vat)}</td>
+                        <td className="px-3 py-3 text-right tabular-nums text-foreground">{formatThb(r.output.vat)}</td>
+                        <td className={`px-3 py-3 text-right tabular-nums font-semibold ${net < 0 ? "text-emerald-600 dark:text-emerald-400" : net > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
+                          {net !== 0 ? (net < 0 ? "-" : "+") : ""}{formatThb(Math.abs(net))}
+                        </td>
+                        <td className="px-3 py-3">
+                          {!hasData ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted text-muted-foreground">
+                              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />ไม่มีข้อมูล
+                            </span>
+                          ) : isCurrent ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />รอนำส่ง
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />นำส่งแล้ว
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 pr-5 text-right">
+                          {hasData && (
+                            <button className="text-[12px] font-medium text-brand-600 dark:text-brand-400 hover:underline">ดูรายการ</button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {/* Total row */}
+                  <tr className="bg-muted/40 font-semibold">
+                    <td className="px-5 py-3 text-foreground">รวม</td>
+                    <td className="px-3 py-3 text-right tabular-nums text-foreground">{formatThb(totalInputAll)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums text-foreground">{formatThb(totalOutputAll)}</td>
+                    <td className={`px-3 py-3 text-right tabular-nums ${totalNetAll < 0 ? "text-emerald-600 dark:text-emerald-400" : totalNetAll > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
+                      {totalNetAll !== 0 ? (totalNetAll < 0 ? "-" : "+") : ""}{formatThb(Math.abs(totalNetAll))}
                     </td>
-                    <td className="px-3 py-3">
-                      {r.current
-                        ? <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />รอนำส่ง</span>
-                        : <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />นำส่งแล้ว</span>
-                      }
-                    </td>
-                    <td className="px-3 py-3 pr-5 text-right">
-                      <button className="text-[12px] font-medium text-brand-600 dark:text-brand-400 hover:underline">ดูรายการ</button>
-                    </td>
+                    <td colSpan={2}></td>
                   </tr>
-                )
-              })}
-              {/* Total row */}
-              <tr className="bg-muted/40 font-semibold">
-                <td className="px-5 py-3 text-foreground">รวม</td>
-                <td className="px-3 py-3 text-right tabular-nums text-foreground">{formatThb(totalInput)}</td>
-                <td className="px-3 py-3 text-right tabular-nums text-foreground">{formatThb(totalOutput)}</td>
-                <td className={`px-3 py-3 text-right tabular-nums ${net > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                  {net > 0 ? "+" : ""}{formatThb(net)}
-                </td>
-                <td colSpan={2}></td>
-              </tr>
+                </>
+              )}
             </tbody>
           </table>
         </div>
@@ -142,7 +293,7 @@ export function TaxPageClient({ orgId: _orgId }: { orgId: string }) {
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
           <div>
             <h3 className="text-[15px] font-semibold text-foreground">ภาษีหัก ณ ที่จ่าย (WHT)</h3>
-            <p className="text-[12px] text-muted-foreground mt-0.5">ที่ถูกหักจากผู้จ่ายเงิน</p>
+            <p className="text-[12px] text-muted-foreground mt-0.5">ที่ถูกหักจากผู้จ่ายเงิน — {THAI_MONTHS[month - 1]} {year}</p>
           </div>
           <button className="h-8 px-3 rounded-[8px] border border-border bg-card text-xs font-medium text-foreground hover:bg-muted transition inline-flex items-center gap-1.5">
             <Plus className="w-3.5 h-3.5" /> เพิ่มรายการ
@@ -160,15 +311,31 @@ export function TaxPageClient({ orgId: _orgId }: { orgId: string }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {WHT_ROWS.map((r, i) => (
-                <tr key={i} className="hover:bg-muted/30">
-                  <td className="px-5 py-3 text-muted-foreground">{formatDate(r.date)}</td>
-                  <td className="px-3 py-3 font-medium text-foreground">{r.payer}</td>
-                  <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">{formatThb(r.amount)}</td>
-                  <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">{r.rate}%</td>
-                  <td className="pr-5 py-3 text-right tabular-nums font-semibold text-foreground">{formatThb(r.tax)}</td>
-                </tr>
-              ))}
+              {whtLoading ? (
+                Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={5} />)
+              ) : !whtData?.items.length ? (
+                <EmptyState text="ไม่พบรายการ WHT ในเดือนนี้" />
+              ) : (
+                <>
+                  {whtData.items.map((r, i) => (
+                    <tr key={i} className="hover:bg-muted/30">
+                      <td className="px-5 py-3 text-muted-foreground">{formatDate(r.date)}</td>
+                      <td className="px-3 py-3 font-medium text-foreground">{r.payer}</td>
+                      <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">{formatThb(r.amount)}</td>
+                      <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">{r.rate}%</td>
+                      <td className="pr-5 py-3 text-right tabular-nums font-semibold text-foreground">{formatThb(r.tax)}</td>
+                    </tr>
+                  ))}
+                  {/* Summary row */}
+                  <tr className="bg-muted/40 font-semibold">
+                    <td className="px-5 py-3 text-foreground">รวม</td>
+                    <td className="px-3 py-3 text-muted-foreground">{whtData.items.length} รายการ</td>
+                    <td className="px-3 py-3 text-right tabular-nums text-foreground">{formatThb(whtData.total_base)}</td>
+                    <td className="px-3 py-3"></td>
+                    <td className="pr-5 py-3 text-right tabular-nums text-foreground">{formatThb(whtData.total_wht)}</td>
+                  </tr>
+                </>
+              )}
             </tbody>
           </table>
         </div>

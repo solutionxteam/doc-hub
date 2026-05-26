@@ -1,0 +1,55 @@
+<svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    TikTok Profile Photo — 200×200 (displayed as circle)
+    Upload at least 200×200. TikTok crops to circle.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="200" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"  stop-color="#3730a3"/>
+      <stop offset="50%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="55" y1="38" x2="145" y2="162" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8eaf6"/>
+    </linearGradient>
+    <filter id="sh"><feDropShadow dx="0" dy="3" stdDeviation="7" flood-color="#1e1b4b" flood-opacity="0.32"/></filter>
+    <pattern id="dots" x="0" y="0" width="10" height="10" patternUnits="userSpaceOnUse">
+      <circle cx="5" cy="5" r="0.4" fill="#ffffff" fill-opacity="0.06"/>
+    </pattern>
+  </defs>
+
+  <rect width="200" height="200" fill="url(#bg)"/>
+  <rect width="200" height="200" fill="url(#glow)"/>
+  <rect width="200" height="200" fill="url(#dots)"/>
+
+  <!-- Receipt mascot -->
+  <g transform="translate(100,88) rotate(-5) translate(-100,-88)" filter="url(#sh)">
+    <path d="M61 22 L139 22 Q152 22 152 35 L152 148
+             L147 154 L142 148 L137 154 L132 148 L127 154 L122 148 L117 154 L112 148 L107 154 L102 148 L48 148 L48 35 Q48 22 61 22 Z"
+      fill="#1e1b4b" fill-opacity="0.20" transform="translate(3 5)"/>
+    <path d="M61 22 L139 22 Q152 22 152 35 L152 148
+             L147 154 L142 148 L137 154 L132 148 L127 154 L122 148 L117 154 L112 148 L107 154 L102 148 L48 148 L48 35 Q48 22 61 22 Z"
+      fill="url(#paper)"/>
+    <rect x="56" y="43" width="44" height="4" rx="2" fill="#6366f1" fill-opacity="0.18"/>
+    <circle cx="80"  cy="82" r="13" fill="#1e1b4b"/>
+    <circle cx="120" cy="82" r="13" fill="#1e1b4b"/>
+    <circle cx="84"  cy="77" r="4.5" fill="#ffffff" fill-opacity="0.72"/>
+    <circle cx="124" cy="77" r="4.5" fill="#ffffff" fill-opacity="0.72"/>
+    <ellipse cx="64"  cy="99" rx="12" ry="8" fill="#fb7185" fill-opacity="0.48"/>
+    <ellipse cx="136" cy="99" rx="12" ry="8" fill="#fb7185" fill-opacity="0.48"/>
+    <path d="M80 105 Q100 124 120 105"
+          stroke="#1e1b4b" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <rect x="56" y="136" width="40" height="3" rx="1.5" fill="#6366f1" fill-opacity="0.13"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="100" y="182"
+    text-anchor="middle"
+    font-family="system-ui,-apple-system,'Helvetica Neue',sans-serif"
+    font-size="20" font-weight="800" letter-spacing="-0.5" fill="#ffffff" fill-opacity="0.90">Slippy</text>
+</svg>

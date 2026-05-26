@@ -1,11 +1,43 @@
 "use client"
 
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { useState, useEffect, createContext, useContext, useCallback } from "react"
 import { LogoMark } from "@/components/ui/logo"
 import { Icons }    from "@/components/ui/icons"
 import { cn }       from "@/lib/utils"
 
-// ─── Sample data ────────────────────────────────────────────────────────────
+// ─── Props & live data types ──────────────────────────────────────────────────
+
+export interface MobileClientProps {
+  orgName:         string
+  orgPlan:         string
+  orgRole:         string
+  totalDocs:       number
+  pendingDocs:     number
+  monthSpend:      number
+  prevMonthSpend:  number
+  monthlySeries:   { m: string; spend: number }[]
+  categories:      { name: string; value: number; color: string }[]
+}
+
+type LiveData = MobileClientProps
+
+const LiveDataCtx = createContext<LiveData>({
+  orgName: "—", orgPlan: "free", orgRole: "member",
+  totalDocs: 0, pendingDocs: 0, monthSpend: 0, prevMonthSpend: 0,
+  monthlySeries: [], categories: [],
+})
+const useLive = () => useContext(LiveDataCtx)
+
+// ─── Demo docs (for interactive phone showcase only) ─────────────────────────
 
 const SAMPLE_DOCS = [
   { id:'d1', vendor:'บมจ. ซีพี ออลล์ (7-Eleven)', vendorEn:'CP All (7-Eleven)', amount:285.00,   vat:18.64,   status:'approved',   date:'2026-05-17T10:24:00', category:'ของใช้สำนักงาน',    invoiceNo:'INV-7E-23984',    confidence:0.97, thumb:'🧾' },
@@ -18,32 +50,14 @@ const SAMPLE_DOCS = [
   { id:'d8', vendor:'TrueMove H',                   vendorEn:'TrueMove H',         amount:1199.00,  vat:78.36,   status:'approved',   date:'2026-05-12T10:11:00', category:'ค่าโทรศัพท์',       invoiceNo:'TR-2605-008812',  confidence:0.94, thumb:'📱' },
 ] as const
 
-const MONTH_SERIES = [
-  { m:'ต.ค.', spend:118400 }, { m:'พ.ย.', spend:99300 }, { m:'ธ.ค.', spend:132800 },
-  { m:'ม.ค.', spend:121500 }, { m:'ก.พ.', spend:109700 }, { m:'มี.ค.', spend:127200 },
-  { m:'เม.ย.', spend:132000 }, { m:'พ.ค.', spend:142380 },
-]
-
-const CATEGORY_BREAKDOWN = [
-  { name:'ค่า Software / Cloud', value:38200, color:'#6366f1' },
-  { name:'ค่าเช่าสำนักงาน',      value:35000, color:'#8b5cf6' },
-  { name:'ค่าเดินทาง',           value:18700, color:'#06b6d4' },
-  { name:'ของใช้สำนักงาน',       value:14250, color:'#10b981' },
-  { name:'อาหารและเครื่องดื่ม',  value:13420, color:'#f97316' },
-]
-
-const SAMPLE_ORGS = [
-  { id:'abc',      name:'บริษัท เอบีซี จำกัด',    plan:'pro',     role:'owner', type:'business' },
-  { id:'personal', name:'บัญชีส่วนตัว · นภัทร',  plan:'free',    role:'owner', type:'personal' },
-]
-
 type Doc = typeof SAMPLE_DOCS[number]
 
 const fmtTHB = (n: number) =>
   '฿' + n.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
-function relTime(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime()
+// Pass `now` explicitly so server and client use the same reference until after mount
+function relTime(iso: string, now: number): string {
+  const diff = now - new Date(iso).getTime()
   const h = diff / 3.6e6
   if (h < 1)  return `${Math.round(h * 60)} นาทีที่แล้ว`
   if (h < 24) return `${Math.round(h)} ชั่วโมงที่แล้ว`
@@ -182,14 +196,30 @@ function MAppBar({ title, large, right, showBack = true }: { title: string; larg
 
 function MHome() {
   const { platform, navigate, setTab } = useMA()
+  const { totalDocs, pendingDocs, monthSpend, prevMonthSpend } = useLive()
   const recent = SAMPLE_DOCS.slice(0,4)
+
+  const fmtSpend = (n: number) => {
+    if (n >= 1_000_000) return `฿${(n/1_000_000).toFixed(1)}M`
+    if (n >= 1_000)     return `฿${(n/1_000).toFixed(1).replace(/\.0$/,'')}k`
+    return `฿${n.toLocaleString()}`
+  }
+
+  const momPct = prevMonthSpend > 0
+    ? Math.round(((monthSpend - prevMonthSpend) / prevMonthSpend) * 100)
+    : 0
+  const momUp = momPct >= 0
+  const vatEst = Math.round(monthSpend * 0.065)  // ~VAT portion estimate
+
+  const nowTH = new Date().toLocaleDateString("th-TH", { month: "short", year: "2-digit" })
+
   return (
     <div className="h-full overflow-y-auto pb-24">
       <div className={cn("px-4 pt-2 pb-3", platform === 'android' && 'bg-white dark:bg-slate-900')}>
         <div className="flex items-start justify-between">
           <div>
             <div className="text-[11px] text-slate-500 dark:text-slate-400">สวัสดีตอนเช้า</div>
-            <div className="text-[20px] font-bold tracking-tight mt-0.5">นภัทร 👋</div>
+            <div className="text-[20px] font-bold tracking-tight mt-0.5">คุณ 👋</div>
           </div>
           <div className="flex items-center gap-1.5">
             <button onClick={() => navigate({ type:'search' })} className={cn("flex items-center justify-center", platform==='ios' ? 'h-9 w-9 bg-slate-100 dark:bg-slate-800 rounded-full' : 'h-10 w-10 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full')}>
@@ -197,7 +227,7 @@ function MHome() {
             </button>
             <button onClick={() => navigate({ type:'notifications' })} className={cn("flex items-center justify-center relative", platform==='ios' ? 'h-9 w-9 bg-slate-100 dark:bg-slate-800 rounded-full' : 'h-10 w-10 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full')}>
               <Icons.Bell size={16}/>
-              <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-rose-500"/>
+              {pendingDocs > 0 && <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-rose-500"/>}
             </button>
           </div>
         </div>
@@ -207,18 +237,23 @@ function MHome() {
       <div className="px-4">
         <div className={cn("p-4 text-white relative overflow-hidden", platform==='ios' ? 'rounded-[18px]' : 'rounded-[16px]')} style={{ background:'linear-gradient(135deg,#8b5cf6 0%,#6366f1 50%,#4338ca 100%)' }}>
           <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/10"/>
-          <div className="absolute right-3 top-3 text-[10px] uppercase tracking-wider opacity-80 font-semibold">พ.ค. 2026</div>
+          <div className="absolute right-3 top-3 text-[10px] uppercase tracking-wider opacity-80 font-semibold">{nowTH}</div>
           <div className="relative">
             <div className="text-[10.5px] uppercase tracking-wider opacity-80 font-semibold">ยอดใช้จ่ายเดือนนี้</div>
-            <div className="mt-1 text-[28px] font-bold tabular-nums">฿142,380</div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-[11px]">
-              <span className="inline-flex items-center gap-0.5 bg-white/20 px-1.5 py-0.5 rounded-full"><Icons.TrendingUp size={10}/>+8%</span>
-              <span className="opacity-80">จากเดือนก่อน</span>
-            </div>
+            <div className="mt-1 text-[28px] font-bold tabular-nums">{fmtSpend(monthSpend)}</div>
+            {prevMonthSpend > 0 && (
+              <div className="mt-0.5 flex items-center gap-1.5 text-[11px]">
+                <span className="inline-flex items-center gap-0.5 bg-white/20 px-1.5 py-0.5 rounded-full">
+                  {momUp ? <Icons.TrendingUp size={10}/> : <Icons.TrendingDown size={10}/>}
+                  {momUp ? '+' : ''}{momPct}%
+                </span>
+                <span className="opacity-80">จากเดือนก่อน</span>
+              </div>
+            )}
             <div className="mt-3 pt-3 border-t border-white/15 grid grid-cols-3 gap-2">
-              <div><div className="text-[16px] font-bold tabular-nums">47</div><div className="text-[9px] uppercase tracking-wider opacity-80">เอกสาร</div></div>
-              <div><div className="text-[16px] font-bold tabular-nums">8</div><div className="text-[9px] uppercase tracking-wider opacity-80">รอตรวจ</div></div>
-              <div><div className="text-[16px] font-bold tabular-nums">฿9.3k</div><div className="text-[9px] uppercase tracking-wider opacity-80">VAT</div></div>
+              <div><div className="text-[16px] font-bold tabular-nums">{totalDocs}</div><div className="text-[9px] uppercase tracking-wider opacity-80">เอกสาร</div></div>
+              <div><div className="text-[16px] font-bold tabular-nums">{pendingDocs}</div><div className="text-[9px] uppercase tracking-wider opacity-80">รอตรวจ</div></div>
+              <div><div className="text-[16px] font-bold tabular-nums">{fmtSpend(vatEst)}</div><div className="text-[9px] uppercase tracking-wider opacity-80">VAT ~7%</div></div>
             </div>
           </div>
         </div>
@@ -248,16 +283,18 @@ function MHome() {
       </div>
 
       {/* Pending */}
+      {pendingDocs > 0 && (
       <div className="px-4 mt-4">
         <button onClick={() => setTab('docs')} className="w-full bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-[14px] p-3 flex items-center gap-3 text-left">
           <span className="h-9 w-9 rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300 flex items-center justify-center"><Icons.Loader size={16}/></span>
           <div className="flex-1 min-w-0">
-            <div className="text-[12.5px] font-semibold">8 เอกสารรอตรวจสอบ</div>
+            <div className="text-[12.5px] font-semibold">{pendingDocs} เอกสารรอตรวจสอบ</div>
             <div className="text-[10.5px] text-slate-500 dark:text-slate-400">ใช้เวลาเพียง 2 นาที</div>
           </div>
           <Icons.ChevronRight size={16} className="text-amber-600 dark:text-amber-300"/>
         </button>
       </div>
+      )}
 
       {/* Recent docs */}
       <div className="px-4 mt-4">
@@ -297,6 +334,9 @@ function MDocRow({ d, onClick }: { d: Doc; onClick: () => void }) {
 function MDocs() {
   const { platform, navigate } = useMA()
   const [filter, setFilter] = useState('all')
+  // clientNow: null on SSR → no Date.now() hydration mismatch
+  const [clientNow, setClientNow] = useState<number | null>(null)
+  useEffect(() => { setClientNow(Date.now()) }, [])
   const filters = [
     { id:'all', label:'ทั้งหมด' }, { id:'reviewing', label:'รอตรวจ' },
     { id:'approved', label:'อนุมัติแล้ว' }, { id:'pushed', label:'ส่งเข้าบัญชี' },
@@ -323,7 +363,7 @@ function MDocs() {
             <span className="h-11 w-11 rounded-[10px] bg-slate-100 dark:bg-slate-800 text-xl flex items-center justify-center shrink-0">{d.thumb}</span>
             <div className="flex-1 min-w-0">
               <div className="text-[12.5px] font-semibold truncate">{d.vendor}</div>
-              <div className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate">{d.category} · {relTime(d.date)}</div>
+              <div className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate" suppressHydrationWarning>{d.category} · {clientNow ? relTime(d.date, clientNow) : '—'}</div>
             </div>
             <div className="text-right shrink-0">
               <div className="text-[13px] font-bold tabular-nums">{fmtTHB(d.amount)}</div>
@@ -517,6 +557,21 @@ function MCaptureReview() {
 
 function MStats() {
   const { platform } = useMA()
+  const { monthSpend, prevMonthSpend, monthlySeries, categories } = useLive()
+
+  const momPct = prevMonthSpend > 0
+    ? Math.round(((monthSpend - prevMonthSpend) / prevMonthSpend) * 100)
+    : null
+  const momUp = (momPct ?? 0) >= 0
+
+  // Use live data if available, fall back to empty
+  const data = monthlySeries.length > 0 ? monthlySeries : [
+    { m:'—', spend:0 }, { m:'—', spend:0 }, { m:'—', spend:0 },
+    { m:'—', spend:0 }, { m:'—', spend:0 }, { m:'—', spend:0 },
+  ]
+  const cats = categories.length > 0 ? categories : []
+  const maxCat = Math.max(...cats.map(c => c.value), 1)
+
   return (
     <div className="h-full overflow-y-auto pb-24">
       <div className={cn("px-4 pt-2", platform==='android' && 'bg-white dark:bg-slate-900 pb-3 shadow-sm')}>
@@ -529,8 +584,13 @@ function MStats() {
       </div>
       <div className="px-4 mt-4">
         <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold">รวมเดือนนี้</div>
-        <div className="text-[32px] font-bold tabular-nums">฿142,380</div>
-        <div className="text-[11px] text-emerald-500 inline-flex items-center gap-1 font-semibold"><Icons.TrendingUp size={11}/>+8% vs Apr</div>
+        <div className="text-[32px] font-bold tabular-nums">{fmtTHB(monthSpend)}</div>
+        {momPct !== null && (
+          <div className={cn("text-[11px] inline-flex items-center gap-1 font-semibold", momUp ? 'text-emerald-500' : 'text-rose-500')}>
+            {momUp ? <Icons.TrendingUp size={11}/> : <Icons.TrendingDown size={11}/>}
+            {momUp ? '+' : ''}{momPct}% vs เดือนก่อน
+          </div>
+        )}
       </div>
       <div className="px-4 mt-4">
         <div className="bg-white dark:bg-slate-900 rounded-[14px] p-3 shadow-sm shadow-slate-900/5">
@@ -541,8 +601,7 @@ function MStats() {
               </linearGradient>
             </defs>
             {(() => {
-              const data = MONTH_SERIES
-              const max = Math.max(...data.map(d => d.spend))
+              const max = Math.max(...data.map(d => d.spend), 1)
               const pts = data.map((d,i) => [12 + i*(256/(data.length-1)), 100-(d.spend/max)*80] as [number,number])
               const path = pts.map((p,i) => (i===0?'M':'L')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ')
               return (<>
@@ -557,19 +616,23 @@ function MStats() {
       </div>
       <div className="px-4 mt-4">
         <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-2">ตามหมวดหมู่</div>
-        <div className="bg-white dark:bg-slate-900 rounded-[14px] divide-y divide-slate-100 dark:divide-slate-800 shadow-sm shadow-slate-900/5">
-          {CATEGORY_BREAKDOWN.map(c => (
-            <div key={c.name} className="px-3.5 py-2.5">
-              <div className="flex items-center justify-between text-[12px]">
-                <span className="inline-flex items-center gap-2 truncate"><span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ background:c.color }}/>{c.name}</span>
-                <span className="font-semibold tabular-nums shrink-0">{fmtTHB(c.value)}</span>
+        {cats.length > 0 ? (
+          <div className="bg-white dark:bg-slate-900 rounded-[14px] divide-y divide-slate-100 dark:divide-slate-800 shadow-sm shadow-slate-900/5">
+            {cats.map(c => (
+              <div key={c.name} className="px-3.5 py-2.5">
+                <div className="flex items-center justify-between text-[12px]">
+                  <span className="inline-flex items-center gap-2 truncate"><span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ background:c.color }}/>{c.name}</span>
+                  <span className="font-semibold tabular-nums shrink-0">{fmtTHB(c.value)}</span>
+                </div>
+                <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                  <div className="h-full" style={{ width:(c.value/maxCat)*100+'%', background:c.color }}/>
+                </div>
               </div>
-              <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                <div className="h-full" style={{ width:(c.value/38200)*100+'%', background:c.color }}/>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center text-slate-400 text-[12px] py-8">ยังไม่มีข้อมูลหมวดหมู่</div>
+        )}
       </div>
     </div>
   )
@@ -579,6 +642,7 @@ function MStats() {
 
 function MProfile() {
   const { navigate } = useMA()
+  const { orgName, orgPlan, orgRole } = useLive()
   return (
     <div className="h-full overflow-y-auto pb-24">
       <div className="px-4 pt-2 pb-3">
@@ -586,11 +650,14 @@ function MProfile() {
       </div>
       <div className="px-4 mt-2">
         <div className="bg-white dark:bg-slate-900 rounded-[16px] p-4 flex items-center gap-3 shadow-sm shadow-slate-900/5">
-          <div className="h-14 w-14 rounded-full bg-gradient-to-br from-brand-400 to-brand-700 text-white flex items-center justify-center font-bold text-[20px]">N</div>
+          <div className="h-14 w-14 rounded-full bg-gradient-to-br from-brand-400 to-brand-700 text-white flex items-center justify-center font-bold text-[20px]">
+            {orgName ? orgName[0].toUpperCase() : "?"}
+          </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[14px] font-bold truncate">นภัทร เจริญพร</div>
-            <div className="text-[11px] text-slate-500 truncate">napat@abc.co.th</div>
-            <span className="inline-block mt-1 text-[9.5px] font-semibold bg-brand-500/10 text-brand-600 dark:text-brand-300 px-2 py-0.5 rounded-full">Pro · Owner</span>
+            <div className="text-[14px] font-bold truncate">{orgName}</div>
+            <span className="inline-block mt-1 text-[9.5px] font-semibold bg-brand-500/10 text-brand-600 dark:text-brand-300 px-2 py-0.5 rounded-full capitalize">
+              {orgPlan} · {orgRole}
+            </span>
           </div>
           <Icons.ChevronRight size={16} className="text-slate-400"/>
         </div>
@@ -598,18 +665,16 @@ function MProfile() {
       <div className="px-4 mt-3">
         <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5 px-1">องค์กร</div>
         <div className="bg-white dark:bg-slate-900 rounded-[14px] divide-y divide-slate-100 dark:divide-slate-800 shadow-sm shadow-slate-900/5">
-          {SAMPLE_ORGS.map((o,i) => (
-            <div key={o.id} className="px-3.5 py-2.5 flex items-center gap-3">
-              <span className="h-8 w-8 rounded-[8px] bg-gradient-to-br from-brand-400 to-brand-700 text-white flex items-center justify-center">
-                {o.type==='personal' ? <Icons.User size={14}/> : <Icons.Building size={14}/>}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[12px] font-semibold truncate">{o.name}</div>
-                <div className="text-[9.5px] uppercase tracking-wider text-slate-400 font-medium">{o.plan} · {o.role}</div>
-              </div>
-              {i===0 && <Icons.Check size={15} className="text-brand-500"/>}
+          <div className="px-3.5 py-2.5 flex items-center gap-3">
+            <span className="h-8 w-8 rounded-[8px] bg-gradient-to-br from-brand-400 to-brand-700 text-white flex items-center justify-center">
+              <Icons.Building size={14}/>
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="text-[12px] font-semibold truncate">{orgName}</div>
+              <div className="text-[9.5px] uppercase tracking-wider text-slate-400 font-medium">{orgPlan} · {orgRole}</div>
             </div>
-          ))}
+            <Icons.Check size={15} className="text-brand-500"/>
+          </div>
         </div>
       </div>
       <div className="px-4 mt-3 space-y-2">
@@ -1110,10 +1175,11 @@ function DownloadCard({ kind }: { kind: 'ios'|'android'|'huawei' }) {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export function MobileClient() {
+export function MobileClient(props: MobileClientProps) {
   const [platform, setPlatform] = useState<'ios'|'android'>('ios')
 
   return (
+    <LiveDataCtx.Provider value={props}>
     <div className="p-6 lg:p-7 space-y-10 max-w-[1400px] animate-fade-in">
 
       {/* Hero */}
@@ -1239,5 +1305,6 @@ export function MobileClient() {
         </div>
       </div>
     </div>
+    </LiveDataCtx.Provider>
   )
 }

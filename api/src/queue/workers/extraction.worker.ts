@@ -5,18 +5,22 @@ import { createClient }     from "../../lib/supabase"
 import { notifyLineAfterExtraction } from "../../routes/line"
 
 export interface ExtractionJobData {
-  documentId:     string
-  organizationId: string
+  documentId: string
+  orgId:      string   // matches queueExtraction payload key
+  /** @deprecated use orgId */
+  organizationId?: string
 }
 
 export function startExtractionWorker() {
   const worker = new Worker<ExtractionJobData>(
     "extraction",
     async (job: Job<ExtractionJobData>) => {
-      const { documentId, organizationId } = job.data
+      const { documentId } = job.data
+      // Support both key names for backwards-compatibility
+      const orgId = job.data.orgId ?? job.data.organizationId ?? ""
       console.log(`[extraction] Processing document ${documentId}`)
 
-      const result = await runPipeline(documentId, organizationId)
+      const result = await runPipeline(documentId, orgId)
 
       if (!result.success) {
         throw new Error(result.error ?? "Pipeline failed")
@@ -29,12 +33,8 @@ export function startExtractionWorker() {
       return result
     },
     {
-      connection: redisConnection,
+      connection:  redisConnection,
       concurrency: 3,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 5000 },
-      },
     }
   )
 
@@ -49,10 +49,10 @@ export function startExtractionWorker() {
         .update({ status: "failed", updated_at: new Date().toISOString() })
         .eq("id", job.data.documentId)
 
-      // Notify LINE user of failure
+      const orgId = job.data.orgId ?? job.data.organizationId ?? ""
       await notifyLineAfterExtraction(
         job.data.documentId,
-        job.data.organizationId,
+        orgId,
         { success: false, error: err.message }
       ).catch(() => {})
     }
@@ -61,10 +61,10 @@ export function startExtractionWorker() {
   worker.on("completed", async (job, result) => {
     console.log(`[extraction] Job ${job.id} completed`)
 
-    // Notify LINE user of success
+    const orgId = job.data.orgId ?? job.data.organizationId ?? ""
     await notifyLineAfterExtraction(
       job.data.documentId,
-      job.data.organizationId,
+      orgId,
       result
     ).catch(() => {})
   })

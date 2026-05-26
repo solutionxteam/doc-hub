@@ -1,3 +1,12 @@
+/**
+ * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
+ * All rights reserved.
+ *
+ * This software is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this software,
+ * in whole or in part, is strictly prohibited without prior written permission.
+ */
+
 import { createServerClient, type CookieOptions } from "@supabase/ssr"
 import { NextResponse, type NextRequest }          from "next/server"
 
@@ -28,6 +37,8 @@ export async function middleware(request: NextRequest) {
     || pathname.startsWith("/register")
     || pathname.startsWith("/auth/")
     || pathname.startsWith("/api/webhooks/")
+    || pathname.startsWith("/privacy-policy")
+    || pathname.startsWith("/cookie-policy")
     || pathname === "/"
 
   if (!user && !isPublic) {
