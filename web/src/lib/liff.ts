@@ -8,8 +8,16 @@
  * Use case: bill/trip participants join via LIFF link instead of /connect CODE
  *
  * Setup required (one-time):
- *   1. LINE Developers Console → Messaging API channel → LIFF tab
- *   2. Add LIFF app with endpoint: https://slippy.ai/liff
+ *   1. LINE Developers Console → LINE Login channel → LIFF tab
+ *   2. Add LIFF app with endpoint = the BARE app origin, e.g.
+ *        https://slippy-solutionxteams-projects.vercel.app
+ *      ⚠️ Do NOT append "/liff" to the endpoint — every helper below
+ *      (makeLiffGateUrl/makeLiffSportUrl/makeLiffTripUrl/makeLiffJoinUrl)
+ *      already builds links like `https://liff.line.me/{liffId}/liff/home`.
+ *      LINE appends that trailing path onto whatever Endpoint URL is
+ *      registered, so an endpoint of ".../liff" produces a broken
+ *      ".../liff/liff/home" (404) which then bounces to the desktop
+ *      `/login` page — exactly the "redirects to the main login" symptom.
  *   3. Copy LIFF ID → NEXT_PUBLIC_LIFF_ID in .env.local
  */
 
