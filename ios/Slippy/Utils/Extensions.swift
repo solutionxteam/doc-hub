@@ -26,7 +26,7 @@ struct StatusBadge: View {
     let status: String
     var body: some View {
         Text(statusLabel(status))
-            .font(.system(size: 11, weight: .700))
+            .font(.system(size: 11, weight: .bold))
             .foregroundColor(statusColor(for: status))
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(statusColor(for: status).opacity(0.12))
@@ -55,7 +55,7 @@ struct InitialsAvatar: View {
         ZStack {
             Circle().fill(color)
             Text(text)
-                .font(.system(size: size * 0.35, weight: .800))
+                .font(.system(size: size * 0.35, weight: .heavy))
                 .foregroundColor(.white)
         }
         .frame(width: size, height: size)

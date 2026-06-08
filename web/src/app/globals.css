@@ -112,3 +112,12 @@
   background-image: radial-gradient(rgba(99,102,241,0.18) 1px, transparent 1px);
   background-size: 22px 22px;
 }
+
+/* Landing page animations */
+@keyframes ld-float   { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+@keyframes ld-tilt    { 0%,100%{transform:rotate(-7deg)} 50%{transform:rotate(-2deg)} }
+@keyframes ld-blink   { 0%,42%,48%,100%{transform:scaleY(1)} 45%{transform:scaleY(0.12)} }
+@keyframes ld-pulse   { 0%,100%{opacity:0.35;transform:scale(0.95)} 50%{opacity:0.55;transform:scale(1.05)} }
+@keyframes ld-ring    { 0%{transform:scale(0.9);opacity:0.6} 100%{transform:scale(1.6);opacity:0} }
+@keyframes ld-fade-up { 0%{opacity:0;transform:translateY(8px)} 100%{opacity:1;transform:translateY(0)} }
+@keyframes hero-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }

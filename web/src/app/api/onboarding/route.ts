@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { slugify }           from "@/lib/utils"
-import { getDocQuota }       from "@/lib/plans"
+import { getDocQuota, getOrgQuota } from "@/lib/plans"
 
 export async function POST(req: NextRequest) {
   // ── 1. Verify caller is authenticated (anon client reads session cookie) ──
@@ -42,6 +42,36 @@ export async function POST(req: NextRequest) {
   // ── 3. All writes via admin client (bypasses RLS) ────────────────────────
   const admin = createAdminClient()
 
+  // ── 3-pre. Check org quota for this user ──────────────────────────────────
+  // Count how many orgs this user already owns
+  const { count: ownedCount } = await admin
+    .from("organization_members")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .eq("role", "owner")
+
+  // Get user's plan from their first org (or default to free)
+  const { data: firstMembership } = await admin
+    .from("organization_members")
+    .select("organizations(plan)")
+    .eq("user_id", user.id)
+    .eq("role", "owner")
+    .limit(1)
+    .single()
+
+  const userPlan = (firstMembership?.organizations as any)?.plan ?? "free"
+  const orgQuota = getOrgQuota(userPlan)
+  const owned    = ownedCount ?? 0
+
+  if (orgQuota > 0 && owned >= orgQuota) {
+    return NextResponse.json({
+      error: `แผน ${userPlan.toUpperCase()} สร้างได้สูงสุด ${orgQuota} องค์กร (ตอนนี้มี ${owned} แล้ว) · อัปเกรดแผนเพื่อสร้างเพิ่ม`,
+      code:  "ORG_QUOTA_EXCEEDED",
+      quota: orgQuota,
+      owned,
+    }, { status: 403 })
+  }
+
   // 3a. Upsert user profile
   const { error: profileError } = await admin
     .from("users")
@@ -62,6 +92,7 @@ export async function POST(req: NextRequest) {
     .insert({
       name:            orgName.trim(),
       slug,
+      account_type:    accountType,          // 'business' | 'personal'
       tax_id:          taxId?.trim() || null,
       address:         address?.trim() || null,
       fiscal_year_end: fiscalYearEnd,

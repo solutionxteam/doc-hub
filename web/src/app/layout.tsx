@@ -58,7 +58,7 @@ export const metadata: Metadata = {
   openGraph: {
     type:        "website",
     locale:      "th_TH",
-    url:         "https://slippy.app",
+    url:         "https://slippy.ai",
     siteName:    "Slippy",
     title:       "Slippy — ระบบจัดการเอกสารบัญชีอัจฉริยะ",
     description: "อ่านใบเสร็จด้วย AI · จัดหมวดหมู่อัตโนมัติ · Export รายงาน · เชื่อม LINE",

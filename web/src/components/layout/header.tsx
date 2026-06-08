@@ -10,11 +10,10 @@
  */
 
 import { useTranslations } from "next-intl"
-import { useTheme } from "next-themes"
 import { Icons } from "@/components/ui/icons"
-import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
+import { LangThemeToggle } from "@/components/ui/lang-theme-toggle"
 
 interface HeaderProps {
   title:             string
@@ -23,7 +22,6 @@ interface HeaderProps {
 }
 
 export function Header({ title, locale, onMobileMenuClick }: HeaderProps) {
-  const { theme, setTheme } = useTheme()
   const t = useTranslations("settings")
   const router = useRouter()
   const [unreadCount, setUnreadCount] = useState(0)
@@ -46,11 +44,6 @@ export function Header({ title, locale, onMobileMenuClick }: HeaderProps) {
     return () => { cancelled = true; clearInterval(interval) }
   }, [])
 
-  const switchLocale = async (newLocale: string) => {
-    document.cookie = `locale=${newLocale};path=/;max-age=31536000`
-    router.refresh()
-  }
-
   return (
     <header className="sticky top-0 z-30 flex items-center gap-3
       h-[57px] px-4 lg:px-7 border-b bg-card/80 backdrop-blur-sm">
@@ -72,47 +65,8 @@ export function Header({ title, locale, onMobileMenuClick }: HeaderProps) {
 
       <div className="flex items-center gap-1">
 
-        {/* Language switcher — hidden on very small screens */}
-        <div className="hidden sm:flex items-center rounded-lg border bg-muted/50 p-0.5">
-          {["th", "en"].map((l) => (
-            <button
-              key={l}
-              onClick={() => switchLocale(l)}
-              className={cn(
-                "px-2.5 py-1 text-xs font-medium rounded-md transition-all",
-                locale === l
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {l === "th" ? "ไทย" : "EN"}
-            </button>
-          ))}
-        </div>
-
-        {/* Theme switcher */}
-        <div className="flex items-center rounded-lg border bg-muted/50 p-0.5 sm:ml-1">
-          {[
-            { value: "light",  icon: Icons.Sun },
-            { value: "system", icon: Icons.Monitor },
-            { value: "dark",   icon: Icons.Moon },
-          ].map(({ value, icon: Icon }) => (
-            <button
-              key={value}
-              onClick={() => setTheme(value)}
-              title={t(value as any)}
-              suppressHydrationWarning
-              className={cn(
-                "p-1.5 rounded-md transition-all",
-                theme === value
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Icon size={14} />
-            </button>
-          ))}
-        </div>
+        {/* Lang + Theme toggle — shared component */}
+        <LangThemeToggle locale={locale} className="hidden sm:flex" />
 
         {/* Notifications */}
         <button

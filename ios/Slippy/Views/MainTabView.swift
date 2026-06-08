@@ -39,3 +39,14 @@ struct MainTabView: View {
         .tint(Color.brand500)
     }
 }
+
+#if DEBUG
+#Preview {
+    let vm = AuthViewModel(_preview: true)
+    vm.setPreviewData(
+        profile: UserProfile(id: "u1", email: "demo@slippy.app", fullName: "สมชาย ใจดี", avatarUrl: nil),
+        org: Organization(id: "demo-org", name: "บริษัท Demo จำกัด", plan: "pro", docQuota: 200, docUsed: 45)
+    )
+    return MainTabView().environmentObject(vm)
+}
+#endif

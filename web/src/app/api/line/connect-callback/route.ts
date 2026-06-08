@@ -1,0 +1,113 @@
+/**
+ * GET /api/line/connect-callback
+ * LINE Login OAuth callback — เชื่อม LINE account กับ org โดยอัตโนมัติ
+ */
+import { NextRequest, NextResponse } from "next/server"
+import { cookies }            from "next/headers"
+import { createAdminClient }  from "@/lib/supabase/admin"
+
+const LINE_TOKEN_URL   = "https://api.line.me/oauth2/v2.1/token"
+const LINE_PROFILE_URL = "https://api.line.me/v2/profile"
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
+  const code  = searchParams.get("code")
+  const state = searchParams.get("state")
+  const error = searchParams.get("error")
+
+  const appUrl      = process.env.NEXT_PUBLIC_APP_URL ?? "https://localhost:3000"
+  const cookieStore = await cookies()
+  const savedState  = cookieStore.get("line_connect_state")?.value
+  const userId      = cookieStore.get("line_connect_user")?.value
+
+  cookieStore.delete("line_connect_state")
+  cookieStore.delete("line_connect_user")
+
+  const redirectBack = `${appUrl}/settings/integrations`
+
+  // Error from LINE
+  if (error) {
+    return NextResponse.redirect(`${redirectBack}?error=line_cancelled`)
+  }
+
+  // CSRF check
+  if (!state || !savedState || state !== savedState) {
+    return NextResponse.redirect(`${redirectBack}?error=state_mismatch`)
+  }
+
+  if (!code || !userId) {
+    return NextResponse.redirect(`${redirectBack}?error=missing_params`)
+  }
+
+  // Decode orgId from state
+  let orgId: string
+  try {
+    const decoded = JSON.parse(Buffer.from(state, "base64url").toString())
+    orgId = decoded.orgId
+    if (!orgId) throw new Error("no orgId")
+  } catch {
+    return NextResponse.redirect(`${redirectBack}?error=invalid_state`)
+  }
+
+  const channelId     = process.env.LINE_LOGIN_CHANNEL_ID
+  const channelSecret = process.env.LINE_LOGIN_CHANNEL_SECRET
+  if (!channelId || !channelSecret) {
+    return NextResponse.redirect(`${redirectBack}?error=not_configured`)
+  }
+
+  try {
+    // ── Exchange code → access token ──────────────────────────────
+    const tokenRes = await fetch(LINE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type:    "authorization_code",
+        code,
+        redirect_uri:  `${appUrl}/api/line/connect-callback`,
+        client_id:     channelId,
+        client_secret: channelSecret,
+      }),
+    })
+    if (!tokenRes.ok) {
+      console.error("[LINE connect-callback] token exchange failed:", await tokenRes.text())
+      return NextResponse.redirect(`${redirectBack}?error=token_failed`)
+    }
+    const { access_token } = await tokenRes.json() as { access_token: string }
+
+    // ── Get LINE profile ──────────────────────────────────────────
+    const profileRes = await fetch(LINE_PROFILE_URL, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    })
+    if (!profileRes.ok) {
+      return NextResponse.redirect(`${redirectBack}?error=profile_failed`)
+    }
+    const profile = await profileRes.json() as {
+      userId:      string
+      displayName: string
+      pictureUrl?: string
+    }
+
+    // ── Upsert line_connections ───────────────────────────────────
+    const admin = createAdminClient()
+    const { error: upsertErr } = await admin
+      .from("line_connections")
+      .upsert({
+        line_user_id:    profile.userId,
+        user_id:         userId,
+        organization_id: orgId,
+        display_name:    profile.displayName,
+      }, { onConflict: "line_user_id" })
+
+    if (upsertErr) {
+      console.error("[LINE connect-callback] upsert failed:", upsertErr)
+      return NextResponse.redirect(`${redirectBack}?error=upsert_failed`)
+    }
+
+    console.log(`[LINE connect-callback] ✅ Connected ${profile.displayName} (${profile.userId.slice(0,8)}…) → org ${orgId.slice(0,8)}`)
+    return NextResponse.redirect(`${redirectBack}?connected=true&name=${encodeURIComponent(profile.displayName)}`)
+
+  } catch (err: any) {
+    console.error("[LINE connect-callback] unexpected:", err.message)
+    return NextResponse.redirect(`${redirectBack}?error=unexpected`)
+  }
+}

@@ -28,12 +28,15 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           ⚙ Admin Console
         </span>
         <nav className="flex gap-1 ml-4">
-          <a
-            href="/admin/plans"
-            className="px-3 py-1.5 rounded-md text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
-          >
-            Plans &amp; Pricing
-          </a>
+          {[
+            { href: "/admin/plans",  label: "Plans & Pricing" },
+            { href: "/admin/config", label: "System Config"   },
+          ].map(({ href, label }) => (
+            <a key={href} href={href}
+              className="px-3 py-1.5 rounded-md text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors">
+              {label}
+            </a>
+          ))}
         </nav>
         <span className="ml-auto text-xs text-zinc-500">
           {profile.full_name ?? profile.email}

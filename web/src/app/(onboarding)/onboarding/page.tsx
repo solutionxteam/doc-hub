@@ -39,11 +39,15 @@ export default async function OnboardingPage() {
     ?? (user.user_metadata?.full_name as string | undefined)
     ?? ""
 
+  // If email is a LINE placeholder, treat as empty so user can enter real email
+  const isPlaceholderEmail = (user.email ?? "").includes("@noreply.slippy.app")
+    || (user.email ?? "").includes("@line.slippy.app")
+
   return (
     <OnboardingWizard
       userId={user.id}
       defaultName={defaultName}
-      email={user.email ?? ""}
+      email={isPlaceholderEmail ? "" : (user.email ?? "")}
     />
   )
 }

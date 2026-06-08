@@ -6,14 +6,7 @@ struct AnalyticsView: View {
 
     private let catColors: [Color] = [.brand500, Color(hex: "#8b5cf6"),
                                        Color(hex: "#06b6d4"), Color(hex: "#10b981"),
-                                       Color(hex: "#f97316")]
-    private let categories = [
-        ("ค่า Software / Cloud", 38200.0),
-        ("ค่าเช่าสำนักงาน",      35000.0),
-        ("ค่าเดินทาง",           18700.0),
-        ("ของใช้สำนักงาน",       14250.0),
-        ("อาหารและเครื่องดื่ม",  13420.0),
-    ]
+                                       Color(hex: "#f97316"), Color(hex: "#ec4899")]
 
     var body: some View {
         NavigationStack {
@@ -45,10 +38,10 @@ struct AnalyticsView: View {
     private var yearTotalCard: some View {
         VStack(spacing: 8) {
             Text("รวมทั้งปี")
-                .font(.system(size: 13, weight: .600))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.white.opacity(0.75))
             Text(fmtTHB(vm.yearTotal))
-                .font(.system(size: 34, weight: .900))
+                .font(.system(size: 34, weight: .black))
                 .foregroundColor(.white)
             Text("จาก \(vm.chartData.count) เดือน")
                 .font(.system(size: 12))
@@ -68,7 +61,7 @@ struct AnalyticsView: View {
     private var barChartCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("ค่าใช้จ่ายรายเดือน")
-                .font(.system(size: 14, weight: .700))
+                .font(.system(size: 14, weight: .bold))
                 .foregroundColor(Color.textPrimary)
 
             MiniBarChart(data: vm.chartData)
@@ -80,7 +73,7 @@ struct AnalyticsView: View {
                         .foregroundColor(Color.textSecondary)
                     Spacer()
                     Text(fmtTHB(latest.spend))
-                        .font(.system(size: 14, weight: .700))
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundColor(Color.brand500)
                 }
                 .padding(.top, 4)
@@ -93,22 +86,23 @@ struct AnalyticsView: View {
     private var categoryCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("แยกตามหมวดหมู่")
-                .font(.system(size: 14, weight: .700))
+                .font(.system(size: 14, weight: .bold))
                 .foregroundColor(Color.textPrimary)
 
-            let catTotal = categories.reduce(0) { $0 + $1.1 }
-            ForEach(Array(categories.enumerated()), id: \.offset) { i, cat in
+            let cats = vm.catBreakdown.isEmpty ? [("ไม่มีข้อมูล", 1.0)] : vm.catBreakdown
+            let catTotal = cats.reduce(0) { $0 + $1.value }
+            ForEach(Array(cats.enumerated()), id: \.offset) { i, cat in
                 VStack(spacing: 4) {
                     HStack {
                         Circle()
                             .fill(catColors[i % catColors.count])
                             .frame(width: 8, height: 8)
-                        Text(cat.0)
-                            .font(.system(size: 12, weight: .500))
+                        Text(cat.name)
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(Color.textPrimary)
                         Spacer()
-                        Text(fmtTHB(cat.1))
-                            .font(.system(size: 12, weight: .700))
+                        Text(vm.catBreakdown.isEmpty ? "—" : fmtTHB(cat.value))
+                            .font(.system(size: 12, weight: .bold))
                             .foregroundColor(Color.textPrimary)
                     }
                     GeometryReader { geo in
@@ -116,7 +110,7 @@ struct AnalyticsView: View {
                             Capsule().fill(Color.border).frame(height: 4)
                             Capsule()
                                 .fill(catColors[i % catColors.count])
-                                .frame(width: geo.size.width * (cat.1 / catTotal), height: 4)
+                                .frame(width: geo.size.width * (catTotal > 0 ? cat.value / catTotal : 0), height: 4)
                         }
                     }
                     .frame(height: 4)
@@ -130,7 +124,7 @@ struct AnalyticsView: View {
     private var monthlyListCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("สรุปรายเดือน")
-                .font(.system(size: 14, weight: .700))
+                .font(.system(size: 14, weight: .bold))
                 .foregroundColor(Color.textPrimary)
                 .padding(.bottom, 12)
 
@@ -141,7 +135,7 @@ struct AnalyticsView: View {
                         .foregroundColor(Color.textPrimary)
                     Spacer()
                     Text(fmtTHB(month.spend))
-                        .font(.system(size: 13, weight: .700))
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundColor(Color.textPrimary)
                 }
                 .padding(.vertical, 10)
@@ -153,6 +147,17 @@ struct AnalyticsView: View {
         .sectionCard()
     }
 }
+
+#if DEBUG
+#Preview {
+    let vm = AuthViewModel(_preview: true)
+    vm.setPreviewData(
+        profile: UserProfile(id: "u1", email: "demo@slippy.app", fullName: "สมชาย ใจดี", avatarUrl: nil),
+        org: Organization(id: "demo-org", name: "บริษัท Demo จำกัด", plan: "pro", docQuota: 200, docUsed: 45)
+    )
+    return AnalyticsView().environmentObject(vm)
+}
+#endif
 
 // MARK: – Mini bar chart
 struct MiniBarChart: View {

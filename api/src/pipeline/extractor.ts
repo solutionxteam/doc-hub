@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk"
+import { runOcr }  from "./ocr"
 
 /**
  * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
@@ -10,8 +11,26 @@ const getClient = () => {
   if (!_client) _client = new Anthropic()  // read env at call time, not module load
   return _client
 }
-const MODEL     = "claude-haiku-4-5-20251001" // explicit version for caching eligibility
-const MAX_PAGES = 3                            // receipts/invoices are almost always 1-2 pages
+
+// ── Model tiers ───────────────────────────────────────────────────────────────
+// Cost: Sonnet ~฿0.91/doc, Haiku ~฿0.22/doc
+// Smart routing cuts avg cost to ~฿0.43/doc (53% savings)
+const MODEL_SONNET = "claude-sonnet-4-5"          // complex docs, low confidence
+const MODEL_HAIKU  = "claude-haiku-4-5-20251001"  // simple receipts, high-confidence path
+
+// Doc types that are "simple" enough for Haiku-only extraction:
+//   consumer_receipt (LINE MAN, Grab), receipt (ใบเสร็จธรรมดา)
+// These have predictable layouts and few fields — Haiku handles them well.
+// Complex types (tax_invoice_full, receipt_with_tax, credit_note) → always Sonnet.
+const HAIKU_ELIGIBLE_CATEGORIES = new Set([
+  "consumer_receipt",
+  "receipt",
+])
+
+// Max tokens per model pass
+const MAX_TOKENS_HAIKU  = 1500   // consumer receipts don't need much
+const MAX_TOKENS_SONNET = 4096   // full tax invoices can be dense
+const MAX_PAGES = 3                              // receipts/invoices are almost always 1-2 pages
 
 // ── Document category ─────────────────────────────────────────────────────────
 //
@@ -145,7 +164,8 @@ export interface ExtractedDocument {
 // ── System prompt ─────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `\
 You are an expert Thai accounting document parser with deep knowledge of Thai tax law.
-Analyse the document image(s) and return ONLY valid JSON — no markdown, no extra text.
+Analyse the document image(s) and return ONLY valid JSON — absolutely no markdown code fences,
+no \`\`\`json blocks, no explanatory text before or after, no comments. Just raw JSON.
 
 ## Document classification
 
@@ -203,8 +223,15 @@ wet markets, coffee carts, hospitals (OPD receipts), etc.
 - Thai Buddhist calendar: subtract 543 (e.g. "2567" → 2024, "15 ม.ค. 2566" → "2023-01-15")
 - Thai month names: ม.ค./มกราคม=01, ก.พ.=02, มี.ค.=03, เม.ย.=04, พ.ค.=05, มิ.ย.=06,
   ก.ค.=07, ส.ค.=08, ก.ย.=09, ต.ค.=10, พ.ย.=11, ธ.ค.=12
+- Date formats to recognize (any = YYYY-MM-DD output):
+  • "02/06/2569", "2/6/69", "06-02-69" → date fields with / - separators
+  • "02 มิ.ย. 2569", "2 มิถุนายน 2569" → Thai month name
+  • "20250602", "250602" → compact YYYYMMDD or YYMMDD
+  • Time printed next to date "12:17" is NOT the date — look for DD/MM/YYYY pattern
+  • Hospital receipts: look for วันที่, Date, เวลา fields
 - VAT = 7%. WHT rates: 1%, 1.5%, 3%, 5%
 - For consumer_receipt: delivery_fee = ค่าจัดส่ง, discount_amount = ส่วนลด/คูปอง
+- If image appears rotated, try to read text at correct orientation. Look for numbers in all directions.
 - Unknown fields → null. Unknown amounts → 0
 - Confidence 0.0–1.0 reflects actual certainty. Never fabricate data.`
 
@@ -242,34 +269,215 @@ const DOC_SCHEMA = `{
   "extraction_issues": []
 }`
 
+// ── Pre-classifier: ตัดสินใจ model tier ก่อน extraction ─────────────────────
+/**
+ * Quick doc-type classifier using Haiku (~0.05 วินาที, ถูกมาก).
+ * Returns the likely doc_category so we can decide whether to use Haiku or Sonnet.
+ * Combined with OCR pass — does both in one call to save one round-trip.
+ */
+interface OcrAndCategory {
+  ocrText:     string
+  category:    string   // doc_category guess
+  useHaiku:    boolean  // true = safe to use Haiku for extraction
+}
+
+async function ocrAndClassify(imageBlocks: Anthropic.ImageBlockParam[]): Promise<OcrAndCategory> {
+  try {
+    const res = await getClient().messages.create({
+      model:      MODEL_HAIKU,
+      max_tokens: 2200,
+      messages: [{
+        role:    "user",
+        content: [
+          ...imageBlocks,
+          {
+            type: "text",
+            text: `Read ALL text in this Thai receipt/invoice image AND classify it.
+
+CRITICAL — OCR errors to avoid:
+- Digits: never confuse 1↔7, 3↔8, 0↔6, 6↔5 — check curves carefully
+- Thai chars: น vs ม, เ vs แ, ใ vs ไ — look carefully
+- Tax IDs: always 13 digits
+- Dates: Buddhist year 2567=2024, 2568=2025, 2569=2026 — transcribe as-is
+
+Output in this EXACT format (two sections):
+CATEGORY: <one of: tax_invoice_full|tax_invoice_simplified|receipt_with_tax|receipt|consumer_receipt|invoice|credit_note|other>
+OCR:
+<all visible text in order: store name, address, tax ID, doc number, date, items, amounts, payment method>`,
+          },
+        ],
+      }],
+    })
+
+    const text = (res.content as Anthropic.ContentBlock[])
+      .filter((c): c is Anthropic.TextBlock => c.type === "text")
+      .map(c => c.text).join("").trim()
+
+    // Parse CATEGORY: line
+    const catMatch = text.match(/^CATEGORY:\s*(\S+)/m)
+    const category = catMatch?.[1]?.trim() ?? "other"
+
+    // Parse OCR section
+    const ocrMatch = text.match(/^OCR:\s*\n?([\s\S]+)/m)
+    const ocrText  = ocrMatch?.[1]?.trim() ?? text
+
+    const useHaiku = HAIKU_ELIGIBLE_CATEGORIES.has(category)
+
+    return { ocrText, category, useHaiku }
+  } catch {
+    return { ocrText: "", category: "other", useHaiku: false }
+  }
+}
+
+// ── Pass 1: OCR — extract raw text ────────────────────────────────────────────
+/**
+ * First pass: read all visible text from the image using Haiku (fast + cheap).
+ * Returns raw transcribed text that Pass 2 uses alongside the image.
+ * Two-pass dramatically improves accuracy: Claude doesn't have to OCR + structure
+ * simultaneously — it can focus on each task independently.
+ */
+async function ocrPass(imageBlocks: Anthropic.ImageBlockParam[]): Promise<string> {
+  try {
+    const res = await getClient().messages.create({
+      model:      "claude-haiku-4-5-20251001",   // pinned snapshot for consistency
+      max_tokens: 2048,
+      messages: [{
+        role:    "user",
+        content: [
+          ...imageBlocks,
+          {
+            type: "text",
+            text: `Read ALL text visible in this Thai receipt/invoice image. Transcribe every character exactly as printed.
+
+CRITICAL — Thai thermal receipt OCR errors to avoid:
+- Digits: never confuse 1↔7, 3↔8, 0↔6, 6↔5 — look carefully at curves and strokes
+- Thai chars: น vs ม (different right stroke), เ vs แ (แ has extra stroke), ใ vs ไ (different left curve)
+- Prices: always read all digits e.g. "1,234.56" not "1,23.56" — never drop digits
+- Tax IDs: always 13 digits — if you see fewer, recount
+- Dates: Buddhist year 2567=2024, 2568=2025, 2569=2026 — do NOT convert, transcribe as-is
+- Store names: copy exactly including ห้าง/บมจ/บจก prefixes
+
+Output sections in this order (skip if absent):
+1. ชื่อร้าน/บริษัท (store/company name + branch)
+2. ที่อยู่ (address)
+3. เลขประจำตัวผู้เสียภาษี (tax ID — 13 digits)
+4. เลขที่เอกสาร (doc number)
+5. วันที่ (date as printed)
+6. รายการสินค้า (line items with qty × price = amount)
+7. ยอดรวม subtotal / VAT / ส่วนลด / ค่าจัดส่ง / ยอดสุทธิ
+8. วิธีชำระเงิน (payment method)
+9. ข้อความอื่นๆ (other visible text)
+
+Output ONLY the transcribed text, no commentary.`,
+          },
+        ],
+      }],
+    })
+    return (res.content as Anthropic.ContentBlock[])
+      .filter((c): c is Anthropic.TextBlock => c.type === "text")
+      .map(c => c.text)
+      .join("")
+      .trim()
+  } catch {
+    return ""   // if OCR pass fails, continue with image-only pass 2
+  }
+}
+
+// Confidence threshold below which we trigger Google Document AI fallback
+const FALLBACK_CONFIDENCE_THRESHOLD = 0.65
+
+// ── Google Document AI fallback ────────────────────────────────────────────────
+/**
+ * Run Google Document AI on the first page when Claude confidence is low.
+ * Adds a third source of OCR text as a "tiebreaker" — if both Haiku and DocAI
+ * agree on a value that Sonnet initially got wrong, Sonnet should trust them.
+ * Returns empty string if DocAI is not configured or fails.
+ */
+async function docAiPass(pageBuffer: Buffer): Promise<string> {
+  const hasConfig = process.env.GOOGLE_DOC_AI_PROCESSOR_ID &&
+    process.env.GOOGLE_APPLICATION_CREDENTIALS &&
+    process.env.GOOGLE_DOC_AI_PROCESSOR_ID !== "..."
+
+  if (!hasConfig) return ""
+
+  try {
+    const page = await runOcr(pageBuffer)
+    return page.blocks
+      .filter(b => b.confidence > 0.5 && b.text.trim())
+      .sort((a, b) => (b.boundingBox?.[1] ?? 0) - (a.boundingBox?.[1] ?? 0))  // top-to-bottom
+      .map(b => b.text)
+      .join("\n")
+      .trim()
+  } catch (err) {
+    console.warn("[docai-fallback] failed:", (err as Error).message)
+    return ""
+  }
+}
+
 // ── Main extraction function ───────────────────────────────────────────────────
 /**
- * Accept PNG buffers (one per page, already preprocessed) and return
- * structured accounting data using Claude Haiku vision — no OCR step needed.
+ * Three-pass extraction (Pass 3 is conditional):
+ *   Pass 1 (Haiku):         OCR — extract raw text from image
+ *   Pass 2 (Sonnet):        Structure — given raw text + image, produce JSON
+ *   Pass 3 (Google DocAI):  Fallback — only when confidence < 0.65; adds second OCR opinion
+ *                            then re-runs Pass 2 with both OCR sources
  *
- * @param pageBuffers  Preprocessed page images (JPEG)
- * @param fewShotBlock Optional few-shot examples string from fetchFewShotExamples()
+ * @param pageBuffers     Preprocessed page images (JPEG)
+ * @param fewShotBlock    Few-shot + corrections + error patterns block
+ * @param qualityWarnings Image quality warnings (blur, exposure) from image-quality.ts
+ * @param modelTier       Plan-based AI tier: "haiku" | "smart" | "priority"
+ *                        haiku    = Haiku-only (Free/Starter plans — lowest cost)
+ *                        smart    = Auto-route by doc type (Pro/Team — balanced)
+ *                        priority = Sonnet always (Business/Enterprise — highest accuracy)
  */
 export async function extractDocument(
-  pageBuffers: Buffer[],
-  fewShotBlock = "",
+  pageBuffers:     Buffer[],
+  fewShotBlock     = "",
+  qualityWarnings: string[] = [],
+  modelTier:       "haiku" | "smart" | "priority" = "smart",
 ): Promise<ExtractedDocument | ExtractedDocument[]> {
-  // Cap to MAX_PAGES to control cost
   const pages = pageBuffers.slice(0, MAX_PAGES)
 
-  // Build image content blocks — JPEG keeps payload ~5× smaller than PNG
   const imageBlocks: Anthropic.ImageBlockParam[] = pages.map(buf => ({
     type:   "image",
-    source: {
-      type:       "base64",
-      media_type: "image/jpeg",
-      data:       buf.toString("base64"),
-    },
+    source: { type: "base64", media_type: "image/jpeg", data: buf.toString("base64") },
   }))
 
-  const textBlock: Anthropic.TextBlockParam = {
+  // ── Pass 1: OCR + Classify (Haiku — cheap, fast) ────────────────────────────
+  // Combined: transcribe text AND guess doc type in one call
+  const { ocrText: rawOcrText, category: predictedCategory, useHaiku: autoHaiku } = await ocrAndClassify(imageBlocks)
+
+  // Apply plan-tier override on top of auto-routing:
+  //   priority → always Sonnet (ignore auto classification)
+  //   haiku    → always Haiku (even for complex docs — lower-cost plans accept this trade-off)
+  //   smart    → use the auto-classification result
+  const useHaiku = modelTier === "priority" ? false
+                 : modelTier === "haiku"    ? true
+                 : autoHaiku
+  console.log(`[extractor] tier=${modelTier} category=${predictedCategory} → ${useHaiku ? "Haiku" : "Sonnet"}`)
+
+  // ── Build helpers ─────────────────────────────────────────────────────────────
+  const buildOcrSection = (haikuText: string, docAiText = "") => {
+    if (!haikuText && !docAiText) return ""
+    const parts: string[] = []
+    if (haikuText) parts.push(`### Haiku OCR:\n\`\`\`\n${haikuText}\n\`\`\``)
+    if (docAiText) parts.push(`### Google Document AI OCR (second opinion):\n\`\`\`\n${docAiText}\n\`\`\``)
+    return `## OCR Pre-reads (reference only — IMAGE takes priority over all OCR text)
+**When OCR text and image disagree, ALWAYS trust the image.**
+**When two OCR sources agree on a value, it is very likely correct.**
+Common OCR errors: 1↔7, 3↔8, 0↔6 in prices/tax IDs; น↔ม, เ↔แ in Thai words.
+${parts.join("\n")}
+
+`
+  }
+
+  const qualityBlock = qualityWarnings.length
+    ? qualityWarnings.join("\n") + "\n\n"
+    : ""
+
+  const buildTextBlock = (ocrSection: string): Anthropic.TextBlockParam => ({
     type: "text",
-    text: `${fewShotBlock}First, check if this image contains MORE THAN ONE separate document (e.g. multiple receipts photographed together).
+    text: `${qualityBlock}${ocrSection}${fewShotBlock}First, check if this image contains MORE THAN ONE separate document (e.g. multiple receipts photographed together).
 
 If the image is unreadable or not a financial document, return valid JSON with confidence_score near 0 and explain in extraction_issues.
 
@@ -284,38 +492,93 @@ Return ONLY a JSON object with this wrapper:
   "documents": [ ${DOC_SCHEMA}, ... ]
 }
 
+Cross-check ALL OCR pre-reads above against the image. When two OCR sources agree, prefer that value.
 Extract all accounting data from ${pages.length > 1 ? `these ${pages.length} document pages` : "this document"}.`,
+  })
+
+  // ── Pass 2: Extraction — Haiku or Sonnet based on doc complexity ─────────────
+  //
+  // ROUTING LOGIC:
+  //   consumer_receipt / receipt  → Haiku (predictable layout, few fields, ~฿0.22/doc)
+  //   everything else             → Sonnet (complex, needs tax accuracy, ~฿0.91/doc)
+  //   useHaiku + confidence < 0.7 → escalate to Sonnet automatically
+  //
+  const runExtraction = async (
+    textBlock: Anthropic.TextBlockParam,
+    model: string,
+    maxTokens: number,
+  ): Promise<string> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response: Anthropic.Message = await (getClient().messages.create as any)(
+      {
+        model,
+        max_tokens: maxTokens,
+        system: [
+          {
+            type:          "text",
+            text:          SYSTEM_PROMPT,
+            cache_control: { type: "ephemeral" },   // cache TTL 5 min — saves ~300ms + tokens
+          },
+        ],
+        messages: [{ role: "user", content: [...imageBlocks, textBlock] }],
+      },
+      { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
+    )
+    return (response.content as Anthropic.ContentBlock[])
+      .filter((c): c is Anthropic.TextBlock => c.type === "text")
+      .map((c: Anthropic.TextBlock) => c.text)
+      .join("")
   }
 
-  // Use prompt caching — system prompt is identical every call, saves ~300-500ms.
-  // SDK 0.24.x: cache_control is not in types → cast; beta opt-in via header not body param.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const response: Anthropic.Message = await (getClient().messages.create as any)(
-    {
-      model:      MODEL,
-      max_tokens: 1200,
-      system: [
-        {
-          type:          "text",
-          text:          SYSTEM_PROMPT,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages: [{ role: "user", content: [...imageBlocks, textBlock] }],
-    },
-    { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
-  )
+  // Alias for DocAI fallback (always Sonnet)
+  const runSonnetExtraction = (textBlock: Anthropic.TextBlockParam) =>
+    runExtraction(textBlock, MODEL_SONNET, MAX_TOKENS_SONNET)
 
-  const raw = (response.content as Anthropic.ContentBlock[])
-    .filter((c): c is Anthropic.TextBlock => c.type === "text")
-    .map((c: Anthropic.TextBlock) => c.text)
-    .join("")
+  const ocrSection = buildOcrSection(rawOcrText)
+  const textBlock  = buildTextBlock(ocrSection)
 
-  // Strip markdown code fences if present
-  const jsonStr = raw
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/i, "")
-    .trim()
+  // First extraction — Haiku or Sonnet
+  const firstModel     = useHaiku ? MODEL_HAIKU  : MODEL_SONNET
+  const firstMaxTokens = useHaiku ? MAX_TOKENS_HAIKU : MAX_TOKENS_SONNET
+  const response = await runExtraction(textBlock, firstModel, firstMaxTokens)
+
+  // ── Robust JSON extraction ────────────────────────────────────────────────────
+  // Claude Sonnet sometimes adds explanatory text or markdown fences even when
+  // instructed not to. We try multiple strategies in order:
+  function extractJson(text: string): string {
+    // Strategy 1a: full fence match ```json ... ```
+    const fullFence = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/i)
+    if (fullFence?.[1]?.trim()) {
+      const inner = fullFence[1].trim()
+      if (inner.startsWith("{") || inner.startsWith("[")) return inner
+    }
+
+    // Strategy 1b: opening fence only (response truncated before closing ```)
+    // e.g. response was cut off mid-JSON by max_tokens
+    const openFence = text.match(/```(?:json)?\s*\n?([\s\S]+)/i)
+    if (openFence?.[1]?.trim()) {
+      const inner = openFence[1].replace(/```[\s\S]*$/, "").trim()
+      if (inner.startsWith("{") || inner.startsWith("[")) return inner
+    }
+
+    // Strategy 2: find the first { or [ and slice to the last matching closer
+    const objStart = text.indexOf("{")
+    const arrStart = text.indexOf("[")
+    if (objStart === -1 && arrStart === -1) return text.trim()
+
+    const jsonStart = (objStart === -1) ? arrStart
+      : (arrStart === -1) ? objStart
+      : Math.min(objStart, arrStart)
+
+    const opener  = text[jsonStart]
+    const closer  = opener === "{" ? "}" : "]"
+    const jsonEnd = text.lastIndexOf(closer)
+
+    // Return whatever we found — JSON.parse will catch malformed JSON
+    return jsonEnd > jsonStart
+      ? text.slice(jsonStart, jsonEnd + 1).trim()
+      : text.slice(jsonStart).trim()   // truncated — no closer found
+  }
 
   // ── Parse response ────────────────────────────────────────────────────────────
   type RawDoc = Omit<ExtractedDocument, "doc_type" | "vat_claimable" | "expense_claimable" | "business_use_note">
@@ -333,17 +596,67 @@ Extract all accounting data from ${pages.length > 1 ? `these ${pages.length} doc
     extraction_issues: [],
   }
 
-  try {
-    const json = JSON.parse(jsonStr)
-    // Detect multi-doc wrapper: { multi_doc: true, documents: [...] }
-    if (json?.multi_doc === true && Array.isArray(json.documents)) {
-      rawParsed = json.documents as RawDoc[]
-    } else {
-      rawParsed = json as RawDoc
+  const parseRaw = (text: string): RawDoc | RawDoc[] => {
+    const jsonStr2 = extractJson(text)
+    try {
+      const json = JSON.parse(jsonStr2)
+      if (json?.multi_doc === true && Array.isArray(json.documents)) return json.documents as RawDoc[]
+      return json as RawDoc
+    } catch {
+      const hint = text.slice(0, 200).trim() || "AI ไม่สามารถประมวลผลเอกสารนี้ได้"
+      return { ...FALLBACK_DOC, extraction_issues: [`AI ตอบกลับในรูปแบบที่ไม่คาดคิด: ${hint}`] }
     }
-  } catch {
-    const hint = raw.slice(0, 200).trim() || "AI ไม่สามารถประมวลผลเอกสารนี้ได้"
-    rawParsed = { ...FALLBACK_DOC, extraction_issues: [`AI ตอบกลับในรูปแบบที่ไม่คาดคิด: ${hint}`] }
+  }
+
+  rawParsed = parseRaw(response)
+
+  const firstConfidence = Array.isArray(rawParsed)
+    ? rawParsed[0]?.confidence_score ?? 0
+    : rawParsed.confidence_score ?? 0
+
+  // ── Haiku → Sonnet escalation ─────────────────────────────────────────────────
+  // If Haiku was used but result is low-confidence, automatically escalate to Sonnet.
+  // Cost: adds ~฿0.69 for this doc, but beats sending user a wrong result.
+  const HAIKU_ESCALATE_THRESHOLD = 0.72
+  if (useHaiku && firstConfidence < HAIKU_ESCALATE_THRESHOLD) {
+    console.log(`[extractor] Haiku confidence ${firstConfidence.toFixed(2)} < ${HAIKU_ESCALATE_THRESHOLD} — escalating to Sonnet`)
+    const escalatedResponse = await runSonnetExtraction(buildTextBlock(ocrSection))
+    const escalatedParsed   = parseRaw(escalatedResponse)
+    const escalatedConf     = Array.isArray(escalatedParsed)
+      ? escalatedParsed[0]?.confidence_score ?? 0
+      : escalatedParsed.confidence_score ?? 0
+    if (escalatedConf >= firstConfidence) {
+      rawParsed = escalatedParsed
+      console.log(`[extractor] Sonnet escalation: ${firstConfidence.toFixed(2)} → ${escalatedConf.toFixed(2)}`)
+    }
+  }
+
+  // ── Pass 3: Google Document AI fallback ──────────────────────────────────────
+  // Triggered when: confidence < threshold even after potential escalation
+  // Adds a second OCR source and re-runs Sonnet — costs ~2x but saves low-confidence docs
+  const currentConfidence = Array.isArray(rawParsed)
+    ? rawParsed[0]?.confidence_score ?? 0
+    : rawParsed.confidence_score ?? 0
+
+  if (currentConfidence < FALLBACK_CONFIDENCE_THRESHOLD) {
+    console.log(`[extractor] confidence ${currentConfidence.toFixed(2)} < ${FALLBACK_CONFIDENCE_THRESHOLD} — triggering Google DocAI fallback`)
+    const docAiText = await docAiPass(pages[0])
+    if (docAiText) {
+      const retryRaw = await runSonnetExtraction(
+        buildTextBlock(buildOcrSection(rawOcrText, docAiText))
+      )
+      const retryParsed = parseRaw(retryRaw)
+      const retryConfidence = Array.isArray(retryParsed)
+        ? retryParsed[0]?.confidence_score ?? 0
+        : retryParsed.confidence_score ?? 0
+
+      if (retryConfidence > currentConfidence) {
+        console.log(`[extractor] DocAI fallback improved: ${currentConfidence.toFixed(2)} → ${retryConfidence.toFixed(2)}`)
+        rawParsed = retryParsed
+      } else {
+        console.log(`[extractor] DocAI fallback did not improve (${retryConfidence.toFixed(2)}) — keeping current result`)
+      }
+    }
   }
 
   // ── Normalise single or multiple documents ─────────────────────────────────
@@ -362,6 +675,38 @@ Extract all accounting data from ${pages.length > 1 ? `these ${pages.length} doc
     parsed.vat_amount      = toNum(parsed.vat_amount)
     parsed.wht_amount      = toNum(parsed.wht_amount)
     parsed.total_amount    = toNum(parsed.total_amount)
+
+    // ── Math auto-correction ─────────────────────────────────────────────────
+    // If total_amount exists but subtotal is missing, derive subtotal from total
+    if (parsed.total_amount > 0 && parsed.subtotal === 0 && parsed.vat_amount > 0) {
+      parsed.subtotal = +(parsed.total_amount - parsed.vat_amount + parsed.discount_amount).toFixed(2)
+    }
+    // If subtotal exists but total is missing, derive total
+    if (parsed.subtotal > 0 && parsed.total_amount === 0) {
+      parsed.total_amount = +(parsed.subtotal + parsed.vat_amount + parsed.delivery_fee
+        - parsed.discount_amount - parsed.wht_amount).toFixed(2)
+    }
+    // If total and subtotal exist but VAT is missing and category implies VAT 7%
+    const VAT_CAT = new Set(["tax_invoice_full","tax_invoice_simplified","receipt_with_tax","receipt"])
+    if (parsed.vat_amount === 0 && parsed.total_amount > 0 && VAT_CAT.has(parsed.doc_category ?? "")) {
+      // Check if total ≈ subtotal * 1.07 (VAT inclusive)
+      const impliedVat = +(parsed.total_amount * 7 / 107).toFixed(2)
+      const implied107 = +(parsed.total_amount / 1.07 * 0.07).toFixed(2)
+      if (impliedVat > 0 && impliedVat === implied107) {
+        // VAT was probably embedded — don't guess, leave at 0
+      }
+    }
+    // Boost confidence_score if math checks out
+    if (parsed.total_amount > 0 && parsed.subtotal > 0) {
+      const computed = +(parsed.subtotal + parsed.vat_amount + parsed.delivery_fee
+        - parsed.discount_amount - parsed.wht_amount).toFixed(2)
+      const diff = Math.abs(computed - parsed.total_amount)
+      const pct  = diff / parsed.total_amount
+      if (pct < 0.01) {
+        // Math is correct → boost confidence
+        parsed.confidence_score = Math.min(1, parsed.confidence_score + 0.05)
+      }
+    }
 
     const category = (parsed.doc_category ?? "other") as DocCategory
     return {

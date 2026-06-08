@@ -145,12 +145,12 @@ export function TaxPageClient({ orgId }: { orgId: string }) {
   const totalNetAll    = vatHistory.reduce((s, r) => s + (r.net_vat ?? 0), 0)
 
   return (
-    <div className="p-6 lg:p-7 space-y-5 max-w-[1600px] animate-fade-in">
+    <div className="space-y-5 animate-fade-in">
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
         <div>
-          <h2 className="text-[20px] font-bold text-foreground">ภาษี (VAT & WHT)</h2>
-          <p className="text-[12.5px] text-muted-foreground mt-0.5">สรุปภาษีซื้อ ภาษีขาย และภาษีหัก ณ ที่จ่าย</p>
+          <h2 className="text-[20px] font-bold text-foreground">ภาษีองค์กร (VAT & WHT)</h2>
+          <p className="text-[12.5px] text-muted-foreground mt-0.5">ภ.พ.30 ภาษีมูลค่าเพิ่ม · ภ.ง.ด.3/53 ภาษีหัก ณ ที่จ่ายนิติบุคคล</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <input

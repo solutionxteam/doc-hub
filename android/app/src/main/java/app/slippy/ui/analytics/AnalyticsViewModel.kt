@@ -8,15 +8,18 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
 
 data class ChartMonth(val label: String, val spend: Double)
 
 data class AnalyticsUiState(
-    val isLoading : Boolean          = true,
-    val chartData : List<ChartMonth> = emptyList(),
-    val yearTotal : Double           = 0.0,
-    val error     : String?          = null,
+    val isLoading    : Boolean                     = true,
+    val chartData    : List<ChartMonth>            = emptyList(),
+    val yearTotal    : Double                      = 0.0,
+    val catBreakdown : List<Pair<String, Double>>  = emptyList(),
+    val error        : String?                     = null,
 )
 
 private val MONTHS_TH = listOf("ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.",
@@ -35,20 +38,51 @@ class AnalyticsViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = authRepo.currentUserId() ?: return@launch
             try {
-                val member     = authRepo.fetchOrgMembership(userId)
-                val summaries  = docRepo.fetchMonthSummaries(member.organizationId)
+                val member    = authRepo.fetchOrgMembership(userId)
+                val summaries = docRepo.fetchMonthSummaries(member.organizationId)
+
                 val chartData = if (summaries.isNotEmpty()) {
                     summaries.map { s ->
                         val monthIdx = (s.month.takeLast(2).toIntOrNull() ?: 1) - 1
                         ChartMonth(MONTHS_TH.getOrNull(monthIdx) ?: s.month, s.grandTotal)
                     }
                 } else { fallbackData() }
+
                 val total = chartData.sumOf { it.spend }
-                _state.value = _state.value.copy(isLoading = false, chartData = chartData, yearTotal = total)
+
+                // Category breakdown – fetch all docs for current year
+                val yearStart = SimpleDateFormat("yyyy-01-01", Locale.US).format(Date())
+                val docs = docRepo.fetchFiltered(
+                    orgId = member.organizationId,
+                    limit = 1000
+                )
+
+                val skippedStatuses = listOf("pending", "failed", "rejected", "processing")
+                val catMap = mutableMapOf<String, Double>()
+                docs.filter { it.status !in skippedStatuses }
+                    .filter { it.docDate?.compareTo(yearStart) ?: -1 >= 0 }
+                    .forEach { doc ->
+                        val key = doc.category ?: "อื่นๆ"
+                        catMap[key] = (catMap[key] ?: 0.0) + (doc.totalAmount ?: 0.0)
+                    }
+                val cats = catMap.entries
+                    .sortedByDescending { it.value }
+                    .take(6)
+                    .map { it.key to it.value }
+
+                _state.value = _state.value.copy(
+                    isLoading    = false,
+                    chartData    = chartData,
+                    yearTotal    = total,
+                    catBreakdown = cats
+                )
             } catch (e: Exception) {
                 val fb = fallbackData()
                 _state.value = _state.value.copy(
-                    isLoading = false, chartData = fb, yearTotal = fb.sumOf { it.spend })
+                    isLoading = false,
+                    chartData = fb,
+                    yearTotal = fb.sumOf { it.spend }
+                )
             }
         }
     }

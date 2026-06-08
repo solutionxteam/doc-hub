@@ -1,0 +1,3 @@
+# Monorepo
+
+apps/, packages/, services/.

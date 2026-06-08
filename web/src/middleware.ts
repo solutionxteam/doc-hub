@@ -36,9 +36,12 @@ export async function middleware(request: NextRequest) {
   const isPublic = pathname.startsWith("/login")
     || pathname.startsWith("/register")
     || pathname.startsWith("/auth/")
+    || pathname.startsWith("/api/auth/")      // OAuth callbacks (LINE, etc.)
     || pathname.startsWith("/api/webhooks/")
     || pathname.startsWith("/privacy-policy")
     || pathname.startsWith("/cookie-policy")
+    || pathname.startsWith("/liff/")          // LIFF mini-apps — auth via LINE profile, not Supabase session
+    || pathname.startsWith("/api/liff/")      // LIFF backing APIs (join, bill-info, sport-groups, …)
     || pathname === "/"
 
   if (!user && !isPublic) {

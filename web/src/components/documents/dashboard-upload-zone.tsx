@@ -141,9 +141,217 @@ async function normalizeFile(file: File): Promise<File> {
   return file
 }
 
+// ─── Feature flags ────────────────────────────────────────────────────────────
+// Set to true when the feature is ready for users
+const SHOW_CAMERA = false   // camera on notebook is unreliable — hidden until mobile/HTTPS UX is polished
+const SHOW_EMAIL  = false   // email ingestion requires DNS/mailbox setup — hidden until configured
+
 // ─── Accepted types ───────────────────────────────────────────────────────────
 const ACCEPT_ATTR = "application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
 const MAX_BYTES   = 20 * 1024 * 1024   // 20 MB
+
+// ─── Document validator ───────────────────────────────────────────────────────
+/**
+ * Two-tier validation before uploading:
+ *   Tier 1 — client-side Canvas analysis (instant, free)
+ *   Tier 2 — Claude Haiku API call (fast, ~$0.0001)
+ *
+ * Returns { ok: true } if the image looks like a document,
+ * or { ok: false, reason } to reject without queuing OCR.
+ */
+async function validateDocument(
+  file: File
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+
+  // PDF → skip visual check, PDFs are almost always documents
+  if (file.type === "application/pdf") return { ok: true }
+
+  // ── Tier 1: quick Canvas pixel analysis ────────────────────────────────────
+  const clientScore = await new Promise<number>((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const W = 120, H = 90
+      const canvas = document.createElement("canvas")
+      canvas.width = W; canvas.height = H
+      const ctx = canvas.getContext("2d", { willReadFrequently: true })!
+      ctx.drawImage(img, 0, 0, W, H)
+      const { data } = ctx.getImageData(0, 0, W, H)
+
+      let bright = 0, edges = 0
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const i = (y * W + x) * 4
+          const lum = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2]
+          if (lum > 170) bright++
+          if (x < W - 1 && y < H - 1) {
+            const ir = (y * W + x + 1) * 4
+            const ib = ((y + 1) * W + x) * 4
+            const lumR = 0.299*data[ir] + 0.587*data[ir+1] + 0.114*data[ir+2]
+            const lumB = 0.299*data[ib] + 0.587*data[ib+1] + 0.114*data[ib+2]
+            if (Math.abs(lum - lumR) > 25 || Math.abs(lum - lumB) > 25) edges++
+          }
+        }
+      }
+      const brightPct = bright / (W * H)
+      const edgePct   = edges  / (W * H)
+      const score =
+        (brightPct > 0.10 && brightPct < 0.95 ? 50 : 0) +
+        (edgePct > 0.03 ? Math.min(50, edgePct * 700) : 0)
+      resolve(score)
+      URL.revokeObjectURL(img.src)
+    }
+    img.onerror = () => resolve(50)  // can't decode → allow through
+    img.src = URL.createObjectURL(file)
+  })
+
+  // Clearly not a document (solid color, dark photo, etc.)
+  if (clientScore < 20) {
+    return { ok: false, reason: "รูปนี้ไม่ใช่เอกสาร กรุณาส่งรูปใบเสร็จหรือเอกสารทางการเงิน" }
+  }
+
+  // ── Tier 2: Claude Haiku vision validation ──────────────────────────────────
+  // Resize to small thumbnail to minimise token cost
+  const thumbBase64 = await new Promise<string>((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const MAX = 512
+      const ratio = Math.min(MAX / img.width, MAX / img.height, 1)
+      const canvas = document.createElement("canvas")
+      canvas.width  = Math.round(img.width  * ratio)
+      canvas.height = Math.round(img.height * ratio)
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height)
+      resolve(canvas.toDataURL("image/jpeg", 0.7).split(",")[1])
+      URL.revokeObjectURL(img.src)
+    }
+    img.onerror = () => resolve("")
+    img.src = URL.createObjectURL(file)
+  })
+
+  if (!thumbBase64) return { ok: true }  // can't resize → allow through
+
+  try {
+    const res = await fetch("/api/documents/validate", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ imageBase64: thumbBase64, mediaType: "image/jpeg" }),
+    })
+    if (!res.ok) return { ok: true }  // API error → don't block upload
+
+    const { isDocument, reason } = await res.json() as { isDocument: boolean; reason: string }
+    if (!isDocument) {
+      return {
+        ok:     false,
+        reason: reason || "รูปนี้ไม่ใช่เอกสาร กรุณาถ่ายรูปใบเสร็จหรือเอกสารทางการเงิน",
+      }
+    }
+  } catch {
+    return { ok: true }  // network error → allow through
+  }
+
+  return { ok: true }
+}
+
+// ─── Document auto-detect hook ───────────────────────────────────────────────
+function useDocumentDetector(
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  active: boolean,
+  onAutoCapture: () => void,
+) {
+  const [detected,   setDetected]   = useState(false)
+  const [holdPct,    setHoldPct]    = useState(0)   // 0–100 progress toward auto-capture
+  const [countdown,  setCountdown]  = useState(0)   // seconds remaining before capture
+  const canvasRef    = useRef<HTMLCanvasElement | null>(null)
+  const holdRef      = useRef(0)   // consecutive high-confidence frames
+
+  // Tuning constants
+  const INTERVAL_MS  = 250         // analysis frequency
+  const SCORE_THRESH = 65          // stricter — must be clearly a document
+  const HOLD_NEEDED  = 20          // 20 × 250ms = 5 seconds of stable detection
+  const DECAY_RATE   = 3           // frames subtracted per non-detected frame (fast reset)
+
+  useEffect(() => {
+    if (!active) {
+      setDetected(false); setHoldPct(0); setCountdown(0)
+      holdRef.current = 0
+      return
+    }
+
+    if (!canvasRef.current) canvasRef.current = document.createElement("canvas")
+
+    const interval = setInterval(() => {
+      const video  = videoRef.current
+      const canvas = canvasRef.current!
+      if (!video || video.readyState < 2 || video.videoWidth === 0) return
+
+      // Sample at slightly higher resolution for better accuracy
+      const W = 120, H = 90
+      canvas.width = W; canvas.height = H
+      const ctx = canvas.getContext("2d", { willReadFrequently: true })!
+      ctx.drawImage(video, 0, 0, W, H)
+      const { data } = ctx.getImageData(0, 0, W, H)
+
+      // Bright pixels — paper
+      let bright = 0
+      for (let i = 0; i < data.length; i += 4) {
+        const lum = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2]
+        if (lum > 175) bright++
+      }
+      const brightPct = bright / (W * H)
+
+      // Edge pixels — text / printed lines
+      let edges = 0
+      for (let y = 0; y < H - 1; y++) {
+        for (let x = 0; x < W - 1; x++) {
+          const i   = (y * W + x) * 4
+          const ir  = (y * W + x + 1) * 4
+          const ib  = ((y + 1) * W + x) * 4
+          const lumC = 0.299*data[i]  + 0.587*data[i+1]  + 0.114*data[i+2]
+          const lumR = 0.299*data[ir] + 0.587*data[ir+1] + 0.114*data[ir+2]
+          const lumB = 0.299*data[ib] + 0.587*data[ib+1] + 0.114*data[ib+2]
+          if (Math.abs(lumC - lumR) > 30 || Math.abs(lumC - lumB) > 30) edges++
+        }
+      }
+      const edgePct = edges / (W * H)
+
+      // Score: needs BOTH a bright region AND visible text/edges
+      // brightPct 0.20–0.88: large white area (not all-white/all-dark)
+      // edgePct > 0.05: text or lines are visible
+      const brightScore = (brightPct > 0.20 && brightPct < 0.88) ? 50 : 0
+      const edgeScore   = edgePct > 0.05 ? Math.min(50, edgePct * 600) : 0
+      const score       = brightScore + edgeScore
+
+      // Both conditions must contribute for a high-confidence result
+      const found = score >= SCORE_THRESH && brightScore > 0 && edgeScore > 10
+
+      setDetected(found)
+
+      if (found) {
+        holdRef.current = Math.min(holdRef.current + 1, HOLD_NEEDED)
+      } else {
+        // Reset quickly if document leaves frame
+        holdRef.current = Math.max(0, holdRef.current - DECAY_RATE)
+      }
+
+      const pct = Math.round((holdRef.current / HOLD_NEEDED) * 100)
+      setHoldPct(pct)
+
+      // Countdown display (seconds remaining)
+      const remaining = Math.ceil(((HOLD_NEEDED - holdRef.current) * INTERVAL_MS) / 1000)
+      setCountdown(holdRef.current > 0 ? remaining : 0)
+
+      if (holdRef.current >= HOLD_NEEDED) {
+        holdRef.current = 0
+        setHoldPct(0)
+        setCountdown(0)
+        onAutoCapture()
+      }
+    }, INTERVAL_MS)
+
+    return () => clearInterval(interval)
+  }, [active, videoRef, onAutoCapture])
+
+  return { detected, holdPct, countdown }
+}
 
 // ─── Camera modal (shared between compact and full) ───────────────────────────
 interface CameraModalProps {
@@ -155,11 +363,17 @@ interface CameraModalProps {
   onCapture:       () => void
   onFlip:          () => void
   onFallback:      () => void
+  onRetry:         () => void
 }
 function CompactCameraModal({
   videoRef, cameraError, facingMode, hasMultipleCams,
-  onClose, onCapture, onFlip, onFallback,
+  onClose, onCapture, onFlip, onFallback, onRetry,
 }: CameraModalProps) {
+  const { detected, holdPct, countdown } = useDocumentDetector(
+    videoRef,
+    !cameraError,   // only run when camera is working
+    onCapture,      // auto-capture callback
+  )
   return (
     <div
       className="fixed inset-0 z-50 bg-black flex flex-col"
@@ -167,15 +381,69 @@ function CompactCameraModal({
     >
       <div className="flex-1 relative overflow-hidden">
         {cameraError ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center">
-            <Camera className="w-12 h-12 text-white/40" />
-            <p className="text-white/70 text-sm whitespace-pre-line">{cameraError}</p>
-            <button
-              onClick={onFallback}
-              className="mt-2 px-4 py-2 rounded-[10px] bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-colors"
-            >
-              เลือกไฟล์แทน
-            </button>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 overflow-y-auto py-8">
+            <Camera className="w-10 h-10 text-white/30 shrink-0" />
+
+            <p className="text-white font-semibold text-sm text-center">กล้องถูกบล็อก</p>
+
+            {/* Mac-specific step-by-step */}
+            <div className="w-full max-w-[300px] space-y-2">
+
+              {/* Step 1 — macOS System (most common culprit) */}
+              <div className="bg-white/10 rounded-xl p-3.5 border border-white/10">
+                <p className="text-white/90 text-xs font-bold mb-2 flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-full bg-violet-500 text-white text-[9px] flex items-center justify-center shrink-0 font-black">1</span>
+                  เปิดสิทธิ์ macOS (สำคัญที่สุด)
+                </p>
+                <div className="text-[11px] text-white/65 space-y-0.5 leading-relaxed">
+                  <p>Apple Menu → <span className="text-white/85 font-medium">System Settings</span></p>
+                  <p>→ Privacy &amp; Security → <span className="text-white/85 font-medium">Camera</span></p>
+                  <p>→ เปิด toggle ข้าง <span className="text-white/85 font-medium">Google Chrome</span> ✓</p>
+                </div>
+              </div>
+
+              {/* Step 2 — Browser permission */}
+              <div className="bg-white/8 rounded-xl p-3.5 border border-white/8">
+                <p className="text-white/90 text-xs font-bold mb-2 flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-full bg-indigo-500 text-white text-[9px] flex items-center justify-center shrink-0 font-black">2</span>
+                  เปิดสิทธิ์ Chrome
+                </p>
+                <div className="text-[11px] text-white/65 space-y-0.5 leading-relaxed">
+                  <p>คลิก <span className="text-white/85 font-medium">🔒</span> ในแถบ URL</p>
+                  <p>→ Camera → <span className="text-white/85 font-medium">Allow</span></p>
+                </div>
+              </div>
+
+              {/* Step 3 — Reload */}
+              <div className="bg-white/8 rounded-xl p-3 border border-white/8">
+                <p className="text-white/70 text-[11px] flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-full bg-white/20 text-white text-[9px] flex items-center justify-center shrink-0 font-black">3</span>
+                  กด <span className="text-white/85 font-medium">รีโหลดหน้า</span> แล้วลองใหม่
+                </p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col gap-2 w-full max-w-[300px]">
+              <button
+                onClick={() => window.location.reload()}
+                className="w-full py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold transition-colors"
+              >
+                🔄 รีโหลดหน้า
+              </button>
+              <button
+                onClick={onRetry}
+                className="w-full py-2 rounded-xl bg-white/12 hover:bg-white/20 text-white text-sm font-medium transition-colors"
+              >
+                ลองอีกครั้ง (ไม่ reload)
+              </button>
+              <button
+                onClick={onFallback}
+                className="w-full py-2 rounded-xl bg-white/6 hover:bg-white/12 text-white/60 text-sm transition-colors"
+              >
+                เลือกไฟล์แทน
+              </button>
+            </div>
           </div>
         ) : (
           <video
@@ -186,41 +454,103 @@ function CompactCameraModal({
         )}
         {!cameraError && (
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="w-[72%] max-w-sm aspect-[3/2] relative">
+            {/* Frame: 90% wide, A4-like ratio (√2 ≈ 1.414), capped so it doesn't overflow */}
+            <div className="w-[90%] max-w-2xl relative" style={{ aspectRatio: "1 / 1.2" }}>
+              {/* Dim overlay outside the frame */}
+              <div className="absolute -inset-[200%] bg-black/40" />
+
+              {/* Corner brackets — larger to match bigger frame */}
               {[
-                "top-0 left-0 border-t-2 border-l-2 rounded-tl-lg",
-                "top-0 right-0 border-t-2 border-r-2 rounded-tr-lg",
-                "bottom-0 left-0 border-b-2 border-l-2 rounded-bl-lg",
-                "bottom-0 right-0 border-b-2 border-r-2 rounded-br-lg",
+                "top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-xl",
+                "top-0 right-0 border-t-[3px] border-r-[3px] rounded-tr-xl",
+                "bottom-0 left-0 border-b-[3px] border-l-[3px] rounded-bl-xl",
+                "bottom-0 right-0 border-b-[3px] border-r-[3px] rounded-br-xl",
               ].map((cls, i) => (
-                <span key={i} className={cn("absolute w-6 h-6 border-white/70", cls)} />
+                <span
+                  key={i}
+                  className={cn(
+                    "absolute w-10 h-10 transition-colors duration-200",
+                    cls,
+                    detected ? "border-emerald-400" : "border-white/80"
+                  )}
+                />
               ))}
+
+              {/* Auto-capture progress bar at bottom of frame */}
+              {holdPct > 0 && (
+                <div className="absolute -bottom-3 left-0 right-0 h-1 bg-white/20 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-400 rounded-full transition-all duration-200"
+                    style={{ width: `${holdPct}%` }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}
+
+        {/* Top bar: close + status label */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm flex items-center justify-center transition-colors"
+          className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm flex items-center justify-center transition-colors z-10"
         >
           <X className="w-5 h-5 text-white" />
         </button>
         {!cameraError && (
-          <p className="absolute top-4 left-1/2 -translate-x-1/2 text-white/60 text-xs backdrop-blur-sm bg-black/30 px-3 py-1 rounded-full whitespace-nowrap">
-            จัดเอกสารให้อยู่ในกรอบ
-          </p>
+          <div
+            className={cn(
+              "absolute top-4 left-1/2 -translate-x-1/2 text-xs backdrop-blur-sm px-3 py-1.5 rounded-full whitespace-nowrap transition-all duration-200 flex items-center gap-1.5",
+              detected
+                ? "bg-emerald-500/80 text-white font-semibold"
+                : "bg-black/30 text-white/60"
+            )}
+          >
+            {detected ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                {holdPct > 0
+                  ? `ถ่ายใน ${countdown} วินาที… (${holdPct}%)`
+                  : "พบเอกสาร! นิ่งไว้สักครู่"
+                }
+              </>
+            ) : "ส่องกล้องที่เอกสาร"}
+          </div>
         )}
       </div>
-      <div className="shrink-0 bg-black/90 backdrop-blur-sm px-8 py-6 flex items-center justify-between safe-area-pb">
-        <div className="w-12 h-12 flex items-center justify-center">
-          <ZoomIn className="w-5 h-5 text-white/30" />
+
+      {/* Bottom controls */}
+      <div className="shrink-0 bg-black/90 backdrop-blur-sm px-8 py-5 flex items-center justify-between">
+        {/* Auto-detect badge */}
+        <div className="flex flex-col items-center gap-1 w-12">
+          <div className={cn(
+            "w-8 h-8 rounded-full flex items-center justify-center transition-colors",
+            detected ? "bg-emerald-500/20" : "bg-white/5"
+          )}>
+            <span className="text-base">{detected ? "🟢" : "⚪"}</span>
+          </div>
+          <span className="text-[9px] text-white/40 text-center leading-tight">
+            {detected ? "พบแล้ว" : "Auto"}
+          </span>
         </div>
+
+        {/* Shutter button */}
         <button
           onClick={onCapture}
           disabled={!!cameraError}
-          className="w-16 h-16 rounded-full border-4 border-white bg-white/10 hover:bg-white/25 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150 flex items-center justify-center shadow-lg shadow-black/50"
+          className={cn(
+            "w-16 h-16 rounded-full border-4 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150 flex items-center justify-center shadow-lg shadow-black/50",
+            detected
+              ? "border-emerald-400 bg-emerald-400/20 hover:bg-emerald-400/30"
+              : "border-white bg-white/10 hover:bg-white/25"
+          )}
         >
-          <div className="w-12 h-12 rounded-full bg-white" />
+          <div className={cn(
+            "w-12 h-12 rounded-full transition-colors",
+            detected ? "bg-emerald-400" : "bg-white"
+          )} />
         </button>
+
+        {/* Flip / spacer */}
         {hasMultipleCams ? (
           <button
             onClick={onFlip}
@@ -243,7 +573,7 @@ interface Props {
   compact?: boolean  // slim single-row strip for pages where upload is secondary
 }
 
-type Status = "idle" | "converting" | "uploading" | "processing" | "done"
+type Status = "idle" | "validating" | "converting" | "uploading" | "processing" | "done"
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) {
@@ -276,6 +606,19 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
   const processFile = useCallback(async (raw: File) => {
     if (raw.size > MAX_BYTES) {
       toast.error(`ไฟล์ใหญ่เกิน 20MB (${(raw.size / 1024 / 1024).toFixed(1)} MB)`)
+      return
+    }
+
+    // ── Validate before uploading ───────────────────────────────────────────
+    setStatus("validating")
+    setFileName(raw.name)
+    const validation = await validateDocument(raw)
+    if (!validation.ok) {
+      toast.error(validation.reason, {
+        duration:    6000,
+        description: "ระบบรับเฉพาะใบเสร็จ, ใบกำกับภาษี, บิล, สลิปโอนเงิน และเอกสารทางการเงินเท่านั้น",
+      })
+      setStatus("idle")
       return
     }
 
@@ -394,47 +737,85 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
     let active = true
 
     const start = async () => {
-      try {
-        // Stop any existing stream first
-        streamRef.current?.getTracks().forEach(t => t.stop())
+      // Stop any existing stream first
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      streamRef.current = null
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: facingMode }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-          audio: false,
-        })
-        if (!active) { stream.getTracks().forEach(t => t.stop()); return }
+      // ── Call getUserMedia directly — no permissions API pre-check ───────────
+      // The Permissions API is unreliable across browsers/OS and can return stale
+      // "denied" state even after the user has allowed camera. We rely solely on
+      // the getUserMedia error for accurate permission feedback.
+      let stream: MediaStream | null = null
 
-        streamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          videoRef.current.play().catch(() => {})
-        }
+      // Try simple first (works on all devices including laptops with only 1 camera)
+      const attempts = [
+        { video: true, audio: false },
+        { video: { facingMode: { ideal: facingMode } }, audio: false },
+      ] as const
 
-        // Detect if multiple cameras available (for flip button)
+      for (const constraints of attempts) {
         try {
-          const devices = await navigator.mediaDevices.enumerateDevices()
-          setHasMultipleCams(devices.filter(d => d.kind === "videoinput").length > 1)
-        } catch { /* non-critical */ }
+          stream = await navigator.mediaDevices.getUserMedia(constraints)
+          break   // success
+        } catch (err: unknown) {
+          const name = (err as { name?: string })?.name ?? ""
+          console.warn("[camera] attempt failed:", name, constraints)
 
-      } catch (err: unknown) {
-        if (!active) return
-        const name = (err as { name?: string })?.name ?? ""
-        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-          setCameraError("ไม่ได้รับอนุญาตให้ใช้กล้อง\nกรุณาอนุญาตในการตั้งค่าเบราว์เซอร์")
-        } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-          // No camera found — fall back to file input
-          stopStream()
-          setCameraOpen(false)
-          cameraInputRef.current?.click()
-        } else {
-          setCameraError("เปิดกล้องไม่ได้ กรุณาลองใหม่")
+          if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+            if (!active) return
+            // macOS: may also need system-level permission
+            const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent)
+            setCameraError(
+              isMac
+                ? "กล้องถูกบล็อก\n\nบน Mac: System Settings → Privacy → Camera → เปิด Chrome\nบน Browser: คลิก 🔒 → Camera → Allow\nแล้วโหลดหน้าใหม่"
+                : "กล้องถูกบล็อก\n\nคลิก 🔒 ในแถบ URL → Camera → Allow\nแล้วโหลดหน้าใหม่"
+            )
+            return
+          }
+          if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+            if (!active) return
+            stopStream(); setCameraOpen(false); cameraInputRef.current?.click()
+            return
+          }
+          // Other errors: try next constraint
         }
       }
+
+      if (!active || !stream) {
+        if (!active) return
+        setCameraError("เปิดกล้องไม่ได้ กรุณาลองใหม่หรือเลือกไฟล์แทน")
+        return
+      }
+
+      streamRef.current = stream
+      const attachStream = () => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream!
+          videoRef.current.play().catch(e => console.warn("[camera] play error:", e))
+        } else {
+          requestAnimationFrame(attachStream)
+        }
+      }
+      attachStream()
+
+      // Detect multiple cameras
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        if (active) setHasMultipleCams(devices.filter(d => d.kind === "videoinput").length > 1)
+      } catch { /* non-critical */ }
     }
 
     start()
     return () => { active = false; stopStream() }
   }, [cameraOpen, facingMode, stopStream])
+
+  // ── Camera: retry — close and reopen to get fresh getUserMedia ───────────────
+  const retryCamera = useCallback(() => {
+    stopStream()
+    setCameraError(null)
+    setCameraOpen(false)
+    setTimeout(() => setCameraOpen(true), 100)
+  }, [stopStream])
 
   // ── Camera: capture snapshot from video frame ──────────────────────────────
   const capturePhoto = useCallback(() => {
@@ -446,11 +827,13 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
     canvas.height = video.videoHeight
     canvas.getContext("2d")!.drawImage(video, 0, 0)
 
-    canvas.toBlob(blob => {
+    canvas.toBlob(async blob => {
       if (!blob) { toast.error("ถ่ายรูปไม่สำเร็จ"); return }
       const file = new File([blob], `photo_${Date.now()}.jpg`, { type: "image/jpeg" })
+      // Close camera first so user sees feedback immediately
       closeCamera()
-      processFile(file)
+      // processFile handles validation internally
+      await processFile(file)
     }, "image/jpeg", 0.92)
   }, [closeCamera, processFile])
 
@@ -468,6 +851,41 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
     if (file) processFile(file)
     e.target.value = ""
   }
+
+  // ── Paste handler (Cmd+V / Ctrl+V) ─────────────────────────────────────────
+  const handlePaste = useCallback((e: ClipboardEvent) => {
+    // Don't intercept when user is typing in an input/textarea
+    const tag = (e.target as HTMLElement)?.tagName
+    if (tag === "INPUT" || tag === "TEXTAREA") return
+    if (status !== "idle") return
+
+    const items = Array.from(e.clipboardData?.items ?? [])
+
+    // 1. Image in clipboard (e.g. screenshot, copy from browser)
+    const imageItem = items.find(i => i.type.startsWith("image/"))
+    if (imageItem) {
+      const blob = imageItem.getAsFile()
+      if (blob) {
+        const ext  = imageItem.type === "image/png" ? "png" : "jpg"
+        const file = new File([blob], `paste_${Date.now()}.${ext}`, { type: imageItem.type })
+        processFile(file)
+        return
+      }
+    }
+
+    // 2. File(s) in clipboard (copy file from Finder/Explorer)
+    const fileItem = items.find(i => i.kind === "file" && !i.type.startsWith("text/"))
+    if (fileItem) {
+      const file = fileItem.getAsFile()
+      if (file) { processFile(file); return }
+    }
+  }, [status, processFile])
+
+  // Listen for global paste event
+  useEffect(() => {
+    document.addEventListener("paste", handlePaste)
+    return () => document.removeEventListener("paste", handlePaste)
+  }, [handlePaste])
 
   const copyEmail = async () => {
     await navigator.clipboard.writeText(uploadEmail)
@@ -498,6 +916,7 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
   // ── Uploading / processing state ───────────────────────────────────────────
   if (status !== "idle") {
     const label =
+      status === "validating"  ? "กำลังตรวจสอบเอกสาร..." :
       status === "converting"  ? "กำลังแปลงไฟล์..." :
       status === "uploading"   ? "กำลังอัปโหลด..." :
       status === "processing"  ? "AI กำลังอ่านเอกสาร..." :
@@ -578,6 +997,7 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
             onCapture={capturePhoto}
             onFlip={() => setFacingMode(m => m === "environment" ? "user" : "environment")}
             onFallback={() => { setCameraError(null); cameraInputRef.current?.click(); setCameraOpen(false) }}
+            onRetry={retryCamera}
           />
         )}
 
@@ -612,7 +1032,7 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
                 {isDrag ? "วางไฟล์ที่นี่" : "ลากไฟล์มาวางที่นี่ หรือคลิกเพื่อเลือก"}
               </p>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                PDF · JPG · PNG · HEIC (สูงสุด 20MB)
+                PDF · JPG · PNG · HEIC · วาง Ctrl+V / ⌘V (สูงสุด 20MB)
               </p>
             </div>
 
@@ -632,19 +1052,21 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
                 <span className="hidden sm:inline">เลือกไฟล์</span>
               </button>
 
-              <button
-                type="button"
-                onClick={openCamera}
-                title="ถ่ายรูป"
-                className="h-8 w-8 rounded-[8px] border border-border bg-card
-                  hover:bg-muted hover:border-brand-300 active:scale-95
-                  text-muted-foreground hover:text-foreground transition-all
-                  inline-flex items-center justify-center"
-              >
-                <Camera className="w-3.5 h-3.5" />
-              </button>
+              {SHOW_CAMERA && (
+                <button
+                  type="button"
+                  onClick={openCamera}
+                  title="ถ่ายรูป"
+                  className="h-8 w-8 rounded-[8px] border border-border bg-card
+                    hover:bg-muted hover:border-brand-300 active:scale-95
+                    text-muted-foreground hover:text-foreground transition-all
+                    inline-flex items-center justify-center"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                </button>
+              )}
 
-              {orgSlug && (
+              {SHOW_EMAIL && orgSlug && (
                 <button
                   type="button"
                   title="ส่งทางอีเมล"
@@ -730,6 +1152,7 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
           onCapture={capturePhoto}
           onFlip={() => setFacingMode(m => m === "environment" ? "user" : "environment")}
           onFallback={() => { setCameraError(null); cameraInputRef.current?.click(); setCameraOpen(false) }}
+          onRetry={retryCamera}
         />
       )}
 
@@ -768,6 +1191,16 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
             <p className="mt-1 text-[13px] text-muted-foreground">
               หรือใช้ปุ่มด้านล่าง · รองรับ PDF, JPG, PNG, <strong>HEIC</strong> (สูงสุด 20MB)
             </p>
+            {/* Paste hint */}
+            <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full
+              bg-muted border border-border text-[11px] text-muted-foreground">
+              <kbd className="font-mono text-[10px] bg-card border border-border rounded px-1 py-0.5">
+                {typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌘" : "Ctrl"}
+              </kbd>
+              <span>+</span>
+              <kbd className="font-mono text-[10px] bg-card border border-border rounded px-1 py-0.5">V</kbd>
+              <span>วางรูปหรือ PDF จาก Clipboard ได้เลย</span>
+            </div>
 
             <div
               className="mt-5 flex items-center justify-center gap-2 flex-wrap"
@@ -784,19 +1217,21 @@ export function DashboardUploadZone({ orgId, orgSlug, compact = false }: Props) 
                 เลือกไฟล์
               </button>
 
-              <button
-                type="button"
-                onClick={openCamera}
-                className="h-10 px-4 rounded-[10px] border border-border bg-card
-                  hover:bg-muted hover:border-brand-300 active:scale-95
-                  text-foreground text-sm font-medium transition-all
-                  inline-flex items-center gap-2"
-              >
-                <Camera className="w-4 h-4" />
-                ถ่ายรูป
-              </button>
+              {SHOW_CAMERA && (
+                <button
+                  type="button"
+                  onClick={openCamera}
+                  className="h-10 px-4 rounded-[10px] border border-border bg-card
+                    hover:bg-muted hover:border-brand-300 active:scale-95
+                    text-foreground text-sm font-medium transition-all
+                    inline-flex items-center gap-2"
+                >
+                  <Camera className="w-4 h-4" />
+                  ถ่ายรูป
+                </button>
+              )}
 
-              {orgSlug && (
+              {SHOW_EMAIL && orgSlug && (
                 <button
                   type="button"
                   onClick={() => setEmailOpen(v => !v)}

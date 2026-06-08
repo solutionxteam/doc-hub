@@ -2,6 +2,7 @@ import { useEffect }        from 'react'
 import { Tabs }             from 'expo-router'
 import { useRouter }        from 'expo-router'
 import { View, Text, StyleSheet } from 'react-native'
+import { LinearGradient }   from 'expo-linear-gradient'
 import { useAuthStore }     from '@/store/auth.store'
 import { Brand, Light }     from '@/constants/colors'
 
@@ -46,10 +47,15 @@ export default function AppLayout() {
       />
       <Tabs.Screen
         name="documents/camera"
-        options={{ title: 'สแกน', tabBarIcon: ({ focused }) => (
-          <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: Brand[500], alignItems: 'center', justifyContent: 'center', marginBottom: 4, shadowColor: Brand[500], shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } }}>
+        options={{ title: 'สแกน', tabBarIcon: () => (
+          <LinearGradient
+            colors={[Brand[400], Brand[600]]}
+            style={{ width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', marginBottom: 4 }}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
             <Text style={{ fontSize: 22 }}>📷</Text>
-          </View>
+          </LinearGradient>
         )}}
       />
       <Tabs.Screen

@@ -13,16 +13,20 @@ import { useState, useEffect } from "react"
 import { usePathname }         from "next/navigation"
 import { Sidebar }             from "./sidebar"
 import { Header }              from "./header"
+import { AppLoadingProvider }  from "@/lib/loading"
+import { SlippyLoader }        from "@/components/ui/slippy-loader"
+import { SupportChat }         from "@/components/ui/support-chat"
 
 export interface OrgOption {
-  id:   string
-  name: string
-  plan: string
-  role: string
+  id:          string
+  name:        string
+  plan:        string
+  role:        string
+  accountType?: "business" | "personal"
 }
 
 interface AppShellProps {
-  org:            { id: string; name: string; plan: string }
+  org:            { id: string; name: string; plan: string; accountType?: string }
   allOrgs:        OrgOption[]
   user:           { full_name: string; email: string; avatar_url?: string }
   locale:         string
@@ -59,6 +63,8 @@ export function AppShell({ org, allOrgs, user, locale, isSuperadmin = false, chi
   }
 
   return (
+    <AppLoadingProvider>
+    <SlippyLoader />
     <div className="flex h-screen overflow-hidden bg-background">
       {mobileOpen && (
         <div
@@ -77,6 +83,7 @@ export function AppShell({ org, allOrgs, user, locale, isSuperadmin = false, chi
         onToggle={toggleDesktop}
         onMobileClose={() => setMobileOpen(false)}
         isSuperadmin={isSuperadmin}
+        accountType={(org.accountType ?? "business") as "business" | "personal"}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -90,5 +97,7 @@ export function AppShell({ org, allOrgs, user, locale, isSuperadmin = false, chi
         </main>
       </div>
     </div>
+      <SupportChat orgId={org.id} />
+    </AppLoadingProvider>
   )
 }

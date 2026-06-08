@@ -1,5 +1,8 @@
 import SwiftUI
 import PhotosUI
+import VisionKit
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import UniformTypeIdentifiers
 
 enum PickerMode { case select, preview }
@@ -9,14 +12,22 @@ struct CameraPickerView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var mode: PickerMode = .select
-    @State private var pickedImage: UIImage?
+    /// All pages captured this session (document scanner supports multi-page)
+    @State private var pages: [UIImage] = []
+    @State private var selectedPage = 0
     @State private var showPhotoPicker = false
-    @State private var showCamera      = false
+    @State private var showScanner     = false
     @State private var showFileImport  = false
     @State private var photoItem: PhotosPickerItem?
     @State private var isUploading     = false
     @State private var uploadSuccess   = false
+    @State private var isEnhancing     = false
+    @State private var showSimulatorHint = false
     @State private var error: String?
+
+    private var pickedImage: UIImage? {
+        pages.indices.contains(selectedPage) ? pages[selectedPage] : nil
+    }
 
     var body: some View {
         NavigationStack {
@@ -32,21 +43,59 @@ struct CameraPickerView: View {
                         .foregroundColor(Color.brand500)
                 }
             }
-            .sheet(isPresented: $showCamera) { CameraView(captured: $pickedImage, mode: $mode) }
+            // ── VisionKit document scanner: auto edge-detect + perspective
+            //    correction + multi-page — the most accurate capture path
+            //    for OCR on iPhone.
+            .fullScreenCover(isPresented: $showScanner) {
+                DocumentScannerView { scannedPages in
+                    Task { await ingestScannedPages(scannedPages) }
+                }
+                .ignoresSafeArea()
+            }
             .fileImporter(isPresented: $showFileImport,
                           allowedContentTypes: [.pdf, .image]) { result in
                 if case .success(let url) = result {
                     handleFile(url: url)
                 }
             }
+            .alert("กล้องไม่พร้อมใช้งานบน Simulator", isPresented: $showSimulatorHint) {
+                Button("ใช้ภาพตัวอย่างทดสอบ") {
+                    Task { await ingestScannedPages([SampleDocumentGenerator.makeReceipt()]) }
+                }
+                Button("เลือกจากคลังภาพแทน", role: .cancel) { showPhotoPicker = true }
+            } message: {
+                Text("Simulator บน Mac ไม่มีกล้องจริง ระบบจะสร้างภาพเอกสารตัวอย่างให้ทดสอบขั้นตอนถ่าย-ปรับปรุง-อัพโหลดแทนกล้องจริงได้ทันที")
+            }
+            .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
         }
         .onChange(of: photoItem) { _, item in
             Task {
                 guard let data  = try? await item?.loadTransferable(type: Data.self),
                       let image = UIImage(data: data) else { return }
-                pickedImage = image
-                mode = .preview
+                await ingestScannedPages([image])
             }
+        }
+    }
+
+    /// Runs every captured page through the OCR-enhancement pipeline,
+    /// then transitions to the preview screen.
+    private func ingestScannedPages(_ raw: [UIImage]) async {
+        guard !raw.isEmpty else { return }
+        isEnhancing = true
+        let enhanced = await withTaskGroup(of: (Int, UIImage).self) { group -> [UIImage] in
+            for (i, img) in raw.enumerated() {
+                group.addTask { (i, DocumentEnhancer.enhance(img)) }
+            }
+            var results = [Int: UIImage]()
+            for await (i, img) in group { results[i] = img }
+            return (0..<raw.count).compactMap { results[$0] }
+        }
+        await MainActor.run {
+            pages = enhanced
+            selectedPage = 0
+            mode = .preview
+            isEnhancing = false
+            hapticSuccess()
         }
     }
 
@@ -56,7 +105,7 @@ struct CameraPickerView: View {
             Spacer()
 
             Text("เลือกวิธีอัพโหลดเอกสาร")
-                .font(.system(size: 18, weight: .700))
+                .font(.system(size: 18, weight: .bold))
                 .foregroundColor(Color.textPrimary)
 
             VStack(spacing: 12) {
@@ -64,7 +113,15 @@ struct CameraPickerView: View {
                              LinearGradient(colors: [Color.brand500, Color.brand600],
                                             startPoint: .topLeading, endPoint: .bottomTrailing)) {
                     hapticLight()
-                    showCamera = true
+                    // The Mac Simulator has no physical camera — VNDocumentCameraViewController
+                    // would just show a black screen. Detect that up front and offer a
+                    // generated sample document instead, so the whole capture → enhance →
+                    // upload pipeline remains testable end-to-end on the Simulator.
+                    if DocumentScannerView.isSupported {
+                        showScanner = true
+                    } else {
+                        showSimulatorHint = true
+                    }
                 }
                 PhotosPicker(selection: $photoItem, matching: .images) {
                     uploadOptionLabel("คลังภาพ", "photo.on.rectangle",
@@ -105,7 +162,7 @@ struct CameraPickerView: View {
                 .background(gradient)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             Text(title)
-                .font(.system(size: 16, weight: .700))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundColor(Color.textPrimary)
             Spacer()
             Image(systemName: "chevron.right")
@@ -146,7 +203,7 @@ struct CameraPickerView: View {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(Color.statusApproved)
                     Text("อัพโหลดสำเร็จ! AI กำลังประมวลผล…")
-                        .font(.system(size: 14, weight: .600))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(Color.statusApproved)
                 }
                 .padding(12)
@@ -158,9 +215,9 @@ struct CameraPickerView: View {
             Spacer()
 
             HStack(spacing: 12) {
-                Button { mode = .select; pickedImage = nil } label: {
+                Button { mode = .select; pages = []; selectedPage = 0 } label: {
                     Text("เลือกใหม่")
-                        .font(.system(size: 15, weight: .700))
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundColor(Color.brand500)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
@@ -173,7 +230,7 @@ struct CameraPickerView: View {
                             ProgressView().tint(.white)
                         } else {
                             Text("อัพโหลด")
-                                .font(.system(size: 15, weight: .700))
+                                .font(.system(size: 15, weight: .bold))
                                 .foregroundColor(.white)
                         }
                     }
@@ -191,35 +248,48 @@ struct CameraPickerView: View {
     }
 
     // MARK: – Upload
+    /// Uploads every captured/enhanced page as a separate document record.
+    /// JPEG quality bumped to 0.94 — at this stage file size matters far less
+    /// than preserving fine text detail for the OCR/AI pipeline.
     private func upload() async {
-        guard let img = pickedImage,
-              let orgId = authVM.org?.id,
-              let userId = authVM.session?.user.id.uuidString,
-              let data = img.jpegData(compressionQuality: 0.85)
+        guard !pages.isEmpty,
+              let orgId  = authVM.org?.id,
+              let userId = authVM.session?.user.id.uuidString
         else { return }
 
         isUploading = true
         error = nil
         hapticLight()
-        let fileName = "\(userId)_\(Date().timeIntervalSince1970).jpg"
-        do {
-            let path = "\(orgId)/\(fileName)"
-            try await SupabaseManager.shared.client
-                .storage
-                .from(Config.storageBucket)
-                .upload(path, data: data, options: .init(upsert: false))
+        let batchStamp = Date().timeIntervalSince1970
 
-            let record: [String: String] = [
-                "organization_id": orgId,
-                "file_name":        fileName,
-                "file_path":        path,
-                "status":           "processing",
-                "source":           "mobile"
-            ]
-            try await SupabaseManager.shared.client
-                .from("documents")
-                .insert(record)
-                .execute()
+        do {
+            for (index, img) in pages.enumerated() {
+                guard let data = img.jpegData(compressionQuality: 0.94) else { continue }
+                let suffix   = pages.count > 1 ? "_p\(index + 1)" : ""
+                let fileName = "\(userId)_\(batchStamp)\(suffix).jpg"
+                let path     = "\(orgId)/\(fileName)"
+
+                try await SupabaseManager.shared.client
+                    .storage
+                    .from(Config.storageBucket)
+                    .upload(path, data: data, options: .init(upsert: false))
+
+                // NOTE: `documents` has no `file_name` column — only `file_path`
+                // (see supabase/migrations/001_core_schema.sql). `file_type` is
+                // NOT NULL with a CHECK ('pdf'|'jpg'|'png'), so it must be sent.
+                let record: [String: String] = [
+                    "organization_id": orgId,
+                    "uploaded_by":      userId,
+                    "file_path":        path,
+                    "file_type":        "jpg",
+                    "status":           "processing",
+                    "source":           "mobile"
+                ]
+                try await SupabaseManager.shared.client
+                    .from("documents")
+                    .insert(record)
+                    .execute()
+            }
 
             isUploading  = false
             uploadSuccess = true
@@ -230,44 +300,33 @@ struct CameraPickerView: View {
         }
     }
 
+    /// Renders every page of an imported PDF at high DPI (2x) and runs each
+    /// page through the same OCR-enhancement pipeline used for camera scans,
+    /// so PDF imports get equally accurate output.
     private func handleFile(url: URL) {
-        // PDF upload handled via same upload path
-        pickedImage = nil
-        mode = .preview
-    }
-}
-
-// MARK: – Native Camera View (UIViewControllerRepresentable)
-struct CameraView: UIViewControllerRepresentable {
-    @Binding var captured: UIImage?
-    @Binding var mode: PickerMode
-
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType  = .camera
-        picker.delegate    = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ vc: UIImagePickerController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: CameraView
-        init(_ parent: CameraView) { self.parent = parent }
-
-        func imagePickerController(_ picker: UIImagePickerController,
-                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            if let img = info[.editedImage] as? UIImage ?? info[.originalImage] as? UIImage {
-                parent.captured = img
-                parent.mode     = .preview
-                hapticSuccess()
+        guard url.pathExtension.lowercased() == "pdf" else {
+            // Plain image file picked via the importer
+            if let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
+                Task { await ingestScannedPages([img]) }
             }
-            picker.dismiss(animated: true)
+            return
         }
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            picker.dismiss(animated: true)
+        Task {
+            isEnhancing = true
+            let rendered = PDFRenderer.renderPages(at: url, scale: 2.0)
+            await ingestScannedPages(rendered)
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    let vm = AuthViewModel(_preview: true)
+    vm.setPreviewData(
+        profile: UserProfile(id: "u1", email: "demo@slippy.app", fullName: "สมชาย ใจดี", avatarUrl: nil),
+        org: Organization(id: "demo-org", name: "บริษัท Demo จำกัด", plan: "pro", docQuota: 200, docUsed: 45)
+    )
+    return CameraPickerView().environmentObject(vm)
+}
+#endif
+

@@ -42,6 +42,22 @@ export async function emailRoutes(app: FastifyInstance) {
         return { ok: true } // Silently accept to avoid Postmark bounce retries
       }
 
+      // ── Plan feature check: email ingestion requires Personal+ ──────────────
+      const { data: orgPlan } = await supabase
+        .from("organizations")
+        .select("plan")
+        .eq("id", orgId)
+        .single()
+      const { data: planRow } = await supabase
+        .from("pricing_plans")
+        .select("feature_email_ingestion")
+        .eq("id", orgPlan?.plan ?? "free")
+        .single()
+      if (!planRow?.feature_email_ingestion) {
+        console.log(`[email] Org ${orgId} on plan ${orgPlan?.plan} — email ingestion not available`)
+        return { ok: true } // accept quietly, don't reveal plan info to sender
+      }
+
       const { data: member } = await supabase
         .from("organization_members")
         .select("user_id")

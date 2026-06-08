@@ -11,14 +11,20 @@
 
 import { useState, useMemo } from "react"
 import { toast } from "sonner"
-import { Copy, Plus, Camera, MoreHorizontal, Zap } from "lucide-react"
+import { Copy, Plus, Camera, MoreHorizontal, Zap, Check, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const ACCOUNTING_APPS = [
-  { id: "flowaccount", name: "FlowAccount",         desc: "ส่งเอกสารเข้าระบบบัญชีอัตโนมัติ", logo: "F", color: "bg-emerald-500" },
-  { id: "peak",        name: "PEAK Account",         desc: "เร็วๆ นี้",                        logo: "P", color: "bg-orange-500", soon: true },
-  { id: "express",     name: "Express Accounting",   desc: "เร็วๆ นี้",                        logo: "E", color: "bg-blue-500",   soon: true },
-  { id: "gsheets",     name: "Google Sheets",        desc: "Export อัตโนมัติเข้าสเปรดชีท",    logo: "G", color: "bg-green-600" },
+// FlowAccount และ PEAK ซ่อนไว้ก่อน — รอ API approval
+// const SHOW_ACCOUNTING_PUSH = false
+
+const ACCOUNTING_APPS: { id: string; name: string; desc: string; logo: string; color: string; soon?: boolean }[] = [
+  // FlowAccount: hidden — waiting for Open API approval
+  // { id: "flowaccount", name: "FlowAccount", desc: "ส่งเอกสารเข้าระบบบัญชีอัตโนมัติ", logo: "F", color: "bg-emerald-500" },
+  // PEAK: hidden — no public API
+  // { id: "peak", name: "PEAK Account", desc: "เร็วๆ นี้", logo: "P", color: "bg-orange-500", soon: true },
+  // Express: hidden — no API yet
+  // { id: "express", name: "Express Accounting", desc: "เร็วๆ นี้", logo: "E", color: "bg-blue-500", soon: true },
+  { id: "gsheets", name: "Google Sheets", desc: "Export อัตโนมัติเข้าสเปรดชีท", logo: "G", color: "bg-green-600" },
 ]
 
 const CONNECT_CODE = "SLPY-7K4Q-8XYZ"
@@ -157,42 +163,45 @@ function LineBubble({ m }: { m: any }) {
 }
 
 export function IntegrationsClient({ orgId, orgSlug: _orgSlug, integrations, lineConnections, userRole }: Props) {
-  const canManage       = ["owner", "admin"].includes(userRole)
-  const [showQR, setShowQR] = useState(false)
-  const [flowConnected, setFlowConnected] = useState(
-    integrations.some(i => i.provider === "flowaccount" && i.is_active)
-  )
-  const [apiKey, _setApiKey] = useState("")
-  const [saving, setSaving] = useState(false)
+  const canManage = ["owner", "admin"].includes(userRole)
+  const [showQR,  setShowQR]  = useState(false)
+  const [flowConnected] = useState(integrations.some(i => i.provider === "flowaccount" && i.is_active))
 
-  const handleFlowConnect = async () => {
-    setSaving(true)
-    const res = await fetch("/api/integrations", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orgId, provider: "flowaccount", apiKey }),
-    })
-    setSaving(false)
-    if (res.ok) { setFlowConnected(true); toast.success("เชื่อมต่อ FlowAccount แล้ว") }
-    else toast.error("เชื่อมต่อไม่สำเร็จ")
+  // Real connect code from API
+  const [connectCode, setConnectCode] = useState<string | null>(null)
+  const [codeLoading, setCodeLoading] = useState(false)
+  const [copied,      setCopied]      = useState(false)
+
+  const generateConnectCode = async () => {
+    setCodeLoading(true)
+    try {
+      const res = await fetch("/api/line/connect", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orgId }),
+      })
+      const data = await res.json()
+      if (res.ok) setConnectCode(data.code)
+      else toast.error(data.error ?? "สร้าง code ไม่สำเร็จ")
+    } catch {
+      toast.error("เกิดข้อผิดพลาด")
+    }
+    setCodeLoading(false)
   }
 
   const copyCode = () => {
-    navigator.clipboard?.writeText(CONNECT_CODE)
-    toast.success("คัดลอกแล้ว")
+    const code = connectCode ?? CONNECT_CODE
+    navigator.clipboard?.writeText(`/connect ${code}`)
+    setCopied(true)
+    toast.success("คัดลอกคำสั่งแล้ว")
+    setTimeout(() => setCopied(false), 2000)
   }
 
   return (
-    <div className="p-6 lg:p-7 space-y-6 max-w-[1100px] animate-fade-in">
-      {/* LINE Bot section */}
-      <div>
-        <h2 className="text-[20px] font-bold text-foreground">LINE Bot</h2>
-        <p className="text-[12.5px] text-muted-foreground mt-0.5">
-          รับสลิปและใบเสร็จผ่าน LINE — ง่ายที่สุด
-        </p>
-      </div>
+    <div className="space-y-5">
+      {/* [LINE Bot section removed — rendered separately by LineSection component] */}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5 items-start">
-        {/* LINE Bot card */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5 items-start" style={{ display: "none" }}>
+        {/* LINE Bot card (hidden) */}
         <div className="bg-card border border-border rounded-[12px] overflow-hidden">
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-0">
             {/* Left: steps */}
@@ -201,7 +210,7 @@ export function IntegrationsClient({ orgId, orgSlug: _orgSlug, integrations, lin
                 <span className="h-12 w-12 rounded-[12px] bg-green-500 text-white flex items-center
                   justify-center font-bold text-lg shrink-0">L</span>
                 <div>
-                  <h3 className="text-[15px] font-semibold text-foreground">@slippy_bot</h3>
+                  <h3 className="text-[15px] font-semibold text-foreground">@slippy</h3>
                   <p className="text-[12px] text-muted-foreground">
                     พร้อมใช้งาน · เชื่อมแล้ว {lineConnections.length || 2} บัญชี
                   </p>
@@ -214,7 +223,7 @@ export function IntegrationsClient({ orgId, orgSlug: _orgSlug, integrations, lin
 
               <ol className="space-y-3">
                 {[
-                  "เพิ่ม @slippy_bot ใน LINE ของคุณ",
+                  "เพิ่ม @slippy ใน LINE ของคุณ",
                   "ส่งคำสั่ง /connect พร้อมรหัสด้านขวา",
                   "ส่งรูปสลิป — Slippy อ่านและอัปโหลดให้เอง",
                 ].map((s, i) => (
@@ -234,33 +243,65 @@ export function IntegrationsClient({ orgId, orgSlug: _orgSlug, integrations, lin
               </div>
             </div>
 
-            {/* Right: QR code */}
-            <div className="bg-muted/40 p-6 border-l border-border flex flex-col items-center justify-center text-center">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-3">
+            {/* Right: Connect code */}
+            <div className="bg-muted/40 p-6 border-l border-border flex flex-col items-center justify-center text-center gap-3">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
                 รหัสเชื่อมต่อ
               </div>
-              <button
-                onClick={() => setShowQR(!showQR)}
-                className="relative h-32 w-32 rounded-[12px] bg-card border border-border flex items-center
-                  justify-center mb-3 hover:shadow-md transition-shadow overflow-hidden">
-                {showQR
-                  ? <QrCodePattern code={CONNECT_CODE} />
-                  : <svg viewBox="0 0 24 24" className="w-14 h-14 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <rect x="3" y="3" width="7" height="7" rx="1" />
-                      <rect x="14" y="3" width="7" height="7" rx="1" />
+
+              {connectCode ? (
+                <>
+                  {/* Show generated code with QR */}
+                  <button
+                    onClick={() => setShowQR(!showQR)}
+                    className="relative h-32 w-32 rounded-[12px] bg-card border border-border flex items-center
+                      justify-center hover:shadow-md transition-shadow overflow-hidden">
+                    {showQR
+                      ? <QrCodePattern code={connectCode} />
+                      : <span className="font-mono text-xl font-black text-foreground tracking-wider">{connectCode}</span>
+                    }
+                  </button>
+                  <div className="rounded-[8px] bg-card border border-border px-3 py-2 font-mono text-sm font-bold tracking-wider text-foreground">
+                    /connect {connectCode}
+                  </div>
+                  <button onClick={copyCode}
+                    className="inline-flex items-center gap-1.5 text-[12px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                    {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copied ? "คัดลอกแล้ว" : "คัดลอกคำสั่ง"}
+                  </button>
+                  <p className="text-[11px] text-muted-foreground">หมดอายุใน 15 นาที</p>
+                </>
+              ) : (
+                <>
+                  <div className="h-32 w-32 rounded-[12px] bg-card border border-border flex items-center justify-center">
+                    <svg viewBox="0 0 24 24" className="w-14 h-14 text-muted-foreground/40" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
                       <rect x="3" y="14" width="7" height="7" rx="1" />
                       <rect x="5" y="5" width="3" height="3" fill="currentColor" stroke="none" />
                       <rect x="16" y="5" width="3" height="3" fill="currentColor" stroke="none" />
                       <rect x="5" y="16" width="3" height="3" fill="currentColor" stroke="none" />
-                      <path d="M14 14h2v2h-2zM16 16h2v2h-2zM18 14h2v2h-2zM14 18h4v2h-4z" fill="currentColor" stroke="none" />
                     </svg>
-                }
-              </button>
-              <div className="font-mono text-[15px] font-bold text-foreground tabular-nums tracking-wider">
-                {CONNECT_CODE}
-              </div>
-              <button
-                onClick={copyCode}
+                  </div>
+                  {canManage ? (
+                    <button
+                      onClick={generateConnectCode}
+                      disabled={codeLoading}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] bg-brand-500 hover:bg-brand-600
+                        text-white text-sm font-semibold transition-colors disabled:opacity-60">
+                      {codeLoading
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <Plus className="w-4 h-4" />
+                      }
+                      สร้าง Connect Code
+                    </button>
+                  ) : (
+                    <p className="text-[12px] text-muted-foreground">ติดต่อ Admin เพื่อสร้าง code</p>
+                  )}
+                </>
+              )}
+
+              {/* dummy hidden button to preserve old copyCode reference below */}
+              <button style={{ display: "none" }} onClick={copyCode}
                 className="mt-2 inline-flex items-center gap-1 text-[11.5px] font-medium
                   text-brand-600 dark:text-brand-400 hover:underline">
                 <Copy className="w-3 h-3" /> คัดลอก
@@ -302,14 +343,7 @@ export function IntegrationsClient({ orgId, orgSlug: _orgSlug, integrations, lin
         </div>
       </div>
 
-      {/* Accounting integrations */}
-      <div>
-        <h2 className="text-[18px] font-bold text-foreground">ระบบบัญชี</h2>
-        <p className="text-[12.5px] text-muted-foreground mt-0.5">
-          เชื่อมต่อ Slippy กับซอฟต์แวร์บัญชีที่คุณใช้
-        </p>
-      </div>
-
+      {/* Connector cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {ACCOUNTING_APPS.map(app => {
           const existing  = integrations.find(i => i.provider === app.id)
@@ -339,18 +373,17 @@ export function IntegrationsClient({ orgId, orgSlug: _orgSlug, integrations, lin
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> เชื่อมแล้ว
                       </span>
                       <button
-                        onClick={() => setFlowConnected(false)}
+                        onClick={() => {}}
                         className="text-[12px] text-rose-600 dark:text-rose-400 hover:underline">
                         ยกเลิก
                       </button>
                     </div>
                   ) : (
                     <button
-                      onClick={handleFlowConnect}
-                      disabled={saving || !canManage}
+                      disabled={!canManage}
                       className="h-8 px-3 rounded-[8px] bg-brand-500 hover:bg-brand-600 text-white text-xs
                         font-medium transition-colors disabled:opacity-60 shrink-0">
-                      {saving ? "กำลังเชื่อม..." : "เชื่อมต่อ"}
+                      เชื่อมต่อ
                     </button>
                   )
                 ) : (

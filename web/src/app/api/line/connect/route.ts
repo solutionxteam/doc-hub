@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getPlanFeatures } from "@/lib/plans"
 
 function randomCode(len = 6): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no ambiguous chars
@@ -29,8 +30,23 @@ export async function POST(req: NextRequest) {
   const { orgId } = await req.json() as { orgId: string }
   if (!orgId) return NextResponse.json({ error: "orgId required" }, { status: 400 })
 
+  // ── Plan feature check ────────────────────────────────────────────────────
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("plan")
+    .eq("id", orgId)
+    .single()
+
+  const features = getPlanFeatures(org?.plan ?? "free")
+  if (!features.lineBot) {
+    return NextResponse.json({
+      error: "LINE Bot ไม่รองรับในแผนนี้ กรุณาอัปเกรด",
+      code:  "FEATURE_NOT_AVAILABLE",
+    }, { status: 403 })
+  }
+
   const code      = randomCode(6)
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString() // 15 minutes
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
 
   const admin = createAdminClient()
 

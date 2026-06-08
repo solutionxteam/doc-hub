@@ -12,6 +12,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { useAppLoading } from "@/lib/loading"
 import { toast } from "sonner"
 import { formatThb, formatDate } from "@/lib/utils"
 import {
@@ -226,49 +227,187 @@ const PROVIDER_LABEL: Record<string, string> = {
   webhook:     "Webhook",
 }
 
-// ─── Lightbox ─────────────────────────────────────────────────────────────────
-function Lightbox({ src, isPdf, onClose }: { src: string; isPdf: boolean; onClose: () => void }) {
+// ─── Lightbox with zoom + pan ─────────────────────────────────────────────────
+function Lightbox({ src, isPdf, initialRot = 0, onClose }: { src: string; isPdf: boolean; initialRot?: number; onClose: () => void }) {
+  const [scale,   setScale]   = useState(1)
+  const [offset,  setOffset]  = useState({ x: 0, y: 0 })
+  const [lbRot,   setLbRot]   = useState(initialRot)   // rotation inside lightbox
+  const [isDragging, setIsDragging] = useState(false)
+  const dragStart = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null)
+  const lastPinch = useRef<number | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Reset zoom
+  const resetZoom = () => { setScale(1); setOffset({ x: 0, y: 0 }) }
+
+  // Keyboard
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
-    document.addEventListener("keydown", handleKey)
-    return () => document.removeEventListener("keydown", handleKey)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+      if (e.key === "0" && e.metaKey) { e.preventDefault(); resetZoom() }
+      if (e.key === "+" || e.key === "=") setScale(s => Math.min(8, +(s + 0.25).toFixed(2)))
+      if (e.key === "-") setScale(s => { const n = Math.max(1, +(s - 0.25).toFixed(2)); if (n === 1) setOffset({ x: 0, y: 0 }); return n })
+      if (e.key === "r") setLbRot(r => (r + 90) % 360)
+      if (e.key === "R") setLbRot(r => (r - 90 + 360) % 360)
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
   }, [onClose])
+
+  // Mouse wheel zoom
+  const onWheel = (e: React.WheelEvent) => {
+    e.preventDefault()
+    const delta = e.ctrlKey ? e.deltaY * 0.01 : e.deltaY * 0.002
+    setScale(s => {
+      const next = Math.max(1, Math.min(8, +(s - delta).toFixed(2)))
+      if (next === 1) setOffset({ x: 0, y: 0 })
+      return next
+    })
+  }
+
+  // Mouse drag to pan
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (scale <= 1) return
+    setIsDragging(true)
+    dragStart.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y }
+  }
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || !dragStart.current) return
+    setOffset({
+      x: dragStart.current.ox + (e.clientX - dragStart.current.x),
+      y: dragStart.current.oy + (e.clientY - dragStart.current.y),
+    })
+  }
+  const onMouseUp = () => { setIsDragging(false); dragStart.current = null }
+
+  // Touch pinch-to-zoom
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX
+      const dy = e.touches[0].clientY - e.touches[1].clientY
+      lastPinch.current = Math.hypot(dx, dy)
+    } else if (e.touches.length === 1 && scale > 1) {
+      dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, ox: offset.x, oy: offset.y }
+    }
+  }
+  const onTouchMove = (e: React.TouchEvent) => {
+    e.preventDefault()
+    if (e.touches.length === 2 && lastPinch.current !== null) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX
+      const dy = e.touches[0].clientY - e.touches[1].clientY
+      const dist = Math.hypot(dx, dy)
+      const ratio = dist / lastPinch.current
+      setScale(s => Math.max(1, Math.min(8, +(s * ratio).toFixed(2))))
+      lastPinch.current = dist
+    } else if (e.touches.length === 1 && dragStart.current) {
+      setOffset({
+        x: dragStart.current.ox + (e.touches[0].clientX - dragStart.current.x),
+        y: dragStart.current.oy + (e.touches[0].clientY - dragStart.current.y),
+      })
+    }
+  }
+  const onTouchEnd = () => { lastPinch.current = null; dragStart.current = null }
+
+  const isZoomed = scale > 1
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center"
+      onClick={!isZoomed ? onClose : undefined}
     >
-      <button
-        type="button"
-        onClick={onClose}
+      {/* Close button */}
+      <button type="button" onClick={onClose}
         className="absolute top-4 right-4 h-10 w-10 rounded-full bg-white/10 hover:bg-white/20
-          text-white flex items-center justify-center transition-colors"
-      >
+          text-white flex items-center justify-center transition-colors z-10">
         <X className="w-5 h-5" />
       </button>
+
+      {/* Zoom controls */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 z-10">
+        <div className="flex items-center gap-1 bg-black/50 rounded-full px-3 py-1.5 backdrop-blur-sm">
+          <button type="button" onClick={() => setScale(s => { const n = Math.max(1, +(s - 0.25).toFixed(2)); if (n===1) setOffset({x:0,y:0}); return n })}
+            className="h-6 w-6 rounded-full hover:bg-white/20 text-white flex items-center justify-center text-lg leading-none transition">
+            −
+          </button>
+          <button type="button" onClick={resetZoom}
+            className="px-2 text-xs text-white/80 tabular-nums min-w-[44px] text-center hover:text-white transition">
+            {Math.round(scale * 100)}%
+          </button>
+          <button type="button" onClick={() => setScale(s => Math.min(8, +(s + 0.25).toFixed(2)))}
+            className="h-6 w-6 rounded-full hover:bg-white/20 text-white flex items-center justify-center text-lg leading-none transition">
+            +
+          </button>
+        </div>
+        {isZoomed && (
+          <button type="button" onClick={resetZoom}
+            className="bg-black/50 rounded-full px-3 py-1.5 text-xs text-white/60 hover:text-white backdrop-blur-sm transition">
+            รีเซ็ต
+          </button>
+        )}
+        {/* Rotate buttons */}
+        <div className="flex items-center gap-1 bg-black/50 rounded-full px-2 py-1 backdrop-blur-sm">
+          <button type="button" onClick={() => setLbRot(r => (r - 90 + 360) % 360)}
+            className="h-6 w-6 rounded-full hover:bg-white/20 text-white flex items-center justify-center transition"
+            title="หมุนซ้าย (R)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+            </svg>
+          </button>
+          <span className="text-[10px] text-white/50 tabular-nums min-w-[28px] text-center">{lbRot}°</span>
+          <button type="button" onClick={() => setLbRot(r => (r + 90) % 360)}
+            className="h-6 w-6 rounded-full hover:bg-white/20 text-white flex items-center justify-center transition"
+            title="หมุนขวา (r)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Image container */}
       <div
-        className="max-w-4xl max-h-[90vh] w-full flex items-center justify-center"
-        onClick={e => e.stopPropagation()}
+        ref={containerRef}
+        className="w-full h-full flex items-center justify-center overflow-hidden"
+        style={{ cursor: isZoomed ? (isDragging ? "grabbing" : "grab") : "zoom-in" }}
+        onClick={e => { if (isZoomed) e.stopPropagation(); else if (!isZoomed) { setScale(2); e.stopPropagation() } }}
+        onWheel={onWheel}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseUp}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
       >
         {isPdf ? (
           <iframe
             src={src}
             title="เอกสารต้นฉบับ"
-            className="rounded-xl shadow-2xl bg-white border border-white/10"
-            style={{ width: "min(800px, 100%)", height: "90vh" }}
+            className="rounded-xl shadow-2xl bg-white"
+            style={{ width: "min(900px, 95vw)", height: "92vh" }}
+            onClick={e => e.stopPropagation()}
           />
         ) : (
           <img
             src={src}
             alt="เอกสารต้นฉบับ"
             draggable={false}
-            className="max-w-full max-h-[90vh] rounded-xl shadow-2xl object-contain select-none"
+            className="select-none rounded-lg shadow-2xl"
+            style={{
+              maxWidth:  lbRot % 180 === 0 ? "95vw" : "92vh",
+              maxHeight: lbRot % 180 === 0 ? "92vh" : "95vw",
+              objectFit: "contain",
+              transform: `rotate(${lbRot}deg) scale(${scale}) translate(${offset.x / scale}px, ${offset.y / scale}px)`,
+              transition: isDragging ? "none" : "transform 0.2s ease",
+              transformOrigin: "center center",
+            }}
           />
         )}
       </div>
-      <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-white/40">
-        กด Esc หรือคลิกพื้นหลังเพื่อปิด
+
+      {/* Hint */}
+      <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-white/30 select-none whitespace-nowrap">
+        {isZoomed ? "ลากเพื่อเลื่อน · Scroll เพื่อ zoom · Esc ปิด" : "Scroll หรือคลิกเพื่อ zoom · Esc ปิด"}
       </p>
     </div>
   )
@@ -284,8 +423,9 @@ const STAGE_LABEL: Record<string, string> = {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOriginal }: ReviewClientProps) {
-  const router   = useRouter()
-  const supabase = createClient()
+  const router        = useRouter()
+  const supabase      = createClient()
+  const { withLoading } = useAppLoading()
   const canEdit  = ["owner", "admin", "accountant"].includes(userRole)
 
   // ── Processing state tracking ─────────────────────────────────────────────────
@@ -333,9 +473,66 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
   }, [])
 
   // ── Viewer state ─────────────────────────────────────────────────────────────
-  const [zoom,     setZoom]     = useState(1)
-  const [rot,      setRot]      = useState(0)
-  const [lightbox, setLightbox] = useState(false)
+  const [zoom,      setZoom]      = useState(1)
+  const initialRot                = (doc.display_rotation as number | undefined) ?? 0
+  const [rot,       setRot]       = useState(initialRot)
+  const [savedRot,  setSavedRot]  = useState(initialRot)
+  const [savingRot, setSavingRot] = useState(false)
+  const [lightbox,  setLightbox]  = useState(false)
+
+  // ── Refs for pinch-to-zoom (non-passive touchmove needed) ────────────────────
+  const viewerRef = useRef<HTMLDivElement>(null)
+  const pinchRef  = useRef<{ dist: number; zoom: number } | null>(null)
+  const zoomRef   = useRef(zoom)
+  useEffect(() => { zoomRef.current = zoom }, [zoom])
+
+  useEffect(() => {
+    const el = viewerRef.current
+    if (!el) return
+
+    const getD = (e: TouchEvent) => {
+      const [a, b] = [e.touches[0], e.touches[1]]
+      return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+    }
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2)
+        pinchRef.current = { dist: getD(e), zoom: zoomRef.current }
+    }
+    const onMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !pinchRef.current) return
+      e.preventDefault()                      // block page scroll while pinching
+      const scale = getD(e) / pinchRef.current.dist
+      setZoom(+(Math.min(3, Math.max(0.3, pinchRef.current.zoom * scale)).toFixed(2)))
+    }
+    const onEnd = () => { pinchRef.current = null }
+
+    el.addEventListener("touchstart", onStart, { passive: true })
+    el.addEventListener("touchmove",  onMove,  { passive: false })  // must be non-passive
+    el.addEventListener("touchend",   onEnd)
+    return () => {
+      el.removeEventListener("touchstart", onStart)
+      el.removeEventListener("touchmove",  onMove)
+      el.removeEventListener("touchend",   onEnd)
+    }
+  }, [])   // empty deps — reads zoom via ref
+
+  // ── Save rotation to DB ───────────────────────────────────────────────────────
+  const handleSaveRotation = async () => {
+    setSavingRot(true)
+    const { error } = await supabase
+      .from("documents")
+      .update({ display_rotation: rot })
+      .eq("id", doc.id)
+    if (error) {
+      // Column may not exist yet — show migration hint
+      toast.error("บันทึกไม่สำเร็จ: " + (error.message.includes("column") ? "กรุณา apply migration 023 ก่อน" : error.message))
+    } else {
+      setSavedRot(rot)
+      toast.success("บันทึกการหมุนแล้ว ✓")
+    }
+    setSavingRot(false)
+  }
 
   // ── Raw AI response — declared before form/items so initializers can fall back ─
   const rawAI = useMemo(() => {
@@ -346,7 +543,7 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
   }, [doc.ai_raw_response])
 
   // ── Form state — DB columns preferred; rawAI used as fallback ─────────────────
-  const [form, setForm] = useState(() => ({
+  const [form, setFormRaw] = useState(() => ({
     vendor_name:     doc.vendor_name    ?? rawAI?.vendor_name    ?? "",
     vendor_tax_id:   doc.vendor_tax_id  ?? rawAI?.vendor_tax_id  ?? "",
     vendor_address:  doc.vendor_address ?? rawAI?.vendor_address ?? "",
@@ -360,9 +557,15 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
     vat_amount:      Number(doc.vat_amount      ?? rawAI?.vat_amount      ?? 0),
     wht_amount:      Number(doc.wht_amount      ?? rawAI?.wht_amount      ?? 0),
     total_amount:    Number(doc.total_amount    ?? rawAI?.total_amount    ?? 0),
-    notes:           doc.notes          ?? "",
+    notes:           doc.notes          ?? "",      // AI reasoning log — read-only
+    review_note:     doc.review_note    ?? "",      // user editable note
     integration_id:  integrations[0]?.id ?? "",
   }))
+  // setForm wrapper — marks dirty whenever form changes
+  const setForm = useCallback((fn: (f: any) => any) => {
+    setFormRaw(fn)
+    setIsDirty(true)
+  }, [])
 
   // ── Line items — DB preferred; rawAI fallback if DB has none ─────────────────
   const [items, setItems] = useState<LineItem[]>(() => {
@@ -386,8 +589,43 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
     }))
   })
 
-  const [saving, setSaving] = useState(false)
-  const [debug,  setDebug]  = useState(false)
+  const [saving,  setSaving]  = useState(false)
+  const [isDirty, setIsDirty] = useState(false)
+  const [debug,   setDebug]   = useState(false)
+
+  // ── Human Learning: บันทึก corrections เปรียบเทียบ AI vs user ──────────────────
+  const saveCorrections = useCallback(async () => {
+    try {
+      // ค่าที่ AI อ่านได้ครั้งแรก (จาก ai_raw_response หรือ initial DB values)
+      const ai = rawAI ?? {}
+      const corrections = [
+        { field: "vendor_name",    aiValue: ai.vendor_name    ?? doc.vendor_name,    correctedValue: form.vendor_name    },
+        { field: "vendor_tax_id",  aiValue: ai.vendor_tax_id  ?? doc.vendor_tax_id,  correctedValue: form.vendor_tax_id  },
+        { field: "doc_number",     aiValue: ai.doc_number     ?? doc.doc_number,     correctedValue: form.doc_number     },
+        { field: "doc_date",       aiValue: ai.doc_date       ?? doc.doc_date,       correctedValue: form.doc_date       },
+        { field: "total_amount",   aiValue: String(ai.total_amount   ?? doc.total_amount   ?? ""), correctedValue: String(form.total_amount)   },
+        { field: "subtotal",       aiValue: String(ai.subtotal       ?? doc.subtotal       ?? ""), correctedValue: String(form.subtotal)       },
+        { field: "vat_amount",     aiValue: String(ai.vat_amount     ?? doc.vat_amount     ?? ""), correctedValue: String(form.vat_amount)     },
+        { field: "discount_amount",aiValue: String(ai.discount_amount ?? doc.discount_amount ?? ""), correctedValue: String(form.discount_amount) },
+      ].map(c => ({
+        ...c,
+        aiValue:         c.aiValue        != null ? String(c.aiValue)        : null,
+        correctedValue:  c.correctedValue != null ? String(c.correctedValue) : null,
+      }))
+
+      // fire-and-forget — ไม่บล็อก save
+      fetch(`/api/documents/${doc.id}/corrections`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          corrections,
+          vendorName:      form.vendor_name      || null,
+          docCategory:     doc.doc_category      || null,
+          confidenceScore: doc.overall_confidence ?? null,
+        }),
+      }).catch(() => {/* silent */})
+    } catch { /* never block */ }
+  }, [doc, form, rawAI])
 
   // ── Doc meta ──────────────────────────────────────────────────────────────────
   const conf      = Number(doc.overall_confidence ?? 0)
@@ -407,10 +645,14 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
   const vatClaimable     = doc.vat_claimable     ?? rawAI?.vat_claimable     ?? false
   const expenseClaimable = (doc.expense_claimable ?? rawAI?.expense_claimable) !== false
   const businessUseNote  = doc.business_use_note || rawAI?.business_use_note || ""
-  const platformName     = doc.platform_name     || rawAI?.platform_name     || null
   const platformRef      = doc.platform_ref      || rawAI?.platform_ref      || null
   const customerName     = doc.customer_name     || rawAI?.customer_name     || null
   const staffName        = doc.staff_name        || rawAI?.staff_name        || null
+
+  // platform_name is editable — add to form state
+  const [platformName, setPlatformName] = useState<string>(
+    doc.platform_name || rawAI?.platform_name || ""
+  )
 
   const isFullTaxInvoice = docCategory === "tax_invoice_full" || docCategory === "receipt_with_tax"
   const isConsumer       = docCategory === "consumer_receipt"
@@ -445,6 +687,24 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
   }, [form, isFullTaxInvoice, isConsumer])
 
   // ── Actions ───────────────────────────────────────────────────────────────────
+
+  /** Send LINE notification — logs errors visibly instead of silently swallowing */
+  const notifyLine = async (action: string) => {
+    try {
+      const res = await fetch(`/api/documents/${doc.id}/notify-line`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ action }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        console.error(`[notify-line] ${action} failed:`, body?.error ?? res.status)
+      }
+    } catch (e) {
+      console.error(`[notify-line] ${action} network error:`, e)
+    }
+  }
+
   const collectLineItemPayload = () =>
     items.map((it, i) => ({
       document_id:  doc.id,
@@ -457,12 +717,14 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
 
   const handleSaveDraft = async () => {
     setSaving(true)
+    saveCorrections()   // fire-and-forget: บันทึก human corrections สำหรับ AI learning
     try {
       await supabase.from("documents").update({
         vendor_name:     form.vendor_name,
         vendor_tax_id:   form.vendor_tax_id   || null,
         vendor_address:  form.vendor_address  || null,
         vendor_phone:    form.vendor_phone    || null,
+        platform_name:   platformName         || null,
         doc_date:        form.doc_date        || null,
         due_date:        form.due_date        || null,
         doc_number:      form.doc_number      || null,
@@ -473,12 +735,16 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
         wht_amount:      form.wht_amount,
         total_amount:    form.total_amount,
         notes:           form.notes           || null,
+        review_note:     form.review_note     || null,
         updated_at:      new Date().toISOString(),
       }).eq("id", doc.id)
 
       await supabase.from("document_line_items").delete().eq("document_id", doc.id)
       if (items.length) await supabase.from("document_line_items").insert(collectLineItemPayload())
-      toast.success("บันทึกร่างเรียบร้อย")
+      // Notify LINE
+      await notifyLine("draft_saved")
+      setIsDirty(false)
+      toast.success("บันทึกการเปลี่ยนแปลงเรียบร้อย ✓")
     } catch {
       toast.error("บันทึกไม่สำเร็จ กรุณาลองใหม่")
     } finally {
@@ -488,6 +754,8 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
 
   const handleApprove = async (andPush: boolean) => {
     setSaving(true)
+    saveCorrections()   // fire-and-forget: บันทึก human corrections สำหรับ AI learning
+    await withLoading(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       await supabase.from("documents").update({
@@ -495,6 +763,7 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
         vendor_tax_id:   form.vendor_tax_id   || null,
         vendor_address:  form.vendor_address  || null,
         vendor_phone:    form.vendor_phone    || null,
+        platform_name:   platformName         || null,
         doc_date:        form.doc_date        || null,
         due_date:        form.due_date        || null,
         doc_number:      form.doc_number      || null,
@@ -505,6 +774,7 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
         wht_amount:      form.wht_amount,
         total_amount:    form.total_amount,
         notes:           form.notes           || null,
+        review_note:     form.review_note     || null,
         status:          "approved",
         reviewed_by:     user!.id,
         reviewed_at:     new Date().toISOString(),
@@ -523,18 +793,35 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
       } else {
         toast.success("อนุมัติเรียบร้อย")
       }
+
+      // Trigger Life Graph population (fire-and-forget)
+      // Core principle (CLAUDE.md): every approved document enriches the Life Graph
+      fetch(`/api/life/populate`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ documentId: doc.id }),
+      }).catch(() => {})
+
+      // Await notify BEFORE navigation — router.push() cancels pending fetches
+      await notifyLine(andPush ? "approved_pushed" : "approved")
+
       router.push("/documents")
     } catch {
       toast.error("เกิดข้อผิดพลาด กรุณาลองใหม่")
       setSaving(false)
     }
+    }, andPush ? "กำลังส่งเข้าระบบบัญชี..." : "กำลังอนุมัติเอกสาร...")
   }
 
   const handleReject = async () => {
     setSaving(true)
-    await supabase.from("documents").update({ status: "rejected" }).eq("id", doc.id)
-    toast.error("ปฏิเสธเอกสารแล้ว")
-    router.push("/documents")
+    await withLoading(async () => {
+      await supabase.from("documents").update({ status: "rejected" }).eq("id", doc.id)
+      // Await notify BEFORE navigation — router.push() cancels pending fetches
+      await notifyLine("rejected")
+      toast.error("ปฏิเสธเอกสารแล้ว")
+      router.push("/documents")
+    }, "กำลังปฏิเสธเอกสาร...")
   }
 
   const [retrying, setRetrying] = useState(false)
@@ -543,10 +830,10 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
   const handleRetry = async () => {
     setRetrying(true)
     try {
+      // Notify LINE first (before refresh which may cancel the fetch)
+      await notifyLine("retrying")
       const res = await fetch(`/api/documents/${doc.id}/process`, { method: "POST" })
       if (!res.ok) throw new Error("Process API error")
-      // Refresh page — server will return doc with status="processing",
-      // the polling useEffect will then take over automatically.
       router.refresh()
     } catch {
       toast.error("ลองอีกครั้งไม่สำเร็จ กรุณาลองใหม่")
@@ -558,6 +845,8 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
     if (!confirm("ลบเอกสารนี้ออกจากระบบ?")) return
     setDeleting(true)
     try {
+      // Notify LINE before delete (document still exists at this point)
+      await notifyLine("deleted")
       const res = await fetch(`/api/documents/${doc.id}`, { method: "DELETE" })
       if (!res.ok) throw new Error("Delete failed")
       toast.success("ลบเอกสารแล้ว")
@@ -570,8 +859,40 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
 
   const updateItem = (i: number, key: keyof LineItem, val: string | number) => {
     const next = [...items]
-    next[i] = { ...next[i], [key]: key === "description" ? val : Number(val) }
+    const updated = { ...next[i], [key]: key === "description" ? val : Number(val) }
+
+    // Auto-recalculate amount = quantity × unit_price when either changes
+    if (key === "quantity" || key === "unit_price") {
+      updated.amount = +(updated.quantity * updated.unit_price).toFixed(2)
+    }
+    next[i] = updated
     setItems(next)
+    setIsDirty(true)
+
+    // Sync totals back to form (subtotal = sum of amounts, keep VAT rate, recalc total)
+    const newSubtotal = +next.reduce((s, it) => s + (it.amount ?? 0), 0).toFixed(2)
+    setFormRaw((f: any) => {
+      const vatRate    = f.subtotal > 0 ? f.vat_amount / f.subtotal : 0.07
+      const newVat     = +(newSubtotal * vatRate).toFixed(2)
+      const newTotal   = +(newSubtotal + newVat - (f.discount_amount ?? 0) + (f.delivery_fee ?? 0) - (f.wht_amount ?? 0)).toFixed(2)
+      return { ...f, subtotal: newSubtotal, vat_amount: newVat, total_amount: newTotal }
+    })
+  }
+
+  // ── Remove item — recalculate totals ─────────────────────────────────────────
+  const removeItem = (i: number) => {
+    setItems((prev: LineItem[]) => {
+      const next = prev.filter((_, j) => j !== i)
+      const newSubtotal = +next.reduce((s, it) => s + (it.amount ?? 0), 0).toFixed(2)
+      setFormRaw((f: any) => {
+        const vatRate  = f.subtotal > 0 ? f.vat_amount / f.subtotal : 0.07
+        const newVat   = +(newSubtotal * vatRate).toFixed(2)
+        const newTotal = +(newSubtotal + newVat - (f.discount_amount ?? 0) + (f.delivery_fee ?? 0) - (f.wht_amount ?? 0)).toFixed(2)
+        return { ...f, subtotal: newSubtotal, vat_amount: newVat, total_amount: newTotal }
+      })
+      setIsDirty(true)
+      return next
+    })
   }
 
   // ── Status badge ──────────────────────────────────────────────────────────────
@@ -714,7 +1035,7 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
     <>
       {/* ── Lightbox overlay ──────────────────────────────────────────────────── */}
       {lightbox && (
-        <Lightbox src={fileUrl} isPdf={isPdf} onClose={() => setLightbox(false)} />
+        <Lightbox src={fileUrl} isPdf={isPdf} initialRot={rot} onClose={() => setLightbox(false)} />
       )}
 
       <div className="flex flex-col h-[calc(100vh-57px)]">
@@ -779,7 +1100,7 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
         </div>
 
         {/* ── Body ───────────────────────────────────────────────────────────────── */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] min-h-0">
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_1.8fr] min-h-0">
 
           {/* ── Left: Document image/PDF ─────────────────────────────────────────── */}
           <div className="flex flex-col border-r border-border bg-muted/30 min-h-0">
@@ -799,10 +1120,31 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
               <div className="h-4 w-px bg-border mx-1" />
+
+              {/* Rotate */}
               <button type="button" onClick={() => setRot(r => (r + 90) % 360)}
-                className={toolBtnCls} title="หมุน">
+                className={toolBtnCls} title="หมุน 90°">
                 <RotateCw className="w-3.5 h-3.5" />
               </button>
+
+              {/* Save rotation — แสดงเมื่อมีการเปลี่ยนแปลง */}
+              {rot !== savedRot && (
+                <button
+                  type="button"
+                  onClick={handleSaveRotation}
+                  disabled={savingRot}
+                  title="บันทึกการหมุน"
+                  className="h-7 px-2 rounded-[6px] text-[11px] font-semibold
+                    bg-brand-500 hover:bg-brand-600 text-white transition-colors
+                    inline-flex items-center gap-1 disabled:opacity-60 shrink-0"
+                >
+                  {savingRot
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <Save    className="w-3 h-3" />}
+                  บันทึก
+                </button>
+              )}
+
               <button type="button" onClick={() => setLightbox(true)}
                 className={toolBtnCls} title="ดูรูปต้นฉบับ">
                 <Maximize2 className="w-3.5 h-3.5" />
@@ -814,8 +1156,12 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
               </a>
             </div>
 
-            {/* Preview area */}
-            <div className="flex-1 overflow-auto relative bg-muted/20">
+            {/* Preview area — ref รับ pinch-to-zoom events */}
+            <div
+              ref={viewerRef}
+              className="flex-1 overflow-auto relative bg-muted/20"
+              style={{ touchAction: "pan-x pan-y" }}
+            >
               {isFailed ? (
                 /* ── Beautiful error state — replaces broken image ─────────────── */
                 <div className="h-full min-h-[400px] flex items-center justify-center p-8">
@@ -894,32 +1240,111 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
                 </div>
               ) : (
                 /* ── Normal document preview ────────────────────────────────────── */
-                <div className="p-6 flex justify-center items-start min-h-full">
+                <div className="flex justify-center items-center min-h-full p-6 overflow-auto">
+                  {/* outer wrapper ขนาดแปรผันตาม rotation — swap w/h เมื่อ 90°/270° */}
                   <div
+                    className="relative group flex items-center justify-center"
                     style={{
-                      transform: `scale(${zoom}) rotate(${rot}deg)`,
-                      transformOrigin: "top center",
-                      transition: "transform 0.15s ease",
+                      // เมื่อหมุน 90/270 → สลับ inline-size ให้ container พอดี
+                      width:  (rot % 180 === 90) ? "auto" : undefined,
+                      height: (rot % 180 === 90) ? "auto" : undefined,
                     }}
-                    onClick={() => setLightbox(true)}
-                    className="cursor-zoom-in"
-                    title="คลิกเพื่อดูรูปต้นฉบับ"
                   >
-                    {isPdf ? (
-                      <iframe
-                        src={fileUrl}
-                        title="เอกสาร"
-                        className="rounded-lg shadow-xl border border-border bg-white pointer-events-none"
-                        style={{ width: 660, height: 900 }}
-                      />
-                    ) : (
-                      <img
-                        src={fileUrl}
-                        alt="เอกสาร"
-                        draggable={false}
-                        className="max-w-[660px] w-full rounded-lg shadow-xl border border-border
-                          hover:shadow-2xl transition-shadow duration-200"
-                      />
+                    {/* Image with zoom+rotate — origin always center */}
+                    <div
+                      style={{
+                        transform: `rotate(${rot}deg) scale(${zoom})`,
+                        transformOrigin: "center center",
+                        transition: "transform 0.2s ease",
+                        display: "block",
+                      }}
+                      onClick={() => setLightbox(true)}
+                      className="cursor-zoom-in"
+                      title="คลิกเพื่อดูรูปต้นฉบับ"
+                    >
+                      {isPdf ? (
+                        <iframe
+                          src={fileUrl}
+                          title="เอกสาร"
+                          className="rounded-lg shadow-xl border border-border bg-white pointer-events-none"
+                          style={{ width: 660, height: 900 }}
+                        />
+                      ) : (
+                        <img
+                          src={fileUrl}
+                          alt="เอกสาร"
+                          draggable={false}
+                          className="max-w-[660px] w-full rounded-lg shadow-xl border border-border
+                            hover:shadow-2xl transition-shadow duration-200"
+                        />
+                      )}
+                    </div>
+
+                    {/* Rotate overlay — appears on hover at center of image */}
+                    <div className="absolute inset-0 flex items-center justify-center
+                      opacity-0 group-hover:opacity-100 transition-opacity duration-200
+                      pointer-events-none">
+                      <div className="flex items-center gap-2 pointer-events-auto"
+                        onClick={e => e.stopPropagation()}>
+                        {/* Rotate CCW */}
+                        <button
+                          type="button"
+                          onClick={() => setRot(r => (r - 90 + 360) % 360)}
+                          className="h-10 w-10 rounded-full bg-black/60 hover:bg-black/80
+                            text-white flex items-center justify-center backdrop-blur-sm
+                            transition-all hover:scale-110 shadow-lg"
+                          title="หมุนซ้าย 90°"
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                            <path d="M3 3v5h5"/>
+                          </svg>
+                        </button>
+
+                        {/* Save button — only when rotation changed */}
+                        {rot !== savedRot && (
+                          <button
+                            type="button"
+                            onClick={handleSaveRotation}
+                            disabled={savingRot}
+                            className="h-9 px-3 rounded-full bg-brand-600 hover:bg-brand-700
+                              text-white text-xs font-semibold flex items-center gap-1.5
+                              backdrop-blur-sm transition-all shadow-lg disabled:opacity-60"
+                            title="บันทึกการหมุน"
+                          >
+                            {savingRot ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                                <polyline points="20 6 9 17 4 12"/>
+                              </svg>
+                            )}
+                            บันทึก
+                          </button>
+                        )}
+
+                        {/* Rotate CW */}
+                        <button
+                          type="button"
+                          onClick={() => setRot(r => (r + 90) % 360)}
+                          className="h-10 w-10 rounded-full bg-black/60 hover:bg-black/80
+                            text-white flex items-center justify-center backdrop-blur-sm
+                            transition-all hover:scale-110 shadow-lg"
+                          title="หมุนขวา 90°"
+                        >
+                          <RotateCw className="w-4.5 h-4.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Rotation indicator badge */}
+                    {rot !== 0 && (
+                      <div className="absolute top-2 left-2 bg-black/50 text-white text-[10px]
+                        font-medium px-2 py-1 rounded-full backdrop-blur-sm pointer-events-none">
+                        {rot}°
+                      </div>
                     )}
                   </div>
                 </div>
@@ -954,6 +1379,7 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
                   items={items}
                   setItems={setItems}
                   updateItem={updateItem}
+                  removeItem={removeItem}
                   conf={conf}
                   confPct={confPct}
                   confTone={confTone}
@@ -964,6 +1390,7 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
                   expenseClaimable={expenseClaimable}
                   businessUseNote={businessUseNote}
                   platformName={platformName}
+                  onPlatformChange={setPlatformName}
                   platformRef={platformRef}
                   customerName={customerName}
                   staffName={staffName}
@@ -1043,11 +1470,14 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
                     <div className="flex-1" />
 
                     <button type="button" onClick={handleSaveDraft} disabled={saving}
-                      className="h-10 px-4 rounded-[10px] border border-border bg-card text-sm font-medium
-                        text-foreground hover:bg-muted inline-flex items-center gap-1.5
-                        transition-colors disabled:opacity-50">
+                      className={`h-10 px-4 rounded-[10px] text-sm font-medium inline-flex items-center
+                        gap-1.5 transition-all disabled:opacity-50 ${
+                        isDirty
+                          ? "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 border border-brand-600"
+                          : "border border-border bg-card text-foreground hover:bg-muted"
+                      }`}>
                       <Save className="w-3.5 h-3.5" />
-                      บันทึกร่าง
+                      {isDirty ? "บันทึกการเปลี่ยนแปลง" : "บันทึกร่าง"}
                     </button>
 
                     <button type="button" onClick={() => handleApprove(false)} disabled={saving}
@@ -1426,6 +1856,181 @@ interface VendorMatch {
   last_doc_date: string | null
 }
 
+// ─── PlatformField — editable platform name with autocomplete ────────────────
+const KNOWN_PLATFORMS = [
+  "LINE MAN", "GrabFood", "Shopee Food", "FoodPanda", "Robinhood",
+  "Lazada", "Shopee", "TikTok Shop", "Central Online",
+  "Kerry Express", "Flash Express", "J&T Express", "Thailand Post",
+  "PromptPay", "G-Wallet", "TrueMoney Wallet", "Rabbit LINE Pay",
+  "SCB Easy", "KBank Mobile", "BBL Mobile", "KTB Next", "UOB TMRW",
+  "ไทยธรรมชาติ 60/40", "เป๋าตัง",
+]
+
+function PlatformField({ value, onChange, orgId, canEdit, inputCls }: {
+  value: string; onChange: (v: string) => void
+  orgId: string; canEdit: boolean; inputCls: string
+}) {
+  const [open,        setOpen]        = useState(false)
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [lifeNames,   setLifeNames]   = useState<string[]>([])
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Load merchant names from life_merchants for autocomplete
+  useEffect(() => {
+    if (!orgId) return
+    const sb = createClient()
+    sb.from("life_merchants").select("name").eq("organization_id", orgId)
+      .order("visit_count", { ascending: false }).limit(30)
+      .then(({ data }) => setLifeNames((data ?? []).map((m: any) => m.name)))
+  }, [orgId])
+
+  const handleChange = (v: string) => {
+    onChange(v)
+    if (debounce.current) clearTimeout(debounce.current)
+    debounce.current = setTimeout(() => {
+      const q = v.toLowerCase()
+      const all = [...KNOWN_PLATFORMS, ...lifeNames]
+      const filtered = q
+        ? all.filter(p => p.toLowerCase().includes(q)).slice(0, 6)
+        : all.slice(0, 6)
+      setSuggestions(filtered)
+      setOpen(filtered.length > 0)
+    }, 150)
+  }
+
+  return (
+    <div className="relative">
+      <input
+        value={value ?? ""}
+        onChange={e => handleChange(e.target.value)}
+        onFocus={() => { if (!value) handleChange("") }}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        disabled={!canEdit}
+        placeholder="เช่น LINE MAN, Shopee Food, PromptPay…"
+        className={inputCls}
+      />
+      {open && canEdit && suggestions.length > 0 && (
+        <div className="absolute z-50 left-0 right-0 mt-1 bg-card border border-border rounded-[10px] shadow-lg overflow-hidden">
+          {suggestions.map(s => {
+            const inSystem = lifeNames.includes(s)
+            return (
+              <button key={s} type="button"
+                onMouseDown={() => { onChange(s); setOpen(false) }}
+                className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/60 transition-colors text-left">
+                <span>{s}</span>
+                {inSystem && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">
+                    ✓ มีในระบบ
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── VendorField — editable vendor with merchant lookup ───────────────────────
+function VendorField({ value, onChange, orgId, canEdit, inputCls }: {
+  value: string; onChange: (v: string) => void
+  orgId: string; canEdit: boolean; inputCls: string
+}) {
+  const [open,        setOpen]        = useState(false)
+  const [merchants,   setMerchants]   = useState<Array<{ name: string; visit_count: number; total_spent: number }>>([])
+  const [vendors,     setVendors]     = useState<Array<{ name: string; doc_count: number }>>([])
+  const [inSystem,    setInSystem]    = useState<"loading" | "found" | "new" | null>(null)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Check if vendor exists & load suggestions
+  const checkAndSuggest = useCallback(async (query: string) => {
+    if (!query.trim() || !orgId) { setInSystem(null); setSuggestions([]); setOpen(false); return }
+    setInSystem("loading")
+    const sb = createClient()
+
+    const [{ data: mData }, { data: vData }] = await Promise.all([
+      sb.from("life_merchants").select("name, visit_count, total_spent")
+        .eq("organization_id", orgId).ilike("name", `%${query}%`).limit(6),
+      sb.from("vendors").select("name, doc_count")
+        .eq("organization_id", orgId).ilike("name", `%${query}%`).limit(6),
+    ])
+
+    const found = [...(mData ?? []), ...(vData ?? [])].find(
+      m => m.name.toLowerCase() === query.toLowerCase()
+    )
+    setInSystem(found ? "found" : "new")
+    setMerchants(mData ?? [])
+    setVendors(vData ?? [])
+    setOpen(((mData?.length ?? 0) + (vData?.length ?? 0)) > 0)
+  }, [orgId])
+
+  const [suggestions, setSuggestions] = useState<any[]>([])
+
+  const handleChange = (v: string) => {
+    onChange(v)
+    if (debounce.current) clearTimeout(debounce.current)
+    debounce.current = setTimeout(() => checkAndSuggest(v), 250)
+  }
+
+  const allSuggestions = [
+    ...(merchants ?? []).map(m => ({ name: m.name, sub: `${m.visit_count} ครั้ง · ฿${Number(m.total_spent).toLocaleString()}`, type: "life" })),
+    ...(vendors ?? []).filter(v => !(merchants ?? []).some(m => m.name.toLowerCase() === v.name.toLowerCase()))
+      .map(v => ({ name: v.name, sub: `${v.doc_count} เอกสาร`, type: "vendor" })),
+  ].slice(0, 8)
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <input
+          value={value ?? ""}
+          onChange={e => handleChange(e.target.value)}
+          onFocus={() => { if (value?.trim()) checkAndSuggest(value) }}
+          onBlur={() => setTimeout(() => setOpen(false), 200)}
+          disabled={!canEdit}
+          placeholder="—"
+          className={inputCls}
+        />
+        {/* Status indicator */}
+        {inSystem === "found" && (
+          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">
+            ✓ มีในระบบ
+          </span>
+        )}
+        {inSystem === "new" && value?.trim() && (
+          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium">
+            + ใหม่
+          </span>
+        )}
+      </div>
+      {open && canEdit && allSuggestions.length > 0 && (
+        <div className="absolute z-50 left-0 right-0 mt-1 bg-card border border-border rounded-[10px] shadow-xl overflow-hidden">
+          <div className="px-3 py-1.5 border-b border-border bg-muted/30">
+            <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">ร้านค้าในระบบ</p>
+          </div>
+          {allSuggestions.map(s => (
+            <button key={s.name} type="button"
+              onMouseDown={() => { onChange(s.name); setOpen(false); setInSystem("found") }}
+              className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted/60 transition-colors text-left border-b border-border/50 last:border-0">
+              <div>
+                <p className="text-sm font-medium">{s.name}</p>
+                <p className="text-[11px] text-muted-foreground">{s.sub}</p>
+              </div>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                s.type === "life"
+                  ? "bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400"
+                  : "bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400"
+              }`}>
+                {s.type === "life" ? "Life Graph" : "Vendor"}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function VendorStatusBadge({
   orgId, vendorName, taxId,
 }: {
@@ -1514,6 +2119,7 @@ interface DocDataPanelProps {
   items:            LineItem[]
   setItems:         (fn: (prev: LineItem[]) => LineItem[]) => void
   updateItem:       (i: number, key: keyof LineItem, val: string | number) => void
+  removeItem:       (i: number) => void
   conf:             number
   confPct:          number
   confTone:         string
@@ -1524,6 +2130,7 @@ interface DocDataPanelProps {
   expenseClaimable: boolean
   businessUseNote:  string
   platformName:     string | null
+  onPlatformChange: (v: string) => void   // ← editable
   platformRef:      string | null
   customerName:     string | null
   staffName:        string | null
@@ -1534,11 +2141,11 @@ interface DocDataPanelProps {
 }
 
 function DocDataPanel({
-  doc, form, setForm, items, setItems, updateItem,
+  doc, form, setForm, items, setItems, updateItem, removeItem,
   conf, confPct, confTone, confLabel,
   docCategory, fmt,
   vatClaimable, expenseClaimable, businessUseNote,
-  platformName, platformRef, customerName, staffName,
+  platformName, onPlatformChange, platformRef, customerName, staffName,
   warnings, canEdit, orgId,
 }: DocDataPanelProps) {
   return (
@@ -1622,17 +2229,27 @@ function DocDataPanel({
             )}
           </div>
           <div className="px-3.5 py-3 grid grid-cols-2 gap-3">
-            {platformName && (
-              <div className="col-span-2">
-                <FieldLabel icon={<Tag className="w-3 h-3" />}>แพลตฟอร์ม</FieldLabel>
-                <input value={platformName} disabled className={inputCls} readOnly />
-              </div>
-            )}
+            {/* Platform name — editable with autocomplete */}
+            <div className="col-span-2">
+              <FieldLabel icon={<Tag className="w-3 h-3" />}>แพลตฟอร์ม</FieldLabel>
+              <PlatformField
+                value={platformName ?? ""}
+                onChange={onPlatformChange}
+                orgId={orgId}
+                canEdit={canEdit}
+                inputCls={inputCls}
+              />
+            </div>
+            {/* Vendor name — editable with merchant lookup */}
             <div className="col-span-2">
               <FieldLabel icon={<ShoppingBag className="w-3 h-3" />}>ร้านค้า / ผู้ให้บริการ</FieldLabel>
-              <input value={form.vendor_name} disabled={!canEdit}
-                onChange={e => setForm((f: any) => ({ ...f, vendor_name: e.target.value }))}
-                className={inputCls} placeholder="—" />
+              <VendorField
+                value={form.vendor_name}
+                onChange={v => setForm((f: any) => ({ ...f, vendor_name: v }))}
+                orgId={orgId}
+                canEdit={canEdit}
+                inputCls={inputCls}
+              />
             </div>
             {platformRef && (
               <div className="col-span-2">
@@ -1774,23 +2391,28 @@ function DocDataPanel({
                 <thead className="bg-muted/50 text-[10.5px] uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th className="text-left px-3 py-2 font-medium">รายละเอียด</th>
-                    <th className="text-right px-3 py-2 font-medium w-10">จำนวน</th>
-                    <th className="text-right px-3 py-2 font-medium w-20">ราคา/หน่วย</th>
-                    <th className="text-right px-3 py-2 font-medium w-20">รวม</th>
+                    <th className="text-right px-3 py-2 font-medium w-20">จำนวน</th>
+                    <th className="text-right px-3 py-2 font-medium w-24">ราคา/หน่วย</th>
+                    <th className="text-right px-3 py-2 font-medium w-24">รวม</th>
                     {canEdit && <th className="w-8" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {items.map((it, i) => (
                     <tr key={i} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-3 py-2.5">
-                        <input value={it.description} disabled={!canEdit}
-                          onChange={e => updateItem(i, "description", e.target.value)}
-                          className="w-full bg-transparent outline-none text-foreground
-                            placeholder:text-muted-foreground/50"
-                          placeholder="รายละเอียด" />
+                      <td className="px-3 py-2.5 align-top">
+                        {canEdit ? (
+                          <textarea value={it.description} disabled={!canEdit}
+                            onChange={e => updateItem(i, "description", e.target.value)}
+                            rows={Math.max(1, Math.ceil(it.description.length / 35))}
+                            className="w-full bg-transparent outline-none text-foreground resize-none
+                              placeholder:text-muted-foreground/50 leading-relaxed"
+                            placeholder="รายละเอียด" />
+                        ) : (
+                          <span className="whitespace-pre-wrap leading-relaxed">{it.description}</span>
+                        )}
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+                      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground align-top">
                         {canEdit ? (
                           <input type="number" value={it.quantity} min={0}
                             onChange={e => updateItem(i, "quantity", e.target.value)}
@@ -1810,7 +2432,7 @@ function DocDataPanel({
                       {canEdit && (
                         <td className="text-center pr-1">
                           <button type="button"
-                            onClick={() => setItems((prev: LineItem[]) => prev.filter((_, j) => j !== i))}
+                            onClick={() => removeItem(i)}
                             className="h-6 w-6 rounded-[4px] hover:bg-rose-50 dark:hover:bg-rose-500/20
                               text-muted-foreground hover:text-rose-500 inline-flex items-center
                               justify-center transition-colors">
@@ -1847,7 +2469,7 @@ function DocDataPanel({
                   </span>
                   {canEdit && (
                     <button type="button"
-                      onClick={() => setItems((prev: LineItem[]) => prev.filter((_, j) => j !== i))}
+                      onClick={() => removeItem(i)}
                       className="h-6 w-6 rounded-[4px] hover:bg-rose-50 dark:hover:bg-rose-500/20
                         text-muted-foreground hover:text-rose-500 inline-flex items-center
                         justify-center transition-colors shrink-0">
@@ -1923,15 +2545,38 @@ function DocDataPanel({
         </div>
       </div>
 
-      {/* ── Notes ─────────────────────────────────────────────────────────── */}
+      {/* ── AI Notes (read-only log) ──────────────────────────────────────── */}
+      {form.notes && (
+        <div>
+          <FieldLabel>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-500/15
+                text-amber-700 dark:text-amber-400 font-semibold tracking-wide">AI</span>
+              บันทึกจาก AI
+            </span>
+          </FieldLabel>
+          <div className="w-full rounded-[10px] border border-border bg-muted/40 text-[12.5px]
+            text-muted-foreground p-3 leading-relaxed whitespace-pre-wrap select-text">
+            {form.notes}
+          </div>
+        </div>
+      )}
+
+      {/* ── User Note (editable) ──────────────────────────────────────────── */}
       <div>
-        <FieldLabel>บันทึก / หมายเหตุ</FieldLabel>
-        <textarea rows={2} value={form.notes} disabled={!canEdit}
-          onChange={e => setForm((f: any) => ({ ...f, notes: e.target.value }))}
-          placeholder="เพิ่มบันทึกภายใน..."
+        <FieldLabel>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-100 dark:bg-brand-500/15
+              text-brand-700 dark:text-brand-400 font-semibold tracking-wide">คุณ</span>
+            บันทึก / หมายเหตุ
+          </span>
+        </FieldLabel>
+        <textarea rows={3} value={form.review_note} disabled={!canEdit}
+          onChange={e => setForm((f: any) => ({ ...f, review_note: e.target.value }))}
+          placeholder="เพิ่มบันทึกของคุณ เช่น หมายเหตุการอนุมัติ, รายละเอียดเพิ่มเติม..."
           className="w-full rounded-[10px] border border-border bg-card text-sm p-3
             outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15
-            resize-none transition disabled:opacity-60" />
+            resize-y transition disabled:opacity-60 min-h-[80px]" />
       </div>
     </div>
   )

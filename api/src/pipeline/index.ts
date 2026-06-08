@@ -4,7 +4,25 @@ import { extractDocument }         from "./extractor"
 import type { ExtractedDocument }  from "./extractor"
 import { validateDocument, shouldAutoApprove } from "./validator"
 import { upsertVendor }            from "./vendor"
-import { fetchFewShotExamples, formatFewShotBlock } from "./few-shot"
+import { fetchFewShotExamples, fetchVendorCorrections, formatFewShotBlock } from "./few-shot"
+import { populateLifeGraph }       from "../services/life-graph"
+import { normalizeVendorName }     from "./merchant-normalizer"
+import { measureImageQuality, logImageQuality } from "./image-quality"
+import { fetchErrorPatterns, formatErrorPatternBlock, mineErrorPatterns } from "./pattern-miner"
+
+// Plan → model tier mapping (mirror of web/src/lib/plans.ts — keep in sync)
+const PLAN_MODEL_TIER: Record<string, "haiku" | "smart" | "priority"> = {
+  free:       "haiku",
+  starter:    "haiku",
+  pro:        "smart",
+  team:       "smart",
+  premium:    "priority",
+  business:   "priority",
+  enterprise: "priority",
+}
+function getModelTier(planId: string | null | undefined): "haiku" | "smart" | "priority" {
+  return PLAN_MODEL_TIER[planId ?? "free"] ?? "smart"
+}
 
 /**
  * Copyright © 2026 SolutionX Co., Ltd. (บริษัท โซลูชั่น เอ็กซ์ จำกัด)
@@ -33,12 +51,20 @@ export async function runPipeline(
 ): Promise<PipelineResult> {
   const supabase = createClient()
 
-  // ── Fetch document record ────────────────────────────────────────────────────
+  // ── Fetch document record + org plan ────────────────────────────────────────
   const { data: doc, error: fetchErr } = await supabase
     .from("documents")
     .select("file_path, status")
     .eq("id", documentId)
     .single()
+
+  // Fetch org plan_id for model tier routing (non-blocking if it fails)
+  const { data: orgRow } = await supabase
+    .from("organizations")
+    .select("plan_id")
+    .eq("id", organizationId)
+    .single()
+  const modelTier = getModelTier(orgRow?.plan_id)
 
   if (fetchErr || !doc) {
     return fail(documentId, `Document not found: ${fetchErr?.message}`)
@@ -54,15 +80,28 @@ export async function runPipeline(
     await updateProgress(documentId, "preprocessing", 10)
     const pageBuffers = await prepareImages(doc.file_path)
 
-    // ── Step 2 — AI Vision Extraction (Claude Haiku reads images directly) ───
-    //    No separate OCR step — Claude handles both reading and extraction.
+    // ── Step 1.5 — Image Quality Check ───────────────────────────────────────
+    // Detect blur / exposure issues before sending to AI — inject warnings into prompt
+    const imageQuality = await measureImageQuality(pageBuffers[0])
+    logImageQuality(documentId, imageQuality, 0).catch(() => {/* fire-and-forget */})
+    if (imageQuality.isBlurry) {
+      console.log(`[pipeline] blurry image detected (score: ${imageQuality.blurScore.toFixed(1)}) — warnings injected into prompt`)
+    }
+
+    // ── Step 2 — AI Vision Extraction ────────────────────────────────────────
     await updateProgress(documentId, "extracting", 40)
 
-    // Inject few-shot examples so the model learns this org's naming patterns
-    const fewShotExamples = await fetchFewShotExamples(organizationId)
-    const fewShotBlock    = formatFewShotBlock(fewShotExamples)
+    // Parallel fetch: few-shot + vendor corrections + learned error patterns
+    const [fewShotExamples, vendorCorrections, errorPatterns] = await Promise.all([
+      fetchFewShotExamples(organizationId),
+      fetchVendorCorrections(organizationId),
+      fetchErrorPatterns(organizationId),
+    ])
 
-    const rawExtracted = await extractDocument(pageBuffers, fewShotBlock)
+    const errorPatternBlock = formatErrorPatternBlock(errorPatterns)
+    const fewShotBlock      = errorPatternBlock + formatFewShotBlock(fewShotExamples, vendorCorrections)
+
+    const rawExtracted = await extractDocument(pageBuffers, fewShotBlock, imageQuality.warnings, modelTier)
 
     // ── Multi-document handling ──────────────────────────────────────────────
     //    When a single photo contains multiple receipts the extractor returns
@@ -81,6 +120,12 @@ export async function runPipeline(
       }
     } else {
       extracted = rawExtracted
+    }
+
+    // ── Step 2.5 — Merchant Normalization ───────────────────────────────────
+    // แก้ชื่อร้านค้าที่อ่านผิด เช่น "ปตท." → "PTT", fuzzy match กับ org vendors
+    if (extracted.vendor_name) {
+      extracted.vendor_name = await normalizeVendorName(extracted.vendor_name, organizationId)
     }
 
     // ── Step 3 — Validation ──────────────────────────────────────────────────
@@ -176,6 +221,23 @@ export async function runPipeline(
     upsertVendor(organizationId, extracted).catch(err =>
       console.warn("[vendor] background upsert error:", err?.message)
     )
+
+    // ── Pattern Mining — อัพเดต error patterns จาก corrections ล่าสุด ────────
+    // รัน light mining หลังทุก document เพื่อให้ patterns ทันสมัยเสมอ
+    // จำกัดเฉพาะ corrections ที่เกิดใน 24 ชั่วโมงที่ผ่านมาเพื่อความเร็ว
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    mineErrorPatterns(organizationId, yesterday).catch(err =>
+      console.warn("[pattern-miner] background mining error:", err?.message)
+    )
+
+    // ── Life Graph population — only for approved documents ──────────────────
+    // Builds: life_merchants, life_events, life_memories
+    // Core principle (CLAUDE.md): every document enriches the Life Graph.
+    if (autoApprove) {
+      populateLifeGraph(documentId, organizationId).catch(err =>
+        console.warn("[life-graph] population error:", err?.message)
+      )
+    }
 
     // Audit log
     await supabase.from("document_audit_logs").insert({

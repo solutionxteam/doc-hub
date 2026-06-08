@@ -12,6 +12,8 @@ data class SlippyDocument(
     @SerialName("doc_date")           val docDate: String?        = null,
     @SerialName("total_amount")       val totalAmount: Double?    = null,
     @SerialName("vat_amount")         val vatAmount: Double?      = null,
+    @SerialName("wht_amount")         val whtAmount: Double?      = null,
+    @SerialName("subtotal_amount")    val subtotalAmount: Double? = null,
     @SerialName("net_amount")         val netAmount: Double?      = null,
     val status: String                                            = "pending",
     val source: String                                            = "manual",

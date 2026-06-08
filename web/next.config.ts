@@ -53,8 +53,10 @@ const securityHeaders = [
   { key: "Strict-Transport-Security",  value: "max-age=31536000; includeSubDomains; preload" },
   // Restrict browser features
   {
+    // camera=(self) — allows this page to use camera, blocks third-party iframes
+    // microphone=() — still blocked (not needed by the app)
     key:   "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    value: "camera=(self), microphone=(), geolocation=(), payment=(), usb=()",
   },
   // Block legacy XSS auditor (old browsers)
   { key: "X-XSS-Protection",           value: "1; mode=block" },

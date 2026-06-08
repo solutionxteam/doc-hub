@@ -10,26 +10,32 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import app.slippy.ui.analytics.AnalyticsScreen
 import app.slippy.ui.auth.LoginScreen
 import app.slippy.ui.auth.LoginViewModel
 import app.slippy.ui.dashboard.DashboardScreen
 import app.slippy.ui.documents.CameraScreen
+import app.slippy.ui.documents.DocumentDetailScreen
 import app.slippy.ui.documents.DocumentsScreen
 import app.slippy.ui.profile.ProfileScreen
 import app.slippy.ui.theme.Brand500
 
 sealed class Screen(val route: String) {
-    object Login     : Screen("login")
-    object Dashboard : Screen("dashboard")
-    object Documents : Screen("documents")
-    object Camera    : Screen("camera")
-    object Analytics : Screen("analytics")
-    object Profile   : Screen("profile")
+    object Login           : Screen("login")
+    object Dashboard       : Screen("dashboard")
+    object Documents       : Screen("documents")
+    object Camera          : Screen("camera")
+    object Analytics       : Screen("analytics")
+    object Profile         : Screen("profile")
+    object DocumentDetail  : Screen("documents/{docId}") {
+        fun createRoute(id: String) = "documents/$id"
+    }
 }
 
 data class TabItem(val screen: Screen, val label: String, val icon: ImageVector)
@@ -69,8 +75,21 @@ fun AppNavigation(isSignedIn: Boolean) {
         }
         composable(Screen.Documents.route) {
             MainScaffold(navController, Screen.Documents) {
-                DocumentsScreen(onCamera = { navController.navigate(Screen.Camera.route) })
+                DocumentsScreen(
+                    onCamera   = { navController.navigate(Screen.Camera.route) },
+                    onDocClick = { docId -> navController.navigate(Screen.DocumentDetail.createRoute(docId)) }
+                )
             }
+        }
+        composable(
+            route     = Screen.DocumentDetail.route,
+            arguments = listOf(navArgument("docId") { type = NavType.StringType })
+        ) { backStack ->
+            val docId = backStack.arguments?.getString("docId") ?: return@composable
+            DocumentDetailScreen(
+                docId  = docId,
+                onBack = { navController.popBackStack() }
+            )
         }
         composable(Screen.Camera.route) {
             MainScaffold(navController, Screen.Camera) {

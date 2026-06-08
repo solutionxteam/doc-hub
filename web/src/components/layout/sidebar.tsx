@@ -19,15 +19,48 @@ import { createClient }  from "@/lib/supabase/client"
 import { LogoMark }      from "@/components/ui/logo"
 import type { OrgOption } from "./app-shell"
 
+// ─── Phase 1 feature flags ────────────────────────────────────────────────────
+// Set to true when ready to enable
+const SHOW_PERSONAL_SPACE = true   // Phase 2: Longevity & Wealth, Vita Card ✅
+const SHOW_SOCIAL_SPACE   = true   // Phase 2: Vita Social, Discover, Shop ✅
+const SHOW_LINE_STUDIO    = true   // Phase 1: LINE Bot management
+const SHOW_MOBILE_PREVIEW = false  // internal dev tool
+
+// ─── Business / Organization (Phase 1) ───────────────────────────────────────
+// Tax here = VAT (ภ.พ.30) + WHT (ภ.ง.ด.3/53) — corporate tax only
 const navItems = [
-  { key: "dashboard",   href: "/dashboard",     icon: Icons.Dashboard },
-  { key: "documents",   href: "/documents",     icon: Icons.FileText },
-  { key: "analytics",   href: "/analytics",     icon: Icons.BarChart },
-  { key: "tax",         href: "/tax",            icon: Icons.Receipt },
-  { key: "vendors",     href: "/vendors",        icon: Icons.Building },
-  { key: "split",       href: "/split",          icon: Icons.Split },
-  { key: "lineStudio",  href: "/line-studio",    icon: Icons.LineBot },
-  { key: "mobile",      href: "/mobile",         icon: Icons.Smartphone },
+  { key: "dashboard",  href: "/dashboard",   icon: Icons.Dashboard },
+  { key: "life",       href: "/life",         icon: Icons.Brain     },  // Life Graph ← core
+  { key: "documents",  href: "/documents",   icon: Icons.FileText  },
+  { key: "analytics",  href: "/analytics",   icon: Icons.BarChart  },
+  { key: "budget",     href: "/budget",       icon: Icons.Target    },
+  { key: "trips",      href: "/trips",        icon: Icons.MapPin    },  // ทริป & กิจกรรม
+  { key: "split",      href: "/split",        icon: Icons.Split     },
+  { key: "claims",     href: "/claims",       icon: Icons.Briefcase },  // Business Suite V4
+  { key: "tax",        href: "/tax",          icon: Icons.Receipt   },
+  { key: "vendors",    href: "/vendors",      icon: Icons.Building  },
+  ...(SHOW_LINE_STUDIO    ? [{ key: "lineStudio", href: "/line-studio", icon: Icons.LineBot  }] : []),
+  ...(SHOW_MOBILE_PREVIEW ? [{ key: "mobile",     href: "/mobile",      icon: Icons.Smartphone }] : []),
+]
+
+// ─── Personal Space (Phase 2) ─────────────────────────────────────────────────
+// Note: tax is in navItems because /tax now has BOTH org + personal tabs in one page
+const personalItems = [
+  { key: "personal",   href: "/personal",          icon: Icons.Leaf     },  // overview
+  { key: "split",      href: "/split",             icon: Icons.Split    },  // หารบิล (ส่วนตัว)
+  { key: "health",     href: "/personal/health",   icon: Icons.Activity },
+  { key: "planner",    href: "/personal/planner",  icon: Icons.Target   },
+  // Phase 2 — hidden until Vita scoring is stable:
+  // { key: "wealth", href: "/personal/wealth", icon: Icons.Wallet },
+  // { key: "vita",   href: "/personal/vita",   icon: Icons.Heart  },
+]
+
+// ─── Vita Social (Phase 2) ────────────────────────────────────────────────────
+const socialItems = [
+  { key: "social",     href: "/social",          icon: Icons.Globe,       label: "Social Feed", color: "text-violet-500 dark:text-violet-400" },
+  { key: "discover",   href: "/social/discover", icon: Icons.Compass,     label: "ค้นพบ",       color: "text-indigo-500 dark:text-indigo-400" },
+  { key: "createPost", href: "/social/create",   icon: Icons.PenLine,     label: "สร้าง Post",  color: "text-pink-500 dark:text-pink-400"    },
+  { key: "shop",       href: "/shop",            icon: Icons.ShoppingBag, label: "ร้านค้า",     color: "text-fuchsia-500 dark:text-fuchsia-400" },
 ]
 
 const bottomItems = [
@@ -50,15 +83,26 @@ interface SidebarProps {
   onToggle:       () => void
   onMobileClose:  () => void
   isSuperadmin?:  boolean
+  accountType?:   "business" | "personal"
 }
 
-export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, onMobileClose, isSuperadmin = false }: SidebarProps) {
+export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, onMobileClose, isSuperadmin = false, accountType = "business" }: SidebarProps) {
   const t        = useTranslations("nav")
   const pathname = usePathname()
   const router   = useRouter()
   const supabase = createClient()
   const [orgMenuOpen, setOrgMenuOpen] = useState(false)
   const [switching,   setSwitching]   = useState<string | null>(null)
+
+  // Track current account type locally so it updates instantly on org switch
+  // (before server re-render completes)
+  const [currentAccountType, setCurrentAccountType] = useState<"business" | "personal">(accountType)
+
+  // Sync with prop when server re-renders with new org
+  const prevOrgId = useState(org.id)[0]
+  if (org.id !== prevOrgId || accountType !== currentAccountType) {
+    // Intentional render-time update (safe: just syncing prop → state)
+  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -68,6 +112,13 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
   const handleSwitchOrg = async (orgId: string) => {
     if (orgId === org.id) { setOrgMenuOpen(false); return }
     setSwitching(orgId)
+
+    // Update local account type immediately for instant UI feedback
+    const targetOrg = allOrgs.find(o => o.id === orgId)
+    if (targetOrg?.accountType) {
+      setCurrentAccountType(targetOrg.accountType)
+    }
+
     await fetch("/api/org/switch", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
@@ -180,24 +231,38 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
           <div className="absolute left-3 right-3 top-full mt-1 z-50
             rounded-xl border bg-popover shadow-lg overflow-hidden">
             <div className="p-1 space-y-0.5 max-h-56 overflow-y-auto">
-              {allOrgs.map(o => (
-                <button
-                  key={o.id}
-                  onClick={() => handleSwitchOrg(o.id)}
-                  disabled={switching === o.id}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left
-                    hover:bg-muted transition-colors disabled:opacity-60"
-                >
-                  <div className="w-7 h-7 rounded-md bg-brand-500/10 flex items-center justify-center shrink-0">
-                    <Icons.Building2 size={14} className="text-brand-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{o.name}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{o.plan} · {o.role}</p>
-                  </div>
-                  {o.id === org.id && <Icons.Check size={16} className="text-brand-500 shrink-0" />}
-                </button>
-              ))}
+              {allOrgs.map(o => {
+                const isPersonal = o.accountType === "personal"
+                return (
+                  <button
+                    key={o.id}
+                    onClick={() => handleSwitchOrg(o.id)}
+                    disabled={switching === o.id}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left
+                      hover:bg-muted transition-colors disabled:opacity-60"
+                  >
+                    {/* Icon ต่างกันตาม account type */}
+                    <div className={cn(
+                      "w-7 h-7 rounded-md flex items-center justify-center shrink-0",
+                      isPersonal
+                        ? "bg-emerald-500/10"
+                        : "bg-brand-500/10"
+                    )}>
+                      {isPersonal
+                        ? <Icons.User size={14} className="text-emerald-600 dark:text-emerald-400" />
+                        : <Icons.Building2 size={14} className="text-brand-500" />
+                      }
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{o.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {isPersonal ? "ส่วนตัว" : "องค์กร"} · {o.plan} · {o.role}
+                      </p>
+                    </div>
+                    {o.id === org.id && <Icons.Check size={16} className="text-brand-500 shrink-0" />}
+                  </button>
+                )
+              })}
             </div>
             <div className="border-t p-1">
               <Link
@@ -221,11 +286,15 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
       )}>
         {navItems.map(({ key, href, icon: Icon }) => {
           const active = isActive(href)
+          // Show tax label based on current account type
+          const label = key === "tax"
+            ? (currentAccountType === "personal" ? "ภาษีส่วนบุคคล" : "ภาษีองค์กร")
+            : t(key as any)
           return (
             <Link
               key={key}
               href={href}
-              title={collapsed ? t(key as any) : undefined}
+              title={collapsed ? label : undefined}
               className={cn(
                 "sidebar-item",
                 active && "active",
@@ -233,12 +302,94 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
               )}
             >
               <Icon className={cn("w-[18px] h-[18px] shrink-0", active ? "text-brand-600 dark:text-brand-300" : "text-sidebar-muted")} />
-              <span className={cn("truncate", collapsed && "lg:hidden")}>{t(key as any)}</span>
+              <span className={cn("truncate", collapsed && "lg:hidden")}>{label}</span>
               {active && !collapsed && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-brand-500 shrink-0 lg:block hidden" />}
             </Link>
           )
         })}
 
+        {/* ── Personal Space (Phase 2 — hidden in Phase 1) ── */}
+        {SHOW_PERSONAL_SPACE && (<>
+          <div className={cn(collapsed ? "lg:block hidden pt-3 pb-1" : "hidden")}>
+            <div className="border-t border-sidebar-border" />
+          </div>
+          <div className={cn(collapsed ? "lg:hidden pt-4 pb-1" : "pt-4 pb-1")}>
+            <p className="px-3 text-xs font-medium text-sidebar-muted uppercase tracking-wider flex items-center gap-1.5">
+              <Icons.Leaf size={11} className="text-emerald-500" />
+              Personal
+            </p>
+          </div>
+          {personalItems.map(({ key, href, icon: Icon }) => {
+            const active = isActive(href)
+            return (
+              <Link key={key} href={href} title={collapsed ? key : undefined}
+                className={cn("sidebar-item", active && "active", collapsed && "lg:justify-center lg:px-0")}>
+                <Icon className={cn("w-[18px] h-[18px] shrink-0", active ? "text-emerald-600 dark:text-emerald-400" : "text-sidebar-muted")} />
+                <span className={cn("truncate", collapsed && "lg:hidden")}>{t(key as any)}</span>
+                {active && !collapsed && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0 lg:block hidden" />}
+              </Link>
+            )
+          })}
+        </>)}
+
+        {/* ── Vita Social (Phase 2 — hidden in Phase 1) ── */}
+        {SHOW_SOCIAL_SPACE && (<>
+          <div className={cn(collapsed ? "lg:block hidden pt-3 pb-1" : "hidden")}>
+            <div className="border-t border-sidebar-border" />
+          </div>
+          <div className={cn(collapsed ? "lg:hidden pt-5 pb-1.5 px-3" : "pt-5 pb-1.5 px-3")}>
+            <div className="flex items-center gap-2">
+              <div className="h-px flex-1 bg-gradient-to-r from-violet-500/30 via-pink-500/20 to-transparent" />
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full
+                bg-gradient-to-r from-violet-500/10 to-pink-500/10
+                border border-violet-500/15 dark:border-violet-500/20">
+                <div className="flex -space-x-0.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-pink-500" />
+                </div>
+                <span className="text-[10px] font-semibold tracking-wider uppercase
+                  text-transparent bg-clip-text bg-gradient-to-r from-violet-600 to-pink-600
+                  dark:from-violet-400 dark:to-pink-400">
+                  Vita Social
+                </span>
+              </div>
+              <div className="h-px flex-1 bg-gradient-to-l from-pink-500/30 via-violet-500/20 to-transparent" />
+            </div>
+          </div>
+          <div className={cn(collapsed ? "lg:flex hidden justify-center py-2" : "hidden")}>
+            <div className="flex gap-0.5">
+              <div className="w-1 h-1 rounded-full bg-violet-500/60" />
+              <div className="w-1 h-1 rounded-full bg-pink-500/60" />
+            </div>
+          </div>
+          <div className="space-y-0.5 px-2">
+            {socialItems.map(({ key, href, icon: Icon, color }) => {
+              const active = isActive(href)
+              return (
+                <Link key={key} href={href} title={collapsed ? t(key as any) : undefined}
+                  className={cn(
+                    "group flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[13px] font-medium transition-all duration-150",
+                    active
+                      ? "bg-gradient-to-r from-violet-500/12 to-pink-500/8 dark:from-violet-500/20 dark:to-pink-500/12 text-sidebar-fg shadow-sm border border-violet-500/15 dark:border-violet-500/25"
+                      : "text-sidebar-muted hover:text-sidebar-fg hover:bg-sidebar-muted/8",
+                    collapsed && "lg:justify-center lg:px-0 lg:w-10 lg:h-10 lg:mx-auto"
+                  )}>
+                  <span className={cn("w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all",
+                    active ? "bg-gradient-to-br from-violet-500/20 to-pink-500/15 dark:from-violet-500/30 dark:to-pink-500/20" : "group-hover:bg-sidebar-muted/10")}>
+                    <Icon className={cn("w-[15px] h-[15px] transition-colors", active ? color : "text-sidebar-muted group-hover:text-sidebar-fg")} />
+                  </span>
+                  <span className={cn("truncate flex-1", collapsed && "lg:hidden")}>{t(key as any)}</span>
+                  {active && !collapsed && (
+                    <span className="ml-auto w-1.5 h-1.5 rounded-full shrink-0 lg:block hidden bg-gradient-to-b from-violet-500 to-pink-500" />
+                  )}
+                </Link>
+              )
+            })}
+          </div>
+        </>)}
+
+        {/* ── Settings section ── */}
         <div className={cn(collapsed ? "lg:block hidden pt-3 pb-1" : "hidden")}>
           <div className="border-t border-sidebar-border" />
         </div>

@@ -9,7 +9,8 @@
  * in whole or in part, is strictly prohibited without prior written permission.
  */
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import {
   Copy, Check, RefreshCw, Trash2, ChevronRight, QrCode,
@@ -53,9 +54,9 @@ interface LineStudioClientProps {
 /* ─── Static bot config (env values, not from DB) ────────────────────────── */
 
 const BOT_CONFIG = {
-  name:      "@slippy_bot",
-  channelId: "2006712345",
-  webhook:   "https://api.slippy.app/webhook/line",
+  name:      process.env.NEXT_PUBLIC_LINE_BOT_ID ?? "@slippy",
+  channelId: process.env.NEXT_PUBLIC_LINE_CHANNEL_ID ?? "—",
+  webhook:   `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/webhooks/line`,
 }
 
 const COMMANDS = [
@@ -513,8 +514,47 @@ export function LineStudioClient({
   monthlySeries,
   slipTotal,
 }: LineStudioClientProps) {
+  const supabase   = createClient()
   const [accounts,  setAccounts]  = useState(initialAccounts)
+  const [liveItems, setLiveItems] = useState<LineActivity[]>(activity)
   const [activeTab, setActiveTab] = useState<"activity" | "accounts" | "commands">("activity")
+  const [newCount,  setNewCount]  = useState(0)
+
+  // ── Realtime: LINE documents ─────────────────────────────────────────────
+  useEffect(() => {
+    const channel = supabase
+      .channel(`line-studio:${orgId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "documents",
+          filter: `organization_id=eq.${orgId}` },
+        async (payload) => {
+          if (payload.eventType === "INSERT" && (payload.new as any).source === "line") {
+            const d = payload.new as any
+            const newItem: LineActivity = {
+              id:         d.id,
+              vendorName: d.vendor_name ?? "เอกสาร LINE",
+              amount:     d.total_amount,
+              status:     d.status,
+              createdAt:  d.created_at,
+              docType:    d.doc_category ?? "",
+            }
+            setLiveItems(prev => [newItem, ...prev].slice(0, 10))
+            setNewCount(n => n + 1)
+          } else if (payload.eventType === "UPDATE") {
+            const d = payload.new as any
+            setLiveItems(prev =>
+              prev.map(item => item.id === d.id
+                ? { ...item, status: d.status, vendorName: d.vendor_name ?? item.vendorName, amount: d.total_amount }
+                : item
+              )
+            )
+          }
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [orgId, supabase])
 
   const disconnect = async (id: string) => {
     try {
@@ -627,8 +667,8 @@ export function LineStudioClient({
                   {activity.length > 0 ? `${activity.length} รายการล่าสุด` : "ไม่มีข้อมูล"}
                 </span>
               </div>
-              <ActivityFeed items={activity} />
-              {activity.length > 0 && (
+              <ActivityFeed items={liveItems} />
+              {liveItems.length > 0 && (
                 <div className="px-5 py-3 border-t">
                   <button className="text-xs text-[#06C755] hover:underline flex items-center gap-1">
                     ดูทั้งหมด <ChevronRight className="w-3.5 h-3.5" />

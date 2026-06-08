@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { fmtTHB } from '@/lib/utils'
 import { Brand, Light } from '@/constants/colors'
 
-interface MonthItem { m: string; spend: number }
+interface MonthItem { m: string; spend: number; vat: number }
 
 const MONTHS_TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
 
@@ -35,43 +35,78 @@ export default function AnalyticsScreen() {
   const [monthly,   setMonthly]  = useState<MonthItem[]>([])
   const [cats,      setCats]     = useState<{ name: string; value: number }[]>([])
   const [yearTotal, setYearTotal]= useState(0)
+  const [vatInput,  setVatInput] = useState(0)
   const [loading,   setLoading]  = useState(true)
 
   useEffect(() => {
     if (!org) return
     ;(async () => {
-      const { data } = await supabase
-        .from('monthly_expense_summary')
-        .select('*')
-        .eq('organization_id', org.id)
-        .order('month', { ascending: true })
-        .limit(12)
+      const now = new Date()
+      const ym  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
-      if (data && data.length > 0) {
-        const series = data.map((row: any) => {
+      const [{ data: summaryData }, { data: docData }, { data: monthData }] = await Promise.all([
+        supabase
+          .from('monthly_expense_summary')
+          .select('*')
+          .eq('organization_id', org.id)
+          .order('month', { ascending: true })
+          .limit(12),
+        supabase
+          .from('documents')
+          .select('category, total_amount')
+          .eq('organization_id', org.id)
+          .not('status', 'in', '(pending,failed,rejected,processing)')
+          .gte('doc_date', `${now.getFullYear()}-01-01`),
+        supabase
+          .from('documents')
+          .select('total_amount, vat_amount, status')
+          .eq('organization_id', org.id)
+          .like('doc_date', `${ym}%`),
+      ])
+
+      // Monthly bar data
+      if (summaryData && summaryData.length > 0) {
+        const series: MonthItem[] = summaryData.map((row: any) => {
           const d = new Date(row.month + '-01')
-          return { m: MONTHS_TH[d.getMonth()], spend: row.grand_total ?? 0 }
+          return { m: MONTHS_TH[d.getMonth()], spend: row.grand_total ?? 0, vat: 0 }
         })
         setMonthly(series)
         setYearTotal(series.reduce((a, x) => a + x.spend, 0))
       } else {
-        // Static fallback
         const fallback: MonthItem[] = [
-          { m:'ต.ค.', spend:118400 }, { m:'พ.ย.', spend:99300 }, { m:'ธ.ค.', spend:132800 },
-          { m:'ม.ค.', spend:121500 }, { m:'ก.พ.', spend:109700 }, { m:'มี.ค.', spend:127200 },
-          { m:'เม.ย.', spend:131979 }, { m:'พ.ค.', spend:142380 },
+          { m:'ต.ค.', spend:118400, vat:0 }, { m:'พ.ย.', spend:99300, vat:0 }, { m:'ธ.ค.', spend:132800, vat:0 },
+          { m:'ม.ค.', spend:121500, vat:0 }, { m:'ก.พ.', spend:109700, vat:0 }, { m:'มี.ค.', spend:127200, vat:0 },
+          { m:'เม.ย.', spend:131979, vat:0 }, { m:'พ.ค.', spend:142380, vat:0 },
         ]
         setMonthly(fallback)
         setYearTotal(fallback.reduce((a, x) => a + x.spend, 0))
       }
-      // Category static (would normally come from another query)
-      setCats([
+
+      // Category breakdown from real documents
+      const catMap: Record<string, number> = {}
+      for (const d of docData ?? []) {
+        const k = (d as any).category || 'อื่นๆ'
+        catMap[k] = (catMap[k] ?? 0) + ((d as any).total_amount ?? 0)
+      }
+      const catList = Object.entries(catMap)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 6)
+      setCats(catList.length > 0 ? catList : [
         { name:'ค่า Software / Cloud', value:38200 },
         { name:'ค่าเช่าสำนักงาน',      value:35000 },
         { name:'ค่าเดินทาง',           value:18700 },
         { name:'ของใช้สำนักงาน',       value:14250 },
         { name:'อาหารและเครื่องดื่ม',  value:13420 },
       ])
+
+      // Current-month VAT input
+      const activeMonth = (monthData ?? []).filter(
+        x => !['pending','failed','rejected','processing'].includes((x as any).status)
+      )
+      const vatSum = activeMonth.reduce((a, x) => a + ((x as any).vat_amount ?? 0), 0)
+      setVatInput(vatSum)
+
       setLoading(false)
     })()
   }, [org])
@@ -141,6 +176,15 @@ export default function AnalyticsScreen() {
               <Text style={an.monthValue}>{fmtTHB(m.spend)}</Text>
             </View>
           ))}
+        </View>
+
+        {/* VAT Summary */}
+        <View style={[an.card, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+          <View>
+            <Text style={an.cardTitle}>ภาษีซื้อเดือนนี้ (Input VAT)</Text>
+            <Text style={{ fontSize: 11, color: Light.mutedFg, marginTop: 2 }}>เฉพาะเอกสารที่อนุมัติ/ส่งแล้ว</Text>
+          </View>
+          <Text style={{ fontSize: 20, fontWeight: '800', color: Brand[500] }}>{fmtTHB(vatInput)}</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

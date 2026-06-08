@@ -20,15 +20,7 @@ import app.slippy.ui.theme.*
 import app.slippy.utils.fmtTHB
 
 private val catColors = listOf(Brand500, StatusPushed, Color(0xFF06B6D4),
-    StatusApproved, Color(0xFFF97316))
-
-private val categories = listOf(
-    "ค่า Software / Cloud" to 38200.0,
-    "ค่าเช่าสำนักงาน"      to 35000.0,
-    "ค่าเดินทาง"           to 18700.0,
-    "ของใช้สำนักงาน"       to 14250.0,
-    "อาหารและเครื่องดื่ม"  to 13420.0,
-)
+    StatusApproved, Color(0xFFF97316), Color(0xFFEC4899))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,26 +93,33 @@ fun AnalyticsScreen(vm: AnalyticsViewModel = hiltViewModel()) {
 
                 // Category breakdown
                 item {
-                    val total = categories.sumOf { it.second }.coerceAtLeast(1.0)
+                    val cats = state.catBreakdown.ifEmpty { emptyList() }
+                    val total = cats.sumOf { it.second }.coerceAtLeast(1.0)
                     SectionCard("แยกตามหมวดหมู่") {
-                        categories.forEachIndexed { i, (name, value) ->
-                            if (i > 0) Spacer(Modifier.height(12.dp))
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        if (cats.isEmpty()) {
+                            Text("ไม่มีข้อมูลหมวดหมู่",
+                                fontSize = 13.sp, color = TextSecondary,
+                                modifier = Modifier.padding(vertical = 8.dp))
+                        } else {
+                            cats.forEachIndexed { i, (name, value) ->
+                                if (i > 0) Spacer(Modifier.height(12.dp))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically) {
-                                    Box(Modifier.size(8.dp).background(catColors[i % catColors.size], CircleShape))
-                                    Text(name, fontSize = 12.sp, color = TextPrimary)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically) {
+                                        Box(Modifier.size(8.dp).background(catColors[i % catColors.size], CircleShape))
+                                        Text(name, fontSize = 12.sp, color = TextPrimary)
+                                    }
+                                    Text(fmtTHB(value), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                                 }
-                                Text(fmtTHB(value), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                Spacer(Modifier.height(4.dp))
+                                LinearProgressIndicator(
+                                    progress   = { (value / total).toFloat() },
+                                    modifier   = Modifier.fillMaxWidth().height(4.dp),
+                                    color      = catColors[i % catColors.size],
+                                    trackColor = BorderColor
+                                )
                             }
-                            Spacer(Modifier.height(4.dp))
-                            LinearProgressIndicator(
-                                progress   = { (value / total).toFloat() },
-                                modifier   = Modifier.fillMaxWidth().height(4.dp),
-                                color      = catColors[i % catColors.size],
-                                trackColor = BorderColor
-                            )
                         }
                     }
                 }

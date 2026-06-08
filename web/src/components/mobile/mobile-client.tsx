@@ -9,7 +9,7 @@
  * in whole or in part, is strictly prohibited without prior written permission.
  */
 
-import { useState, useEffect, createContext, useContext, useCallback } from "react"
+import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react"
 import { LogoMark } from "@/components/ui/logo"
 import { Icons }    from "@/components/ui/icons"
 import { cn }       from "@/lib/utils"
@@ -432,60 +432,222 @@ function MDocDetail({ doc }: { doc: Doc }) {
 
 // ─── CAPTURE ─────────────────────────────────────────────────────────────────
 
+// ─── Real camera with auto-detect ────────────────────────────────────────────
 function MCapture() {
   const { navigate, back } = useMA()
-  const [flash, setFlash] = useState(false)
-  const snap = () => {
+  const videoRef   = useRef<HTMLVideoElement>(null)
+  const canvasRef  = useRef<HTMLCanvasElement>(null)
+  const streamRef  = useRef<MediaStream | null>(null)
+  const detectRef  = useRef<ReturnType<typeof setInterval> | null>(null)
+  const holdRef    = useRef(0)   // consecutive frames with receipt detected
+
+  const [flash,       setFlash]       = useState(false)
+  const [facing,      setFacing]      = useState<'environment'|'user'>('environment')
+  const [permError,   setPermError]   = useState(false)
+  const [detected,    setDetected]    = useState(false)   // receipt in frame?
+  const [autoScore,   setAutoScore]   = useState(0)       // 0–100 confidence
+  const [autoCapturing, setAutoCapturing] = useState(false)
+
+  // ── Start camera ──────────────────────────────────────────────
+  const startCamera = useCallback(async (facingMode: 'environment'|'user') => {
+    // Stop existing stream
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    setPermError(false)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
+    } catch {
+      setPermError(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    startCamera(facing)
+    return () => {
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      if (detectRef.current) clearInterval(detectRef.current)
+    }
+  }, [facing, startCamera])
+
+  // ── Auto-detect receipt (canvas edge analysis) ────────────────
+  useEffect(() => {
+    if (detectRef.current) clearInterval(detectRef.current)
+
+    detectRef.current = setInterval(() => {
+      const video  = videoRef.current
+      const canvas = canvasRef.current
+      if (!video || !canvas || video.readyState < 2) return
+
+      const W = 80, H = 60
+      canvas.width  = W
+      canvas.height = H
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(video, 0, 0, W, H)
+      const { data } = ctx.getImageData(0, 0, W, H)
+
+      // Count bright pixels (paper = high luminance ≥ 180)
+      let bright = 0
+      for (let i = 0; i < data.length; i += 4) {
+        const lum = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2]
+        if (lum > 180) bright++
+      }
+      const brightPct = bright / (W * H)  // 0–1
+
+      // Detect edge contrast between adjacent pixels
+      let edges = 0
+      for (let y = 0; y < H - 1; y++) {
+        for (let x = 0; x < W - 1; x++) {
+          const i  = (y * W + x) * 4
+          const ir = (y * W + x + 1) * 4
+          const id = ((y + 1) * W + x) * 4
+          const lumC  = 0.299*data[i]  + 0.587*data[i+1]  + 0.114*data[i+2]
+          const lumR  = 0.299*data[ir] + 0.587*data[ir+1] + 0.114*data[ir+2]
+          const lumD  = 0.299*data[id] + 0.587*data[id+1] + 0.114*data[id+2]
+          if (Math.abs(lumC - lumR) > 30 || Math.abs(lumC - lumD) > 30) edges++
+        }
+      }
+      const edgePct = edges / (W * H)
+
+      // Receipt score: needs a large bright region (paper) + clear edges (text/border)
+      // brightPct 0.25–0.75 = likely has paper in view, edgePct > 0.05 = text visible
+      const score = Math.round(
+        Math.min(100, Math.max(0,
+          (brightPct > 0.2 && brightPct < 0.85 ? 50 : 0) +
+          (edgePct > 0.05 ? Math.min(50, edgePct * 600) : 0)
+        ))
+      )
+      setAutoScore(score)
+      const found = score >= 60
+      setDetected(found)
+
+      if (found) {
+        holdRef.current++
+        if (holdRef.current >= 8) {   // ~2 seconds at 250ms interval
+          holdRef.current = 0
+          doSnap()
+        }
+      } else {
+        holdRef.current = 0
+      }
+    }, 250)
+
+    return () => { if (detectRef.current) clearInterval(detectRef.current) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Capture frame ─────────────────────────────────────────────
+  const doSnap = useCallback(() => {
+    setAutoCapturing(true)
     setFlash(true)
-    setTimeout(() => setFlash(false), 240)
-    setTimeout(() => navigate({ type:'capture-review' }), 600)
-  }
+    setTimeout(() => { setFlash(false); setAutoCapturing(false) }, 260)
+    setTimeout(() => navigate({ type:'capture-review' }), 700)
+  }, [navigate])
+
+  const flipCamera = () => setFacing(f => f === 'environment' ? 'user' : 'environment')
+
+  // ── Permission denied UI ──────────────────────────────────────
+  if (permError) return (
+    <div className="h-full bg-slate-900 flex flex-col items-center justify-center gap-4 px-8 text-center">
+      <Icons.Camera size={48} className="text-slate-500"/>
+      <p className="text-white font-semibold">ไม่สามารถเข้าถึงกล้องได้</p>
+      <p className="text-slate-400 text-sm">กรุณาอนุญาตการใช้กล้องในการตั้งค่าเบราว์เซอร์ แล้วโหลดหน้าใหม่</p>
+      <button
+        onClick={() => startCamera(facing)}
+        className="mt-2 px-5 py-2.5 rounded-xl bg-brand-500 text-white text-sm font-semibold"
+      >
+        ลองอีกครั้ง
+      </button>
+      <button onClick={back} className="text-slate-400 text-sm">← กลับ</button>
+    </div>
+  )
+
+  const cornerCls = 'absolute h-6 w-6 border-[3px] rounded-[3px]'
+  const borderCol = detected ? 'border-emerald-400' : 'border-white/60'
+
   return (
-    <div className="relative h-full bg-slate-900 text-white overflow-hidden">
-      <div className="absolute inset-0" style={{ background:'linear-gradient(180deg,#0f172a 0%,#1e293b 100%)' }}>
-        <div className="absolute inset-0 opacity-15" style={{ backgroundImage:'radial-gradient(white 1px,transparent 1px)', backgroundSize:'14px 14px' }}/>
+    <div className="relative h-full bg-black overflow-hidden">
+      {/* Live camera feed */}
+      <video
+        ref={videoRef}
+        className="absolute inset-0 w-full h-full object-cover"
+        playsInline muted autoPlay
+      />
+      {/* Hidden canvas for analysis */}
+      <canvas ref={canvasRef} className="hidden"/>
+
+      {/* Viewfinder corners */}
+      <div className="absolute inset-x-8 top-[14%] bottom-[26%] pointer-events-none">
+        <span className={`${cornerCls} ${borderCol} top-0 left-0 border-r-0 border-b-0`}/>
+        <span className={`${cornerCls} ${borderCol} top-0 right-0 border-l-0 border-b-0`}/>
+        <span className={`${cornerCls} ${borderCol} bottom-0 left-0 border-r-0 border-t-0`}/>
+        <span className={`${cornerCls} ${borderCol} bottom-0 right-0 border-l-0 border-t-0`}/>
       </div>
-      <div className="absolute inset-x-10 top-[16%] bottom-[28%] rounded-[6px] bg-white text-slate-900 p-3 shadow-2xl rotate-[1.5deg]">
-        <div className="text-center text-[10px] font-bold border-b border-slate-200 pb-1.5">STARBUCKS COFFEE</div>
-        <div className="text-[7.5px] text-slate-400 text-center mt-0.5">Thonglor 10</div>
-        <div className="mt-2 space-y-0.5 text-[8px]">
-          <div className="flex justify-between"><span>Cappuccino Tall</span><span>110.00</span></div>
-          <div className="flex justify-between"><span>Almond Croissant</span><span>75.00</span></div>
+
+      {/* Top bar */}
+      <div className="absolute top-3 inset-x-0 px-3 flex items-center justify-between z-10">
+        <button onClick={back}
+          className="h-9 w-9 bg-black/50 backdrop-blur rounded-full flex items-center justify-center">
+          <Icons.X size={16} className="text-white"/>
+        </button>
+        <div className={`px-3 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1.5 backdrop-blur ${
+          detected ? 'bg-emerald-500 text-white' : 'bg-black/50 text-white/80'
+        }`}>
+          <Icons.Sparkles size={11}/>
+          {detected ? `พบใบเสร็จ ${autoScore}%` : 'ส่องกล้องที่ใบเสร็จ'}
         </div>
-        <div className="mt-2 pt-1 border-t border-dashed border-slate-300 flex justify-between text-[9.5px] font-bold">
-          <span>TOTAL</span><span>185.00</span>
+        <button onClick={flipCamera}
+          className="h-9 w-9 bg-black/50 backdrop-blur rounded-full flex items-center justify-center">
+          <Icons.RotateCw size={16} className="text-white"/>
+        </button>
+      </div>
+
+      {/* Auto-detect progress bar */}
+      {detected && holdRef.current > 0 && (
+        <div className="absolute left-8 right-8 bottom-[28%] h-1 bg-white/20 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-emerald-400 rounded-full transition-all duration-200"
+            style={{ width: `${(holdRef.current / 8) * 100}%` }}
+          />
         </div>
+      )}
+
+      {/* Hint text */}
+      <div className="absolute bottom-[28%] left-1/2 -translate-x-1/2 mt-3 pointer-events-none">
+        <span className="text-white/70 text-[11px] font-medium">
+          {detected ? 'ถ่ายอัตโนมัติในอีกครู่...' : 'จัดใบเสร็จให้อยู่ในกรอบ'}
+        </span>
       </div>
-      {['top-[12%] left-7 border-t-[3px] border-l-[3px]','top-[12%] right-7 border-t-[3px] border-r-[3px]','bottom-[24%] left-7 border-b-[3px] border-l-[3px]','bottom-[24%] right-7 border-b-[3px] border-r-[3px]'].map((c,i) => (
-        <span key={i} className={`absolute h-6 w-6 border-emerald-400 rounded-[3px] ${c}`}/>
-      ))}
-      <div className="absolute top-3 inset-x-0 px-3 flex items-center justify-between">
-        <button onClick={back} className="h-9 w-9 bg-black/40 backdrop-blur rounded-full flex items-center justify-center"><Icons.X size={16}/></button>
-        <div className="bg-black/40 backdrop-blur px-3 py-1 rounded-full text-[11px] font-medium flex items-center gap-1.5"><Icons.Sparkles size={11}/>AI พร้อมแล้ว</div>
-        <button className="h-9 w-9 bg-black/40 backdrop-blur rounded-full flex items-center justify-center"><Icons.Zap size={16}/></button>
-      </div>
-      <div className="absolute bottom-[28%] left-1/2 -translate-x-1/2">
-        <div className="bg-emerald-500 text-white px-3 py-1 rounded-full text-[11px] font-semibold inline-flex items-center gap-1 shadow-lg shadow-emerald-500/40">
-          <Icons.Check size={12}/> พบใบเสร็จแล้ว
-        </div>
-      </div>
+
+      {/* Flash overlay */}
       {flash && <div className="absolute inset-0 bg-white z-50"/>}
-      <div className="absolute bottom-0 inset-x-0 h-[150px] bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col items-center justify-end pb-6 px-6">
-        <div className="flex items-center gap-4 mb-4 text-[11.5px]">
-          <span className="text-white/50 font-semibold uppercase tracking-wider">Photo</span>
-          <span className="text-amber-400 font-semibold uppercase tracking-wider">Receipt</span>
-          <span className="text-white/50 font-semibold uppercase tracking-wider">Multi</span>
-        </div>
-        <div className="flex items-center justify-between w-full max-w-[280px]">
-          <button className="h-12 w-12 rounded-[12px] bg-white/15 backdrop-blur flex items-center justify-center"><Icons.ZoomIn size={20}/></button>
-          <button onClick={snap} className="relative">
-            <span className="absolute inset-0 rounded-full bg-white/30 animate-pulse-ring"/>
-            <span className="relative h-[68px] w-[68px] rounded-full bg-white flex items-center justify-center">
-              <span className="h-[58px] w-[58px] rounded-full border-[3px] border-slate-900"/>
-            </span>
-          </button>
-          <button className="h-12 w-12 rounded-[12px] bg-white/15 backdrop-blur flex items-center justify-center"><Icons.RotateCw size={20}/></button>
-        </div>
+
+      {/* Controls */}
+      <div className="absolute bottom-0 inset-x-0 h-[140px] bg-gradient-to-t from-black/90 to-transparent
+        flex items-center justify-center gap-10 pb-4">
+        {/* Shutter */}
+        <button
+          onClick={doSnap}
+          className="relative"
+          disabled={autoCapturing}
+        >
+          {detected && (
+            <span className="absolute inset-0 rounded-full animate-ping bg-emerald-400/40"/>
+          )}
+          <span className={`relative h-[68px] w-[68px] rounded-full flex items-center justify-center border-4 ${
+            detected ? 'bg-emerald-400 border-emerald-200' : 'bg-white border-white/80'
+          }`}>
+            <span className={`h-[52px] w-[52px] rounded-full border-[3px] ${
+              detected ? 'border-emerald-700' : 'border-slate-800'
+            }`}/>
+          </span>
+        </button>
       </div>
     </div>
   )

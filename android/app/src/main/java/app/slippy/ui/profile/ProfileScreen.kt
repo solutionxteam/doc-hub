@@ -12,8 +12,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -29,6 +32,7 @@ fun ProfileScreen(
 ) {
     val state by vm.state.collectAsState()
     var showLogout by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) { vm.load() }
     LaunchedEffect(state.loggedOut) { if (state.loggedOut) onLogout() }
@@ -133,11 +137,30 @@ fun ProfileScreen(
 
             // Actions
             ProfileSection("การดำเนินการ") {
-                ActionRow(Icons.Filled.Lock, "เปลี่ยนรหัสผ่าน") {}
+                ActionRow(Icons.Filled.Lock, "เปลี่ยนรหัสผ่าน") {
+                    // Password reset is handled server-side; open billing page for now
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://app.slippy.app/reset-password"))
+                    )
+                }
                 HorizontalDivider(color = BorderColor, modifier = Modifier.padding(start = 16.dp))
-                ActionRow(Icons.Filled.Devices, "อุปกรณ์ที่เข้าสู่ระบบ") {}
+                ActionRow(Icons.Filled.CreditCard, "จัดการแผน / Billing") {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://app.slippy.app/billing"))
+                    )
+                }
                 HorizontalDivider(color = BorderColor, modifier = Modifier.padding(start = 16.dp))
-                ActionRow(Icons.Filled.Support, "ติดต่อฝ่ายสนับสนุน") {}
+                ActionRow(Icons.Filled.Support, "ติดต่อฝ่ายสนับสนุน") {
+                    context.startActivity(
+                        Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:hello@slippy.app"))
+                    )
+                }
+                HorizontalDivider(color = BorderColor, modifier = Modifier.padding(start = 16.dp))
+                ActionRow(Icons.Filled.PrivacyTip, "นโยบายความเป็นส่วนตัว") {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://slippy.app/privacy-policy"))
+                    )
+                }
             }
 
             // App info

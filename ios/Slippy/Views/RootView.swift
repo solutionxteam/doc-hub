@@ -17,6 +17,19 @@ struct RootView: View {
     }
 }
 
+#if DEBUG
+#Preview("Splash") {
+    let vm = AuthViewModel(_preview: true)
+    return RootView().environmentObject(vm)
+}
+
+#Preview("Login") {
+    let vm = AuthViewModel(_preview: true)
+    vm.isLoading = false
+    return RootView().environmentObject(vm)
+}
+#endif
+
 // MARK: – Splash / Launch Screen
 private struct SplashView: View {
     @State private var scale = 0.7
@@ -31,20 +44,7 @@ private struct SplashView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 16) {
-                ZStack {
-                    Circle()
-                        .fill(Color.brand500.opacity(0.15))
-                        .frame(width: 100, height: 100)
-                        .blur(radius: 20)
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 44, weight: .light))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.brand400, .purple],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            )
-                        )
-                }
+                SlippyLogoMark(size: 84, glow: true)
                 Text("Slippy")
                     .font(.system(size: 32, weight: .black, design: .rounded))
                     .foregroundColor(.white)

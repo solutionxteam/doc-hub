@@ -7,10 +7,20 @@ struct ChartMonth: Identifiable {
     let spend: Double
 }
 
+struct CatDoc: Codable {
+    let category: String?
+    let totalAmount: Double?
+    enum CodingKeys: String, CodingKey {
+        case category
+        case totalAmount = "total_amount"
+    }
+}
+
 @MainActor
 final class AnalyticsViewModel: ObservableObject {
     @Published var chartData: [ChartMonth] = []
     @Published var yearTotal = 0.0
+    @Published var catBreakdown: [(name: String, value: Double)] = []
     @Published var isLoading = true
 
     private let db       = SupabaseManager.shared.client
@@ -21,6 +31,7 @@ final class AnalyticsViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
+            // Monthly summaries
             let summaries: [MonthSummary] = try await db
                 .from("monthly_expense_summary")
                 .select()
@@ -39,6 +50,29 @@ final class AnalyticsViewModel: ObservableObject {
                 }
                 yearTotal = chartData.reduce(0) { $0 + $1.spend }
             }
+
+            // Category breakdown – fetch docs for current year
+            let yearStart = Calendar.current.dateInterval(of: .year, for: Date())!.start
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyy-MM-dd"
+            let yearStartStr = fmt.string(from: yearStart)
+
+            let docs: [CatDoc] = try await db
+                .from("documents")
+                .select("category, total_amount")
+                .eq("organization_id", value: orgId)
+                .in("status", values: ["approved", "pushed", "reviewing", "completed"])
+                .gte("doc_date", value: yearStartStr)
+                .execute()
+                .value
+
+            var catMap: [String: Double] = [:]
+            for d in docs {
+                let k = d.category ?? "อื่นๆ"
+                catMap[k, default: 0] += d.totalAmount ?? 0
+            }
+            catBreakdown = catMap.sorted { $0.value > $1.value }.prefix(6).map { ($0.key, $0.value) }
+
         } catch {
             loadFallback()
         }

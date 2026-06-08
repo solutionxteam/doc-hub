@@ -21,9 +21,16 @@ export async function createClient() {
       cookies: {
         getAll: () => cookieStore.getAll(),
         setAll: (cookiesToSet: { name: string; value: string; options: CookieOptions }[]) => {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          )
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            )
+          } catch {
+            // `setAll` is called from a Server Component (e.g. a page render).
+            // Cookies can only be mutated in a Server Action or Route Handler —
+            // this is safe to ignore as long as middleware refreshes the user
+            // session (see `middleware.ts` / `updateSession`).
+          }
         },
       },
     }

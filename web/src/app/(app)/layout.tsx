@@ -29,7 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       .single(),
     supabase
       .from("organization_members")
-      .select("role, organizations(id, name, plan, slug, is_demo)")
+      .select("role, organizations(id, name, plan, slug, is_demo, account_type)")
       .eq("user_id", user.id),
   ])
 
@@ -43,17 +43,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     ? memberships.find(m => (m.organizations as any)?.id === activeOrgId)
     : null
   const current = activeMembership ?? memberships[0]
-  const org     = (current.organizations as any) ?? { id: "", name: "", plan: "free", slug: "", is_demo: false }
+  const org     = (current.organizations as any) ?? { id: "", name: "", plan: "free", slug: "", is_demo: false, account_type: "business" }
   const isDemo  = Boolean(org.is_demo)
 
   const allOrgs = memberships.map(m => {
     const o = m.organizations as any
-    return { id: o?.id ?? "", name: o?.name ?? "", plan: o?.plan ?? "free", role: m.role }
+    return {
+      id:          o?.id          ?? "",
+      name:        o?.name        ?? "",
+      plan:        o?.plan        ?? "free",
+      role:        m.role,
+      accountType: (o?.account_type ?? "business") as "business" | "personal",
+    }
   })
 
   return (
     <AppShell
-      org={{ id: org.id, name: org.name, plan: org.plan }}
+      org={{ id: org.id, name: org.name, plan: org.plan, accountType: org.account_type ?? "business" }}
       allOrgs={allOrgs}
       user={{
         full_name:  profile?.full_name

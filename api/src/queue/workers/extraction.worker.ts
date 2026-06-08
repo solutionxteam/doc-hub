@@ -5,8 +5,9 @@ import { createClient }     from "../../lib/supabase"
 import { notifyLineAfterExtraction } from "../../routes/line"
 
 export interface ExtractionJobData {
-  documentId: string
-  orgId:      string   // matches queueExtraction payload key
+  documentId:  string
+  orgId:       string
+  lineUserId?: string   // passed from LINE webhook so we skip a DB round-trip
   /** @deprecated use orgId */
   organizationId?: string
 }
@@ -16,9 +17,8 @@ export function startExtractionWorker() {
     "extraction",
     async (job: Job<ExtractionJobData>) => {
       const { documentId } = job.data
-      // Support both key names for backwards-compatibility
       const orgId = job.data.orgId ?? job.data.organizationId ?? ""
-      console.log(`[extraction] Processing document ${documentId}`)
+      console.log(`[extraction] ▶ Processing ${documentId}  org=${orgId}`)
 
       const result = await runPipeline(documentId, orgId)
 
@@ -27,48 +27,55 @@ export function startExtractionWorker() {
       }
 
       console.log(
-        `[extraction] Done ${documentId} — score=${result.confidence_score.toFixed(2)} auto_approved=${result.auto_approved}`
+        `[extraction] ✅ Done ${documentId} — score=${result.confidence_score.toFixed(2)} auto_approved=${result.auto_approved}`
       )
-
       return result
     },
-    {
-      connection:  redisConnection,
-      concurrency: 3,
-    }
+    { connection: redisConnection, concurrency: 3 }
   )
 
+  // ── Job completed — notify LINE user ────────────────────────────────────────
+  worker.on("completed", async (job, result) => {
+    const { documentId, lineUserId } = job.data
+    const orgId = job.data.orgId ?? job.data.organizationId ?? ""
+    console.log(`[extraction] 📤 Notifying LINE for ${documentId}  lineUserId=${lineUserId ?? "unknown"}`)
+
+    try {
+      await notifyLineAfterExtraction(documentId, orgId, result, lineUserId)
+      console.log(`[extraction] 📬 LINE notification sent for ${documentId}`)
+    } catch (err: any) {
+      // Log clearly — never rethrow (notification failure ≠ job failure)
+      console.error(`[extraction] ❌ LINE notification failed for ${documentId}:`, err.message)
+    }
+  })
+
+  // ── Job permanently failed — notify LINE user of failure ────────────────────
   worker.on("failed", async (job, err) => {
     if (!job) return
-    console.error(`[extraction] Job ${job.id} failed:`, err.message)
+    const { documentId, lineUserId } = job.data
+    console.error(`[extraction] ❌ Job ${job.id} failed (attempt ${job.attemptsMade}):`, err.message)
 
     if (job.attemptsMade >= (job.opts.attempts ?? 1)) {
       const supabase = createClient()
-      await supabase
+      supabase
         .from("documents")
         .update({ status: "failed", updated_at: new Date().toISOString() })
-        .eq("id", job.data.documentId)
+        .eq("id", documentId)
+        .then(({ error }) => { if (error) console.error("[extraction] DB status update failed:", error.message) })
 
       const orgId = job.data.orgId ?? job.data.organizationId ?? ""
-      await notifyLineAfterExtraction(
-        job.data.documentId,
-        orgId,
-        { success: false, error: err.message }
-      ).catch(() => {})
+      try {
+        await notifyLineAfterExtraction(
+          documentId, orgId,
+          { success: false, error: err.message },
+          lineUserId
+        )
+      } catch (ne: any) {
+        console.error(`[extraction] ❌ Failure notification failed for ${documentId}:`, ne.message)
+      }
     }
   })
 
-  worker.on("completed", async (job, result) => {
-    console.log(`[extraction] Job ${job.id} completed`)
-
-    const orgId = job.data.orgId ?? job.data.organizationId ?? ""
-    await notifyLineAfterExtraction(
-      job.data.documentId,
-      orgId,
-      result
-    ).catch(() => {})
-  })
-
-  console.log("[extraction] Worker started")
+  console.log("[extraction] Worker started ✓")
   return worker
 }

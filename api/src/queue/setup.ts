@@ -13,10 +13,11 @@ export const syncQueue       = new Queue("sync",       { connection })
 export { connection as redisConnection }
 
 export async function queueExtraction(payload: {
-  documentId: string
-  filePath:   string
-  fileType:   string
-  orgId:      string
+  documentId:  string
+  filePath:    string
+  fileType:    string
+  orgId:       string
+  lineUserId?: string   // optional — passed so worker can notify without re-querying DB
 }) {
   await extractionQueue.add("extract", payload, {
     jobId:            `extract-${payload.documentId}`,

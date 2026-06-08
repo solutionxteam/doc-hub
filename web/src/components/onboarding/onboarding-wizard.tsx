@@ -36,6 +36,7 @@ export function OnboardingWizard({ userId: _userId, defaultName, email }: Props)
 
   const [form, setForm] = useState({
     fullName:      defaultName,
+    email:         "",   // editable only when LINE login has no real email
     orgName:       "",
     taxId:         "",
     address:       "",
@@ -160,14 +161,27 @@ export function OnboardingWizard({ userId: _userId, defaultName, email }: Props)
               />
             </Field>
 
-            <Field label="อีเมล" hint="ไม่สามารถเปลี่ยนแปลงได้">
-              <input
-                type="email"
-                value={email}
-                readOnly
-                className={cn(inputClass, "opacity-60 cursor-not-allowed bg-muted")}
-              />
-            </Field>
+            {/* Hide placeholder LINE emails — show editable field instead */}
+            {email && !email.includes("@noreply.slippy.app") && !email.includes("@line.slippy.app") ? (
+              <Field label="อีเมล" hint="ไม่สามารถเปลี่ยนแปลงได้">
+                <input
+                  type="email"
+                  value={email}
+                  readOnly
+                  className={cn(inputClass, "opacity-60 cursor-not-allowed bg-muted")}
+                />
+              </Field>
+            ) : (
+              <Field label="อีเมล (ไม่บังคับ)" hint="สำหรับรับการแจ้งเตือนและ reset password">
+                <input
+                  type="email"
+                  value={form.email ?? ""}
+                  onChange={set("email" as any)}
+                  placeholder="default@slippy.ai"
+                  className={inputClass}
+                />
+              </Field>
+            )}
 
             <button
               onClick={() => setStep(2)}

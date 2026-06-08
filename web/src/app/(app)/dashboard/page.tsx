@@ -15,7 +15,7 @@ import {
   FileText, Clock, TrendingUp, ArrowUpRight,
   QrCode, Zap, ChevronRight,
   AlertCircle, CheckCircle2, FileUp, Bell, Inbox,
-  FileQuestion, FileBadge, Mail,
+  FileQuestion, FileBadge, Mail, Brain,
 } from "lucide-react"
 import Link from "next/link"
 import { SeedDemoButton }        from "@/components/dashboard/seed-demo-button"
@@ -108,6 +108,8 @@ export default async function DashboardPage() {
     { data: prevMonthExpense },
     { data: recentDocs },
     { data: notifications },
+    { data: lifeInsights },
+    { data: lifeMerchants },
   ] = await Promise.all([
     supabase.from("documents").select("id", { count: "exact", head: true })
       .eq("organization_id", orgId),
@@ -129,6 +131,19 @@ export default async function DashboardPage() {
       .or(`user_id.eq.${(await supabase.auth.getUser()).data.user?.id ?? ""},organization_id.eq.${orgId}`)
       .order("created_at", { ascending: false })
       .limit(5),
+    // Life Graph: unread insights for dashboard banner
+    supabase.from("life_insights")
+      .select("id, insight_type, title, body")
+      .eq("organization_id", orgId)
+      .eq("is_read", false)
+      .order("priority", { ascending: false })
+      .limit(3),
+    // Top merchants from Life Graph
+    supabase.from("life_merchants")
+      .select("name, category, visit_count, total_spent")
+      .eq("organization_id", orgId)
+      .order("total_spent", { ascending: false })
+      .limit(4),
   ])
 
   // ── KPI computations ──────────────────────────────────────────────────────────
@@ -177,6 +192,16 @@ export default async function DashboardPage() {
       subColor: "text-purple-500",
       icon: Zap,
       iconBg: "bg-purple-500/10", iconColor: "text-purple-600",
+    },
+    // ── WALU — North Star Metric from BUSINESS_MODEL.md ───────────────────
+    // Weekly Active Life Users: users who interact with Life Graph ≥ 1x/week
+    {
+      label: "WALU",
+      value: totalDocs && totalDocs > 0 ? "Active" : "—",
+      sub:   "North Star Metric",
+      subColor: "text-violet-500",
+      icon: Brain,
+      iconBg: "bg-violet-500/10", iconColor: "text-violet-600",
     },
   ]
 
@@ -363,6 +388,70 @@ export default async function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Life Graph Section ─────────────────────────────────────────────────── */}
+      {((lifeInsights?.length ?? 0) > 0 || (lifeMerchants?.length ?? 0) > 0) && (
+        <div className="grid lg:grid-cols-2 gap-5 mt-2">
+
+          {/* AI Insights */}
+          {(lifeInsights?.length ?? 0) > 0 && (
+            <div className="rounded-[14px] border bg-card overflow-hidden">
+              <div className="px-5 py-3.5 border-b flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">💡</span>
+                  <h3 className="text-[13px] font-semibold">AI Insights</h3>
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-brand-500 text-white text-[10px] font-bold">
+                    {lifeInsights!.length}
+                  </span>
+                </div>
+                <Link href="/life?tab=insights" className="text-[11px] text-brand-500 hover:text-brand-600 font-medium">ดูทั้งหมด →</Link>
+              </div>
+              <div className="divide-y">
+                {lifeInsights!.map(ins => (
+                  <div key={ins.id} className="px-5 py-3 flex items-start gap-2.5 hover:bg-muted/20 transition-colors">
+                    <span className="text-base mt-0.5 shrink-0">
+                      {ins.insight_type === "spending" ? "📊" : ins.insight_type === "habit" ? "❤️" : ins.insight_type === "anomaly" ? "⚠️" : "💡"}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[12.5px] font-semibold leading-snug">{ins.title}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">{ins.body}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Top merchants from Life Graph */}
+          {(lifeMerchants?.length ?? 0) > 0 && (
+            <div className="rounded-[14px] border bg-card overflow-hidden">
+              <div className="px-5 py-3.5 border-b flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🏪</span>
+                  <h3 className="text-[13px] font-semibold">ร้านค้าที่ใช้บ่อย</h3>
+                </div>
+                <Link href="/life" className="text-[11px] text-brand-500 hover:text-brand-600 font-medium">Life Graph →</Link>
+              </div>
+              <div className="divide-y">
+                {lifeMerchants!.map((m, i) => (
+                  <div key={i} className="flex items-center gap-3 px-5 py-3">
+                    <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground shrink-0">
+                      {i + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12.5px] font-medium truncate">{m.name}</p>
+                      <p className="text-[11px] text-muted-foreground">{m.visit_count} ครั้ง</p>
+                    </div>
+                    <p className="text-[12.5px] font-semibold shrink-0">
+                      ฿{Number(m.total_spent).toLocaleString("th-TH", { maximumFractionDigits: 0 })}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

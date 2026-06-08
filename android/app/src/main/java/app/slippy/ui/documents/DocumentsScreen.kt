@@ -35,7 +35,8 @@ private val filterChips = listOf(
 @Composable
 fun DocumentsScreen(
     vm: DocumentsViewModel = hiltViewModel(),
-    onCamera: () -> Unit
+    onCamera: () -> Unit,
+    onDocClick: (String) -> Unit = {}
 ) {
     val state by vm.state.collectAsState()
     var searchText by remember { mutableStateOf("") }
@@ -115,7 +116,7 @@ fun DocumentsScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(state.documents) { doc -> DocumentCardFull(doc) }
+                        items(state.documents) { doc -> DocumentCardFull(doc, onClick = { onDocClick(doc.id) }) }
                     }
                 }
             }
@@ -124,9 +125,10 @@ fun DocumentsScreen(
 }
 
 @Composable
-fun DocumentCardFull(doc: SlippyDocument) {
+fun DocumentCardFull(doc: SlippyDocument, onClick: () -> Unit = {}) {
     Card(
-        Modifier.fillMaxWidth(),
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
         shape  = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
         border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)

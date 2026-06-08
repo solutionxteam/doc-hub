@@ -1,13 +1,15 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Alert, ActivityIndicator,
+  StyleSheet, Alert, ActivityIndicator, Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import * as LocalAuthentication from 'expo-local-authentication'
 import * as Haptics from 'expo-haptics'
+import * as SecureStore from 'expo-secure-store'
 import { useAuthStore } from '@/store/auth.store'
+import { supabase } from '@/lib/supabase'
 import { initials } from '@/lib/utils'
 import { Brand, Light } from '@/constants/colors'
 
@@ -49,6 +51,24 @@ export default function ProfileScreen() {
   const name  = profile?.full_name ?? user?.email?.split('@')[0] ?? '—'
   const email = user?.email ?? '—'
   const role  = org?.role ?? 'member'
+
+  // Persist toggles on mount
+  useEffect(() => {
+    SecureStore.getItemAsync('slippy_line_notif').then(v => { if (v !== null) setLineNotif(v === 'true') })
+    SecureStore.getItemAsync('slippy_weekly_rpt').then(v => { if (v !== null) setWeeklyRpt(v === 'true') })
+  }, [])
+
+  const handleLineNotif = (v: boolean) => {
+    setLineNotif(v)
+    SecureStore.setItemAsync('slippy_line_notif', String(v))
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+  }
+
+  const handleWeeklyRpt = (v: boolean) => {
+    setWeeklyRpt(v)
+    SecureStore.setItemAsync('slippy_weekly_rpt', String(v))
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+  }
 
   const handleBiometricToggle = async (v: boolean) => {
     if (v) {
@@ -101,9 +121,10 @@ export default function ProfileScreen() {
         <View style={pr.section}>
           <Text style={pr.sectionTitle}>บัญชี</Text>
           {[
-            { label: 'ชื่อ-นามสกุล', value: name },
-            { label: 'อีเมล',         value: email },
-            { label: 'บทบาท',         value: ROLE_LABEL[role] ?? role },
+            { label: 'ชื่อ-นามสกุล',  value: name },
+            { label: 'อีเมล',          value: email },
+            { label: 'บทบาท',          value: ROLE_LABEL[role] ?? role },
+            { label: 'แผนปัจจุบัน',   value: (org?.plan ?? 'free').toUpperCase() },
           ].map(row => (
             <View key={row.label} style={pr.infoRow}>
               <Text style={pr.infoLabel}>{row.label}</Text>
@@ -116,18 +137,34 @@ export default function ProfileScreen() {
         <View style={pr.section}>
           <Text style={pr.sectionTitle}>การตั้งค่า</Text>
           <ToggleRow label="Biometric Login" sub="Face ID / Touch ID" value={biometric} onChange={handleBiometricToggle} />
-          <ToggleRow label="แจ้งเตือนผ่าน LINE" sub="Push ผ่าน Slippy Bot" value={lineNotif} onChange={setLineNotif} />
-          <ToggleRow label="รายงานรายสัปดาห์" sub="สรุปค่าใช้จ่ายทุกวันจันทร์" value={weeklyRpt} onChange={setWeeklyRpt} />
+          <ToggleRow label="แจ้งเตือนผ่าน LINE" sub="Push ผ่าน Slippy Bot" value={lineNotif} onChange={handleLineNotif} />
+          <ToggleRow label="รายงานรายสัปดาห์" sub="สรุปค่าใช้จ่ายทุกวันจันทร์" value={weeklyRpt} onChange={handleWeeklyRpt} />
         </View>
 
         {/* Quick actions */}
         <View style={pr.section}>
           <Text style={pr.sectionTitle}>การดำเนินการ</Text>
           {[
-            { label: '🔑 เปลี่ยนรหัสผ่าน',   action: () => {} },
-            { label: '📱 อุปกรณ์ที่เข้าสู่ระบบ', action: () => {} },
-            { label: '💬 ติดต่อฝ่ายสนับสนุน', action: () => {} },
-            { label: '📋 นโยบายความเป็นส่วนตัว', action: () => {} },
+            {
+              label: '🔑 เปลี่ยนรหัสผ่าน',
+              action: async () => {
+                const { error } = await supabase.auth.resetPasswordForEmail(email)
+                if (error) { Alert.alert('เกิดข้อผิดพลาด', error.message); return }
+                Alert.alert('ส่งอีเมลแล้ว', `ตรวจสอบ ${email} เพื่อรีเซ็ตรหัสผ่าน`)
+              },
+            },
+            {
+              label: '💼 จัดการแผน / Billing',
+              action: () => Linking.openURL('https://app.slippy.app/billing'),
+            },
+            {
+              label: '💬 ติดต่อฝ่ายสนับสนุน',
+              action: () => Linking.openURL('mailto:hello@slippy.app?subject=Support'),
+            },
+            {
+              label: '📋 นโยบายความเป็นส่วนตัว',
+              action: () => Linking.openURL('https://slippy.app/privacy-policy'),
+            },
           ].map(row => (
             <TouchableOpacity key={row.label} style={pr.actionRow} onPress={row.action} testID={`action-${row.label}`}>
               <Text style={pr.actionLabel}>{row.label}</Text>

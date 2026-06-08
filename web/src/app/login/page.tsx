@@ -11,6 +11,8 @@ import Link          from "next/link"
 import { LoginForm } from "@/components/auth/login-form"
 import { LogoMark }  from "@/components/ui/logo"
 import { Icons }     from "@/components/ui/icons"
+import { OAuthErrorBanner } from "@/components/auth/oauth-error-banner"
+import { LangThemeToggle } from "@/components/ui/lang-theme-toggle"
 
 const features = [
   { Icon: Icons.Sparkles, text: "AI อ่านเอกสารอัตโนมัติ 95% accuracy" },
@@ -19,9 +21,18 @@ const features = [
   { Icon: Icons.Smartphone, text: "ถ่ายรูปผ่าน Mobile App ได้เลย" },
 ]
 
-export default function LoginPage() {
+export default function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; detail?: string }>
+}) {
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex relative">
+
+      {/* Lang + Theme toggle — fixed top-right */}
+      <div className="fixed top-4 right-4 z-50">
+        <LangThemeToggle />
+      </div>
 
       {/* Left — brand panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-[#070a18] flex-col
@@ -93,6 +104,7 @@ export default function LoginPage() {
             </Link>
           </div>
 
+          <OAuthErrorBanner searchParams={searchParams} />
           <LoginForm />
         </div>
       </div>

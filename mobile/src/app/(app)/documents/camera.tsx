@@ -102,7 +102,7 @@ export default function CameraScreen() {
         file_name:       preview.name,
         file_path:       path,
         file_type:       preview.mimeType,
-        source:          'web',
+        source:          'mobile',
         status:          'pending',
       })
 

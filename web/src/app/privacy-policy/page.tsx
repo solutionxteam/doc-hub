@@ -175,7 +175,7 @@ export default function PrivacyPolicyPage() {
               <p><strong>บริษัท สลิปปี้ จำกัด (Slippy Co., Ltd.)</strong></p>
               <p>เจ้าหน้าที่คุ้มครองข้อมูล (DPO): <a href="mailto:dpo@slippy.app" className="text-indigo-600 hover:underline">dpo@slippy.app</a></p>
               <p>ทั่วไป: <a href="mailto:privacy@slippy.app" className="text-indigo-600 hover:underline">privacy@slippy.app</a></p>
-              <p>LINE: <a href="https://line.me/R/ti/p/@slippy_bot" className="text-indigo-600 hover:underline" target="_blank" rel="noopener noreferrer">@slippy_bot</a></p>
+              <p>LINE: <a href="https://line.me/R/ti/p/@slippy" className="text-indigo-600 hover:underline" target="_blank" rel="noopener noreferrer">@slippy</a></p>
             </div>
           </PolicySection>
         </div>

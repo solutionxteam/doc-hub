@@ -36,7 +36,7 @@ struct DocumentsView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button { showCamera = true } label: {
                         Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .700))
+                            .font(.system(size: 16, weight: .bold))
                             .foregroundColor(Color.brand500)
                     }
                 }
@@ -78,7 +78,7 @@ struct DocumentsView: View {
                         Task { await vm.applyFilter(status: status) }
                     } label: {
                         Text(label)
-                            .font(.system(size: 13, weight: active ? .700 : .500))
+                            .font(.system(size: 13, weight: active ? .bold : .medium))
                             .foregroundColor(active ? .white : Color.textSecondary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
@@ -118,7 +118,7 @@ struct DocumentsView: View {
                 .font(.system(size: 48))
                 .foregroundColor(Color.border)
             Text("ไม่พบเอกสาร")
-                .font(.system(size: 16, weight: .600))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(Color.textSecondary)
             Text("ลองเปลี่ยน filter หรือเพิ่มเอกสารใหม่")
                 .font(.system(size: 13))
@@ -127,6 +127,17 @@ struct DocumentsView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    let vm = AuthViewModel(_preview: true)
+    vm.setPreviewData(
+        profile: UserProfile(id: "u1", email: "demo@slippy.app", fullName: "สมชาย ใจดี", avatarUrl: nil),
+        org: Organization(id: "demo-org", name: "บริษัท Demo จำกัด", plan: "pro", docQuota: 200, docUsed: 45)
+    )
+    return DocumentsView().environmentObject(vm)
+}
+#endif
 
 // MARK: – DocumentCard
 struct DocumentCard: View {
@@ -146,7 +157,7 @@ struct DocumentCard: View {
                 // Info
                 VStack(alignment: .leading, spacing: 3) {
                     Text(doc.vendorName ?? doc.fileName)
-                        .font(.system(size: 14, weight: .700))
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundColor(Color.textPrimary)
                         .lineLimit(1)
                     if let inv = doc.invoiceNumber {
@@ -167,7 +178,7 @@ struct DocumentCard: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     if let amt = doc.totalAmount {
                         Text(fmtTHB(amt))
-                            .font(.system(size: 15, weight: .800))
+                            .font(.system(size: 15, weight: .heavy))
                             .foregroundColor(Color.textPrimary)
                     }
                     StatusBadge(status: doc.status)
@@ -190,7 +201,7 @@ struct DocumentCard: View {
                     }
                     .frame(height: 3)
                     Text("\(Int(conf * 100))%")
-                        .font(.system(size: 10, weight: .600))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(Color.textSecondary)
                 }
                 .padding(.top, 10)

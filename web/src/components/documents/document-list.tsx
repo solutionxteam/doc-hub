@@ -9,13 +9,15 @@
  * in whole or in part, is strictly prohibited without prior written permission.
  */
 
-import { useState, useMemo }   from "react"
+import { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import Link                    from "next/link"
 import { useRouter }           from "next/navigation"
+import { createClient }        from "@/lib/supabase/client"
+import { toast }               from "sonner"
 import {
   Search, Calendar, Filter, LayoutGrid, Table2,
   Eye, MoreHorizontal, Check, Send, Globe, Mail,
-  Inbox, RefreshCw, Trash2, Loader2,
+  Inbox, RefreshCw, Trash2, Loader2, X,
 } from "lucide-react"
 import { cn }                  from "@/lib/utils"
 import { formatThb, formatDate } from "@/lib/utils"
@@ -98,11 +100,161 @@ interface Doc {
   doc_number?:        string | null
 }
 
-export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
+export function DocumentList({ documents: initialDocs, orgId, initialVendorFilter }: {
+  documents: Doc[]
+  orgId?: string
+  initialVendorFilter?: string
+}) {
   const router = useRouter()
+  const [aiResults,   setAiResults]   = useState<Doc[] | null>(null)
+  const [aiSearching, setAiSearching] = useState(false)
+
+  // ── Stable Supabase client ref — createBrowserClient returns a singleton but
+  //    calling it in the component body still produces a new JS reference each
+  //    render, making useEffect deps unstable. useRef guarantees one instance.
+  const sbRef = useRef(createClient())
+  const supabase = sbRef.current
+
   const [documents, setDocuments] = useState(initialDocs)
   const [status,   setStatus]   = useState("all")
-  const [search,   setSearch]   = useState("")
+
+  // ── Realtime ────────────────────────────────────────────────────────────────
+  const [connStatus,    setConnStatus]    = useState<"connecting" | "live" | "error">("connecting")
+  const [liveActivity,  setLiveActivity]  = useState<{ id: string; type: "new" | "updated" } | null>(null)
+  const [reconnectKey,  setReconnectKey]  = useState(0)
+  const reconnectTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollInterval    = useRef<ReturnType<typeof setInterval> | null>(null)
+  const retryCount      = useRef(0)   // exponential backoff: 0→3s, 1→6s, 2→12s, 3→20s
+
+  // fetchDoc is stable because sbRef.current never changes
+  const fetchDoc = useCallback(async (id: string) => {
+    const { data } = await sbRef.current
+      .from("documents")
+      .select("id, vendor_name, total_amount, vat_amount, status, created_at, source, overall_confidence, doc_date, doc_category")
+      .eq("id", id)
+      .single()
+    return data
+  }, [])
+
+  // Refresh all docs from DB (used as fallback when realtime is offline)
+  const refreshDocs = useCallback(async () => {
+    if (!orgId) return
+    const { data } = await sbRef.current
+      .from("documents")
+      .select("id, vendor_name, total_amount, vat_amount, status, created_at, source, overall_confidence, doc_date, doc_category")
+      .eq("organization_id", orgId)
+      .order("created_at", { ascending: false })
+      .limit(100)
+    if (data) setDocuments(data as Doc[])
+  }, [orgId])
+
+  // Manual reconnect: increment key → useEffect re-runs → new channel
+  const handleReconnect = useCallback(() => {
+    retryCount.current = 0   // reset backoff on manual reconnect
+    setConnStatus("connecting")
+    setReconnectKey(k => k + 1)
+  }, [])
+
+  useEffect(() => {
+    if (!orgId) return
+
+    // Clear any pending auto-reconnect timer
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+
+    const channel = supabase
+      .channel(`docs-list:${orgId}:${reconnectKey}`)
+      .on(
+        "postgres_changes",
+        // ── ไม่ใช้ server-side filter เพราะต้องการ REPLICA IDENTITY FULL ──
+        // กรองฝั่ง client แทน (ปลอดภัยเพราะ RLS ใน fetchDoc จัดการแล้ว)
+        { event: "*", schema: "public", table: "documents" },
+        async (payload) => {
+          // Client-side org filter — กรองเฉพาะ doc ของ org นี้
+          const rowOrgId = (payload.new as any)?.organization_id
+                        ?? (payload.old as any)?.organization_id
+          if (rowOrgId && rowOrgId !== orgId) return   // ไม่ใช่ของ org นี้
+
+          if (payload.eventType === "INSERT") {
+            const docId = (payload.new as any).id as string
+            const doc = await fetchDoc(docId)
+            if (!doc) return
+            setDocuments(prev => prev.find(d => d.id === doc.id) ? prev : [doc as Doc, ...prev])
+            setLiveActivity({ id: doc.id, type: "new" })
+            setTimeout(() => setLiveActivity(null), 4000)
+            toast.success(
+              `📄 เอกสารใหม่: ${(doc as any).vendor_name ?? "ไม่ระบุผู้ขาย"}`,
+              { description: "เข้ามาในระบบแล้ว", duration: 4000 }
+            )
+          } else if (payload.eventType === "UPDATE") {
+            const docId = (payload.new as any).id as string
+            const doc = await fetchDoc(docId)
+            if (!doc) return
+            setDocuments(prev => prev.map(d => d.id === doc.id ? doc as Doc : d))
+            setLiveActivity({ id: doc.id, type: "updated" })
+            setTimeout(() => setLiveActivity(null), 4000)
+            const newStatus = (doc as any).status as string
+            const STATUS_LABEL: Record<string, string> = {
+              reviewing: "รอตรวจสอบ", approved: "อนุมัติแล้ว ✅",
+              pushed: "ส่งเข้าบัญชีแล้ว ✅", failed: "ล้มเหลว ❌", processing: "กำลังประมวลผล…",
+            }
+            if (STATUS_LABEL[newStatus]) toast(`⚡ ${(doc as any).vendor_name ?? "เอกสาร"} — ${STATUS_LABEL[newStatus]}`, { duration: 3500 })
+          } else if (payload.eventType === "DELETE") {
+            const delId = (payload.old as any)?.id
+            if (delId) setDocuments(prev => prev.filter(d => d.id !== delId))
+          }
+        }
+      )
+      .subscribe((subStatus, err) => {
+        if (subStatus === "SUBSCRIBED") {
+          setConnStatus("live")
+          retryCount.current = 0   // reset backoff on success
+          if (pollInterval.current) { clearInterval(pollInterval.current); pollInterval.current = null }
+          console.log("[realtime] ✅ connected")
+
+        } else if (subStatus === "CHANNEL_ERROR" || subStatus === "TIMED_OUT") {
+          setConnStatus("error")
+          console.warn("[realtime]", subStatus, err?.message ?? "")
+
+          // Start polling as fallback so data still updates
+          if (!pollInterval.current) pollInterval.current = setInterval(refreshDocs, 8_000)
+
+          // Exponential backoff: 3s → 6s → 12s → 20s → 20s (cap)
+          const delay = Math.min(3000 * Math.pow(2, retryCount.current), 20_000)
+          retryCount.current = Math.min(retryCount.current + 1, 4)
+          console.log(`[realtime] retry in ${delay / 1000}s (attempt ${retryCount.current})`)
+          reconnectTimer.current = setTimeout(() => {
+            setConnStatus("connecting")
+            setReconnectKey(k => k + 1)
+          }, delay)
+        }
+      })
+
+    return () => {
+      supabase.removeChannel(channel)
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+    }
+  }, [orgId, reconnectKey])  // reconnectKey forces re-subscribe
+
+  // Cleanup poll on unmount
+  useEffect(() => () => {
+    if (pollInterval.current) clearInterval(pollInterval.current)
+  }, [])
+  const [search,   setSearch]   = useState(initialVendorFilter ?? "")
+
+  const handleAiSearch = useCallback(async () => {
+    if (!search.trim() || !orgId) return
+    setAiSearching(true)
+    try {
+      const res = await fetch("/api/documents/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: search.trim(), orgId }),
+      })
+      const { documents: found } = await res.json()
+      setAiResults(found ?? [])
+    } catch { toast.error("ค้นหาไม่สำเร็จ") }
+    finally  { setAiSearching(false) }
+  }, [search, orgId])
   const [view,     setView]     = useState<"table" | "card">("table")
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [acting,      setActing]      = useState<Record<string, "retry" | "delete" | null>>({})
@@ -113,10 +265,23 @@ export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
     setDocuments(ds => ds.map(d => d.id === id ? { ...d, status: "processing" } : d))
     try {
       await fetch(`/api/documents/${id}/process`, { method: "POST" })
-      router.refresh()
+    } catch {
+      toast.error("ลองอีกครั้งไม่สำเร็จ")
     } finally {
       setActing(a => ({ ...a, [id]: null }))
     }
+  }
+
+  async function handleBulkRetry() {
+    const ids = [...selected].filter(id => {
+      const doc = documents.find(d => d.id === id)
+      return doc?.status === "failed" || doc?.status === "pending" ||
+        (doc?.status === "reviewing" && (doc.overall_confidence ?? 1) < 0.3)
+    })
+    if (!ids.length) { toast.error("ไม่มีเอกสารที่ล้มเหลวในรายการที่เลือก"); return }
+    setDocuments(ds => ds.map(d => ids.includes(d.id) ? { ...d, status: "processing" } : d))
+    await Promise.all(ids.map(id => fetch(`/api/documents/${id}/process`, { method: "POST" })))
+    toast.success(`🔄 ส่งประมวลผลใหม่ ${ids.length} รายการแล้ว`)
   }
 
   async function handleBulkDelete() {
@@ -147,15 +312,19 @@ export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
     }
   }
 
-  const filtered = useMemo(() => documents.filter(d => {
-    if (status !== "all" && d.status !== status) return false
-    if (search) {
-      const q = search.toLowerCase()
-      if (!(d.vendor_name ?? "").toLowerCase().includes(q) &&
-          !(d.doc_number ?? "").toLowerCase().includes(q)) return false
-    }
-    return true
-  }), [documents, status, search])
+  const filtered = useMemo(() => {
+    // Use AI search results if available
+    const base = aiResults ?? documents
+    return base.filter(d => {
+      if (status !== "all" && d.status !== status) return false
+      if (!aiResults && search) {
+        const q = search.toLowerCase()
+        if (!(d.vendor_name ?? "").toLowerCase().includes(q) &&
+            !(d.doc_number ?? "").toLowerCase().includes(q)) return false
+      }
+      return true
+    })
+  }, [documents, status, search, aiResults])
 
   const counts = useMemo(() => STATUS_TABS.reduce((acc, t) => {
     acc[t.id] = t.id === "all" ? documents.length : documents.filter(d => d.status === t.id).length
@@ -173,8 +342,51 @@ export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
 
   return (
     <div className="space-y-4">
+      {/* Realtime live indicator */}
+      {liveActivity && (
+        <div className={cn(
+          "fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-2.5 rounded-2xl shadow-xl text-sm font-medium animate-in slide-in-from-bottom-2 duration-300",
+          liveActivity.type === "new"
+            ? "bg-brand-500 text-white shadow-brand-500/30"
+            : "bg-emerald-500 text-white shadow-emerald-500/30"
+        )}>
+          <span className="h-2 w-2 rounded-full bg-white animate-ping" />
+          {liveActivity.type === "new" ? "📄 เอกสารใหม่เข้ามา" : "⚡ สถานะอัปเดตแล้ว"}
+        </div>
+      )}
+
       {/* Tab nav */}
       <div className="flex items-center gap-0.5 border-b border-border -mt-1 overflow-x-auto">
+        {/* Live connection badge */}
+        {orgId && connStatus !== "error" && (
+          <div className={cn(
+            "ml-auto flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium",
+            connStatus === "live"       && "text-emerald-600 dark:text-emerald-400",
+            connStatus === "connecting" && "text-muted-foreground",
+          )}>
+            <span className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              connStatus === "live"       && "bg-emerald-500 animate-pulse",
+              connStatus === "connecting" && "bg-muted-foreground animate-pulse",
+            )} />
+            {connStatus === "live" ? "Live" : "กำลังเชื่อมต่อ…"}
+          </div>
+        )}
+
+        {/* Offline — show reconnect button */}
+        {orgId && connStatus === "error" && (
+          <button
+            type="button"
+            onClick={handleReconnect}
+            className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium
+              text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10
+              transition-colors border border-rose-200 dark:border-rose-800/50"
+            title="คลิกเพื่อเชื่อมต่อ Realtime ใหม่"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+            ออฟไลน์ — กดเพื่อเชื่อมต่อใหม่
+          </button>
+        )}
         {STATUS_TABS.map(tab => {
           const active = status === tab.id
           return (
@@ -202,16 +414,41 @@ export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex-1 min-w-[200px] relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+        <div className="flex-1 min-w-[200px] relative group">
+          {aiSearching
+            ? <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-500 animate-spin pointer-events-none" />
+            : <Search  className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />}
           <input
             value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="ค้นหาผู้ขายหรือเลขใบกำกับ..."
+            onChange={e => { setSearch(e.target.value); setAiResults(null) }}
+            onKeyDown={e => { if (e.key === "Enter" && search.trim() && orgId) handleAiSearch() }}
+            placeholder="✨ ค้นหา เช่น 'HomePro เดือนที่แล้ว', 'VAT ขอคืนได้'..."
             className="w-full h-10 rounded-[10px] border border-border bg-card text-sm text-foreground
-              pl-10 pr-3 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 placeholder:text-muted-foreground/60 transition"
+              pl-10 pr-24 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 placeholder:text-muted-foreground/60 transition"
           />
+          {search && (
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {!aiSearching && (
+                <button onClick={handleAiSearch} disabled={!orgId}
+                  className="h-6 px-2 rounded-[6px] bg-brand-500 hover:bg-brand-600 text-white text-[10px] font-medium transition-colors">
+                  AI ค้นหา
+                </button>
+              )}
+              <button onClick={() => { setSearch(""); setAiResults(null) }}
+                className="h-6 w-6 rounded-[6px] hover:bg-muted flex items-center justify-center text-muted-foreground">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
         </div>
+        {aiResults && (
+          <div className="w-full -mt-1 px-1">
+            <p className="text-[11px] text-brand-500 font-medium">
+              ✨ AI พบ {aiResults.length} รายการ สำหรับ "{search}"
+              <button onClick={() => { setAiResults(null); setSearch("") }} className="ml-2 text-muted-foreground hover:text-foreground">ล้างผล</button>
+            </p>
+          </div>
+        )}
         <button className="h-10 px-4 rounded-[10px] border border-border bg-card text-sm font-medium text-foreground
           hover:bg-muted transition inline-flex items-center gap-2 shrink-0">
           <Calendar className="w-4 h-4" /> พ.ค. 2026
@@ -239,30 +476,55 @@ export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
       </div>
 
       {/* Bulk action bar */}
-      {selected.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-brand-50 dark:bg-brand-500/10 rounded-[10px] border border-brand-200 dark:border-brand-500/20">
-          <span className="text-sm font-medium text-foreground">{selected.size} รายการที่เลือก</span>
-          <button className="h-8 px-3 rounded-[8px] border border-border bg-card text-xs font-medium text-foreground hover:bg-muted transition inline-flex items-center gap-1.5">
-            <Check className="w-3.5 h-3.5" /> อนุมัติ
-          </button>
-          <button className="h-8 px-3 rounded-[8px] border border-border bg-card text-xs font-medium text-foreground hover:bg-muted transition inline-flex items-center gap-1.5">
-            <Send className="w-3.5 h-3.5" /> ส่งเข้าบัญชี
-          </button>
-          <button
-            onClick={handleBulkDelete}
-            disabled={bulkDeleting}
-            className="h-8 px-3 rounded-[8px] border border-rose-200 dark:border-rose-500/30 bg-card text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition inline-flex items-center gap-1.5 disabled:opacity-50"
-          >
-            {bulkDeleting
-              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              : <Trash2 className="w-3.5 h-3.5" />}
-            ลบ
-          </button>
-          <button onClick={() => setSelected(new Set())} className="ml-auto text-xs text-muted-foreground hover:text-foreground transition">
-            ยกเลิก
-          </button>
-        </div>
-      )}
+      {selected.size > 0 && (() => {
+        const selectedDocs = [...selected].map(id => documents.find(d => d.id === id)).filter(Boolean) as Doc[]
+        const failedCount  = selectedDocs.filter(d =>
+          d.status === "failed" || d.status === "pending" ||
+          (d.status === "reviewing" && (d.overall_confidence ?? 1) < 0.3)
+        ).length
+        return (
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-brand-50 dark:bg-brand-500/10 rounded-[10px] border border-brand-200 dark:border-brand-500/20 flex-wrap">
+            <span className="text-sm font-semibold text-foreground shrink-0">{selected.size} รายการที่เลือก</span>
+            <div className="h-4 w-px bg-border mx-1 shrink-0" />
+
+            {/* Retry — only when failed docs selected */}
+            {failedCount > 0 && (
+              <button
+                onClick={handleBulkRetry}
+                className="h-8 px-3 rounded-[8px] border border-indigo-200 dark:border-indigo-500/30 bg-card text-xs font-medium
+                  text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10
+                  transition inline-flex items-center gap-1.5 shrink-0"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                ลองอีกครั้ง {failedCount > 0 && `(${failedCount})`}
+              </button>
+            )}
+
+            <button className="h-8 px-3 rounded-[8px] border border-border bg-card text-xs font-medium text-foreground hover:bg-muted transition inline-flex items-center gap-1.5 shrink-0">
+              <Check className="w-3.5 h-3.5" /> อนุมัติ
+            </button>
+            <button className="h-8 px-3 rounded-[8px] border border-border bg-card text-xs font-medium text-foreground hover:bg-muted transition inline-flex items-center gap-1.5 shrink-0">
+              <Send className="w-3.5 h-3.5" /> ส่งเข้าบัญชี
+            </button>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="h-8 px-3 rounded-[8px] border border-rose-200 dark:border-rose-500/30 bg-card text-xs font-medium
+                text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10
+                transition inline-flex items-center gap-1.5 disabled:opacity-50 shrink-0"
+            >
+              {bulkDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              ลบ
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="ml-auto text-xs text-muted-foreground hover:text-foreground transition shrink-0"
+            >
+              ยกเลิก
+            </button>
+          </div>
+        )
+      })()}
 
       {/* Table view */}
       {view === "table" && filtered.length > 0 && (
@@ -290,7 +552,10 @@ export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
               </thead>
               <tbody className="divide-y divide-border">
                 {filtered.map(doc => (
-                  <tr key={doc.id} className="hover:bg-muted/40 transition group">
+                  <tr key={doc.id} className={cn(
+                    "hover:bg-muted/40 transition group",
+                    liveActivity?.id === doc.id && "bg-brand-50/50 dark:bg-brand-500/5"
+                  )}>
                     <td className="pl-4 py-3" onClick={e => e.stopPropagation()}>
                       <input
                         type="checkbox"
@@ -330,14 +595,18 @@ export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
                       {doc.doc_date ? formatDate(doc.doc_date) : "—"}
                     </td>
                     <td className="py-3 pr-4 text-right">
-                      <div className="opacity-0 group-hover:opacity-100 transition inline-flex items-center gap-1">
-                        {(doc.status === "failed" || doc.status === "pending") ? (
+                      <div className="inline-flex items-center gap-1">
+                        {/* Show retry when: failed, pending, OR reviewing with very low confidence */}
+                        {(doc.status === "failed" || doc.status === "pending" ||
+                          (doc.status === "reviewing" && (doc.overall_confidence ?? 1) < 0.3)) ? (
+                          // Show retry always visible
                           <>
                             <button
                               onClick={e => { e.stopPropagation(); handleRetry(doc.id) }}
                               disabled={!!acting[doc.id]}
-                              title="ประมวลผลใหม่"
-                              className="h-7 w-7 rounded-[6px] hover:bg-brand-50 dark:hover:bg-brand-500/10 flex items-center justify-center text-brand-600 dark:text-brand-400 disabled:opacity-50"
+                              title="ลองอีกครั้ง"
+                              className="h-7 w-7 rounded-[6px] bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20
+                                flex items-center justify-center text-indigo-600 dark:text-indigo-400 disabled:opacity-50 transition"
                             >
                               {acting[doc.id] === "retry"
                                 ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -347,7 +616,7 @@ export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
                               onClick={e => { e.stopPropagation(); handleDelete(doc.id) }}
                               disabled={!!acting[doc.id]}
                               title="ลบเอกสาร"
-                              className="h-7 w-7 rounded-[6px] hover:bg-rose-50 dark:hover:bg-rose-500/10 flex items-center justify-center text-rose-500 disabled:opacity-50"
+                              className="h-7 w-7 rounded-[6px] hover:bg-rose-50 dark:hover:bg-rose-500/10 flex items-center justify-center text-rose-400 disabled:opacity-50 transition"
                             >
                               {acting[doc.id] === "delete"
                                 ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -355,7 +624,8 @@ export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
                             </button>
                           </>
                         ) : (
-                          <>
+                          // Normal: hover to reveal
+                          <div className="opacity-0 group-hover:opacity-100 transition inline-flex items-center gap-1">
                             <Link
                               href={`/documents/${doc.id}/review`}
                               className="h-7 w-7 rounded-[6px] hover:bg-muted flex items-center justify-center text-muted-foreground"
@@ -366,7 +636,7 @@ export function DocumentList({ documents: initialDocs }: { documents: Doc[] }) {
                             <button className="h-7 w-7 rounded-[6px] hover:bg-muted flex items-center justify-center text-muted-foreground">
                               <MoreHorizontal className="w-3.5 h-3.5" />
                             </button>
-                          </>
+                          </div>
                         )}
                       </div>
                     </td>

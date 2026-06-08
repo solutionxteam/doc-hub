@@ -19,7 +19,7 @@ export default async function SettingsPage() {
 
   const { data: org } = await supabase
     .from("organizations")
-    .select("id, name, slug, tax_id, address, fiscal_year_end, plan")
+    .select("id, name, slug, tax_id, address, fiscal_year_end, plan, account_type")
     .eq("id", orgId)
     .single()
 

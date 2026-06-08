@@ -144,7 +144,34 @@ export async function validateDocument(
     }
   }
 
-  // 5b. Fallback: vendor + amount (+ doc_number if available)
+  // 5b. Doc number standalone check — highest-confidence for receipts/invoices
+  // เลขที่ใบเสร็จซ้ำ = ซ้ำแน่ๆ (ไม่ต้องรอเทียบ vendor/amount)
+  if (!is_duplicate && extracted.doc_number?.trim()) {
+    let docNumQuery = supabase
+      .from("documents")
+      .select("id, vendor_name, doc_number")
+      .eq("organization_id", organizationId)
+      .eq("doc_number",       extracted.doc_number.trim())
+      .in("status",           ["reviewing", "approved", "pushed"])
+      .limit(1)
+
+    if (excludeDocId) {
+      docNumQuery = docNumQuery.neq("id", excludeDocId)
+    }
+
+    const { data: docNumMatch } = await docNumQuery
+    if (docNumMatch && docNumMatch.length > 0) {
+      is_duplicate     = true
+      duplicate_doc_id = docNumMatch[0].id
+      warnings.push({
+        code:    "DUPLICATE",
+        message: `พบเอกสารซ้ำ — เลขที่ใบเสร็จ "${extracted.doc_number}" ซ้ำกับเอกสาร id: ${docNumMatch[0].id}`,
+      })
+      score = Math.max(0, score - 0.3)
+    }
+  }
+
+  // 5c. Fallback: vendor + amount (when no doc_number or doc_number not matched)
   if (!is_duplicate && extracted.vendor_name && extracted.total_amount > 0) {
     let query = supabase
       .from("documents")
@@ -155,9 +182,6 @@ export async function validateDocument(
       .in("status",          ["reviewing", "approved", "pushed"])
       .limit(1)
 
-    if (extracted.doc_number) {
-      query = query.eq("doc_number", extracted.doc_number.trim())
-    }
     if (excludeDocId) {
       query = query.neq("id", excludeDocId)
     }
@@ -166,7 +190,7 @@ export async function validateDocument(
     if (data && data.length > 0) {
       is_duplicate      = true
       duplicate_doc_id  = data[0].id
-      warnings.push({ code: "DUPLICATE", message: `พบเอกสารซ้ำ (id: ${data[0].id})` })
+      warnings.push({ code: "DUPLICATE", message: `พบเอกสารซ้ำ — vendor + ยอดซ้ำ (id: ${data[0].id})` })
       score = Math.max(0, score - 0.3)
     }
   }
@@ -207,8 +231,10 @@ export async function validateDocument(
  * Consumer/simplified receipts have a slightly lower bar (0.80) since they
  * naturally lack some fields required of full tax invoices.
  */
-export const AUTO_APPROVE_THRESHOLD         = 0.85
-export const AUTO_APPROVE_THRESHOLD_RECEIPT = 0.80
+// Auto-approve thresholds — set to 1.0 to disable (require human review for all docs)
+// Set back to 0.85 / 0.80 when ready to enable auto-approval
+export const AUTO_APPROVE_THRESHOLD         = 1.0   // disabled — always require review
+export const AUTO_APPROVE_THRESHOLD_RECEIPT = 1.0   // disabled — always require review
 
 export function shouldAutoApprove(
   result:   ValidationResult,

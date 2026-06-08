@@ -16,24 +16,29 @@ import {
   FileText,
 } from "lucide-react"
 import { formatThb, formatDate, cn } from "@/lib/utils"
-import { PLANS, type PlanId } from "@/lib/plans"
+import { PLANS, ADDONS as PLAN_ADDONS, ANNUAL_DISCOUNT_PCT, annualMonthlyPrice, annualTotalPrice, type PlanId } from "@/lib/plans"
 
-// ─── UI-only metadata (visual treatment per plan) ───────────────────────────
-// Business logic (quota, price, features) lives in lib/plans.ts
-// Only add here things that are purely cosmetic: color, badge, yearly price
+// ─── UI-only metadata — aligned with BUSINESS_MODEL.md plan structure ────────
+// Consumer: free → pro → premium  |  Business: team → business → enterprise
 const PLAN_UI: Record<string, {
-  sub:     string       // short subtitle shown under plan name
-  color:   string       // accent color class
-  ring:    string       // highlighted ring class
-  badge?:  string       // optional "Popular" badge
-  priceY:  number       // yearly price (10× monthly = 2 months free ~17% off)
+  color:  string; ring: string; badge?: string; gradient?: string
 }> = {
-  free:       { sub: "สำหรับลองใช้งาน",      color: "text-muted-foreground", ring: "",                          priceY: 0    },
-  starter:    { sub: "ผู้เริ่มต้น",            color: "text-sky-600",          ring: "",                          priceY: 990  },
-  personal:   { sub: "Freelancer / คนเดียว",  color: "text-indigo-600",       ring: "",                          priceY: 1990 },
-  sme:        { sub: "ธุรกิจขนาดเล็ก",        color: "text-brand-600",        ring: "ring-2 ring-brand-500/30",  priceY: 5990, badge: "แนะนำ" },
-  business:   { sub: "SME / บริษัท",          color: "text-purple-600",       ring: "",                          priceY: 14990 },
-  enterprise: { sub: "องค์กรขนาดใหญ่",        color: "text-slate-500",        ring: "",                          priceY: 0    },
+  free:       { color: "text-muted-foreground", ring: "" },
+  // Consumer Subscription (40-50% revenue)
+  pro:        { color: "text-indigo-600",  ring: "ring-2 ring-indigo-500/30", badge: "แนะนำ",
+                gradient: "from-indigo-500/5 to-violet-500/5" },
+  premium:    { color: "text-violet-600",  ring: "",
+                gradient: "from-violet-500/5 to-pink-500/5" },
+  // Business SaaS (30-40% revenue)
+  team:       { color: "text-emerald-600", ring: "",
+                gradient: "from-emerald-500/5 to-teal-500/5" },
+  business:   { color: "text-brand-600",  ring: "ring-2 ring-brand-500/30", badge: "SME",
+                gradient: "from-brand-500/5 to-indigo-500/5" },
+  enterprise: { color: "text-slate-500",  ring: "" },
+  // Legacy (inactive)
+  starter:    { color: "text-sky-600",     ring: "" },
+  personal:   { color: "text-indigo-600",  ring: "" },
+  sme:        { color: "text-brand-600",   ring: "" },
 }
 
 const ADDONS = [
@@ -62,7 +67,7 @@ export function BillingClient({ org, invoices: dbInvoices, userRole }: Props) {
   const currentPlanId = (org?.plan ?? "free") as PlanId
   const currentPlan   = PLANS.find(p => p.id === currentPlanId)
   const used          = org?.doc_used  ?? 0
-  const cap           = org?.doc_quota ?? currentPlan?.docQuota ?? 10
+  const cap           = org?.doc_quota ?? currentPlan?.docQuota ?? 15
   const pct           = Math.min(100, Math.round((used / Math.max(cap, 1)) * 100))
   const barTone       = pct >= 90 ? "bg-rose-500" : pct >= 70 ? "bg-amber-500" : "bg-brand-500"
   const isOwner       = userRole === "owner"
@@ -209,35 +214,65 @@ export function BillingClient({ org, invoices: dbInvoices, userRole }: Props) {
       </div>
 
       {/* ── Plan comparison ────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <h3 className="text-[15px] font-semibold">เปรียบเทียบแพ็กเกจ</h3>
-        <button
-          onClick={() => setYearly(v => !v)}
-          className="flex items-center gap-2 text-sm font-medium text-foreground"
-        >
-          {yearly
-            ? <ToggleRight className="w-8 h-8 text-brand-500" />
-            : <ToggleLeft  className="w-8 h-8 text-muted-foreground" />}
-          <span>รายปี</span>
-          {yearly && (
-            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700
-              dark:bg-emerald-500/15 dark:text-emerald-300 text-[11px] font-semibold">
-              ประหยัด ~17%
+
+        {/* monthly / annual toggle — matches landing page style */}
+        <div className="inline-flex items-center gap-2 bg-muted/50 border border-border rounded-xl p-1">
+          <button
+            onClick={() => setYearly(false)}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-[12.5px] font-semibold transition-all",
+              !yearly ? "bg-card shadow text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}>
+            รายเดือน
+          </button>
+          <button
+            onClick={() => setYearly(true)}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-[12.5px] font-semibold transition-all flex items-center gap-1.5",
+              yearly ? "bg-card shadow text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}>
+            รายปี
+            <span className={cn(
+              "text-[10px] font-bold px-1.5 py-0.5 rounded-full transition-all",
+              yearly
+                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                : "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
+            )}>
+              -{ANNUAL_DISCOUNT_PCT}%
             </span>
-          )}
-        </button>
+          </button>
+        </div>
       </div>
+
+      {yearly && (
+        <p className="text-[12px] text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10
+          border border-emerald-100 dark:border-emerald-500/20 rounded-xl px-4 py-2.5 flex items-center gap-2">
+          <Check className="w-3.5 h-3.5 shrink-0" />
+          ชำระรายปี ประหยัด {ANNUAL_DISCOUNT_PCT}% เท่ากับได้ใช้ฟรี {Math.round(12 * ANNUAL_DISCOUNT_PCT / 100)} เดือน
+          — ราคาที่แสดงคือต่อเดือนเมื่อชำระล่วงหน้า 12 เดือน
+        </p>
+      )}
 
       {/* Plan cards — rendered directly from lib/plans.ts */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {PLANS.map(plan => {
-          const ui           = PLAN_UI[plan.id] ?? { sub: "", color: "", ring: "", priceY: 0 }
+          const ui           = PLAN_UI[plan.id] ?? { color: "", ring: "" }
           const isCurrent    = plan.id === currentPlanId
           const isSelected   = selectedPlan === plan.id
           const isLoading    = upgrading === plan.id
           const isEnterprise = plan.id === "enterprise"
-          const displayPrice = yearly ? ui.priceY : plan.priceTHB
-          const canUpgrade   = isOwner && !isCurrent && !isEnterprise && plan.id !== "free"
+          const isFree       = plan.priceTHB === 0 && !isEnterprise
+          const canUpgrade   = isOwner && !isCurrent && !isEnterprise && !isFree
+
+          // price to display — effective monthly (same logic as landing page)
+          const effectiveMonthly = (yearly && plan.priceTHB > 0)
+            ? annualMonthlyPrice(plan.priceTHB)
+            : plan.priceTHB
+          const yearlySavings = plan.priceTHB > 0
+            ? (plan.priceTHB * 12) - annualTotalPrice(plan.priceTHB)
+            : 0
 
           return (
             <div
@@ -246,7 +281,6 @@ export function BillingClient({ org, invoices: dbInvoices, userRole }: Props) {
               className={cn(
                 "bg-card border rounded-[12px] p-5 flex flex-col relative transition-all duration-200",
                 canUpgrade ? "cursor-pointer" : "cursor-default",
-                // Selected state — bright ring + scale up slightly
                 isSelected
                   ? "border-brand-500 ring-2 ring-brand-500/40 shadow-lg shadow-brand-500/10 scale-[1.02]"
                   : plan.highlighted && !isCurrent
@@ -266,33 +300,44 @@ export function BillingClient({ org, invoices: dbInvoices, userRole }: Props) {
                 </div>
               )}
 
-              {/* Plan name + price */}
+              {/* Plan tagline + name */}
               <div>
-                <p className={`text-[11px] font-semibold uppercase tracking-wide ${ui.color}`}>
-                  {ui.sub}
+                <p className={`text-[11px] font-medium ${ui.color}`}>
+                  {plan.taglineTh}
                 </p>
-                <h4 className="text-[16px] font-bold mt-0.5">{plan.nameEn}</h4>
-                <div className="mt-2 flex items-baseline gap-1">
-                  {plan.priceTHB === 0 ? (
-                    <span className="text-[20px] font-bold">
-                      {isEnterprise ? "Custom" : "ฟรี"}
-                    </span>
+                <h4 className="text-[17px] font-bold mt-0.5">{plan.nameEn}</h4>
+
+                {/* Price block */}
+                <div className="mt-3">
+                  {isEnterprise ? (
+                    <span className="text-[22px] font-bold">Custom</span>
+                  ) : isFree ? (
+                    <span className="text-[22px] font-bold">ฟรี</span>
                   ) : (
-                    <>
-                      <span className="text-[20px] font-bold tabular-nums">
-                        ฿{displayPrice.toLocaleString()}
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
+                      {/* strikethrough original when yearly */}
+                      {yearly && (
+                        <span className="text-[13px] line-through text-muted-foreground/60 tabular-nums">
+                          ฿{plan.priceTHB.toLocaleString()}
+                        </span>
+                      )}
+                      <span className="text-[22px] font-bold tabular-nums">
+                        ฿{effectiveMonthly.toLocaleString()}
                       </span>
-                      <span className="text-[11px] text-muted-foreground">
-                        {yearly ? "/ปี" : "/เดือน"}
+                      <span className="text-[11px] text-muted-foreground pb-0.5">
+                        /เดือน{yearly ? " (ชำระรายปี)" : ""}
                       </span>
-                    </>
+                    </div>
+                  )}
+
+                  {/* savings line when yearly */}
+                  {yearly && plan.priceTHB > 0 && (
+                    <p className="text-[10.5px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-medium">
+                      ประหยัด ฿{yearlySavings.toLocaleString()}/ปี
+                    </p>
                   )}
                 </div>
-                {yearly && plan.priceTHB > 0 && (
-                  <p className="text-[10.5px] text-emerald-600 dark:text-emerald-400 mt-0.5">
-                    ≈ ฿{Math.round(ui.priceY / 12)}/เดือน
-                  </p>
-                )}
+
                 {/* Quota pill */}
                 <div className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full
                   bg-muted text-[11px] text-muted-foreground">
@@ -327,7 +372,7 @@ export function BillingClient({ org, invoices: dbInvoices, userRole }: Props) {
                   "inline-flex items-center justify-center gap-2",
                   isCurrent
                     ? "bg-muted text-muted-foreground cursor-default"
-                    : plan.id === "free"
+                    : isFree
                     ? "bg-muted text-muted-foreground cursor-default"
                     : isSelected
                     ? "bg-brand-500 hover:bg-brand-600 text-white shadow-md"
@@ -344,14 +389,14 @@ export function BillingClient({ org, invoices: dbInvoices, userRole }: Props) {
                   ? <><Check className="w-3.5 h-3.5" /> แพ็กเกจปัจจุบัน</>
                   : isEnterprise
                   ? "ติดต่อทีมงาน"
-                  : plan.id === "free"
+                  : isFree
                   ? "แพ็กเกจเริ่มต้น"
                   : isSelected
                   ? <><Zap className="w-3.5 h-3.5" /> อัปเกรดเลย</>
                   : "เลือก"}
               </button>
 
-              {!isCurrent && plan.priceTHB > 0 && !isEnterprise && (
+              {!isCurrent && !isFree && !isEnterprise && (
                 <p className="text-[10px] text-muted-foreground text-center mt-1.5">
                   ยกเลิกได้ทุกเมื่อ
                 </p>
@@ -363,9 +408,12 @@ export function BillingClient({ org, invoices: dbInvoices, userRole }: Props) {
 
       {/* ── Floating upgrade bar (appears when a plan is selected) ──────────── */}
       {selectedPlan && isOwner && (() => {
-        const sp    = PLANS.find(p => p.id === selectedPlan)!
-        const spUi  = PLAN_UI[selectedPlan]
-        const price = yearly ? spUi.priceY : sp.priceTHB
+        const sp            = PLANS.find(p => p.id === selectedPlan)!
+        const effMonthly    = yearly ? annualMonthlyPrice(sp.priceTHB) : sp.priceTHB
+        const totalLabel    = yearly
+          ? `฿${annualTotalPrice(sp.priceTHB).toLocaleString()}/ปี`
+          : `฿${sp.priceTHB.toLocaleString()}/เดือน`
+        const savings       = yearly ? (sp.priceTHB * 12) - annualTotalPrice(sp.priceTHB) : 0
         return (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
             bg-card border border-brand-500/40 shadow-xl shadow-brand-500/10
@@ -374,9 +422,14 @@ export function BillingClient({ org, invoices: dbInvoices, userRole }: Props) {
               <p className="text-[12px] text-muted-foreground">แพ็กเกจที่เลือก</p>
               <p className="text-[15px] font-bold">{sp.nameEn}
                 <span className="ml-2 text-[13px] font-normal text-muted-foreground">
-                  ฿{price.toLocaleString()}{yearly ? "/ปี" : "/เดือน"} · {sp.docQuota} ใบ/เดือน
+                  ฿{effMonthly.toLocaleString()}/เดือน{yearly ? " (ชำระรายปี)" : ""} · {sp.docQuota} ใบ/เดือน
                 </span>
               </p>
+              {yearly && savings > 0 && (
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5">
+                  {totalLabel} · ประหยัด ฿{savings.toLocaleString()}/ปี
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <button
@@ -475,6 +528,74 @@ export function BillingClient({ org, invoices: dbInvoices, userRole }: Props) {
           )}
         </div>
       )}
+
+      {/* ── Tax Report Add-ons ────────────────────────────────────────────── */}
+      {["pro", "premium", "team", "business", "enterprise"].includes(currentPlanId) && (
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-[15px] font-semibold">รายงานภาษี (Add-on)</h3>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px]
+              font-medium bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+              <FileText className="w-3 h-3" /> One-time
+            </span>
+          </div>
+          <p className="text-[12.5px] text-muted-foreground mb-4">
+            Export รายงานภาษีสรอ.กรมสรรพากร · จ่ายครั้งเดียวต่อรอบภาษี
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {Object.entries(PLAN_ADDONS.taxReport).map(([key, addon]) => (
+              <div key={key}
+                className="bg-card border border-border rounded-[12px] p-5 flex items-center
+                  justify-between hover:border-violet-300 transition-colors cursor-pointer"
+                onClick={async () => {
+                  const res = await fetch("/api/stripe/buy-addon", {
+                    method:  "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body:    JSON.stringify({ addonKey: key, orgId: org?.id }),
+                  })
+                  const { url, error: err } = await res.json()
+                  if (err) { alert("เกิดข้อผิดพลาด: " + err); return }
+                  if (url) window.location.href = url
+                }}
+              >
+                <div>
+                  <div className="text-[14px] font-semibold">{addon.nameTh}</div>
+                  <div className="text-[11.5px] text-muted-foreground mt-0.5">Export PDF/Excel</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[20px] font-bold tabular-nums">฿{addon.priceTHB}</div>
+                  <div className="text-[11px] text-muted-foreground">ครั้งเดียว</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Extra Seats info ──────────────────────────────────────────────── */}
+      {(() => {
+        const cp = PLANS.find(p => p.id === currentPlanId)
+        if (!cp || cp.extraSeatTHB === 0) return null
+        return (
+          <div className="bg-muted/30 border border-border rounded-[12px] p-5 flex
+            items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h3 className="text-[14px] font-semibold">เพิ่มสมาชิกทีม</h3>
+              <p className="text-[12.5px] text-muted-foreground mt-0.5">
+                แพ็กเกจปัจจุบันรองรับ{cp.maxUsers > 0 ? ` ${cp.maxUsers} คน` : "ไม่จำกัดคน"} ·
+                เพิ่มได้ ฿{cp.extraSeatTHB}/คน/เดือน
+              </p>
+            </div>
+            <button
+              onClick={handleManage}
+              className="h-9 px-4 rounded-[10px] border border-border text-sm font-medium
+                hover:bg-muted transition-colors whitespace-nowrap"
+            >
+              จัดการสมาชิก
+            </button>
+          </div>
+        )
+      })()}
 
       {/* ── Invoice history ───────────────────────────────────────────────── */}
       <div className="bg-card border border-border rounded-[12px] overflow-hidden">

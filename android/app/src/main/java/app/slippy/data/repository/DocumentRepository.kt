@@ -72,6 +72,11 @@ class DocumentRepository @Inject constructor(
         return supabase.from("documents").insert(doc) { select() }.decodeSingle()
     }
 
+    suspend fun fetchById(docId: String): SlippyDocument =
+        supabase.from("documents")
+            .select { filter { eq("id", docId) } }
+            .decodeSingle()
+
     suspend fun updateStatus(docId: String, status: String): SlippyDocument =
         supabase.from("documents")
             .update({ set("status", status) }) {

@@ -11,9 +11,22 @@
 
 import { createBrowserClient } from "@supabase/ssr"
 
+// Module-level singleton — one client per browser tab
+let _client: ReturnType<typeof createBrowserClient> | null = null
+
 export function createClient() {
-  return createBrowserClient(
+  if (_client) return _client
+  _client = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      realtime: {
+        timeout: 30_000,          // default 10s → increase to 30s
+        params: {
+          eventsPerSecond: 10,
+        },
+      },
+    }
   )
+  return _client
 }
