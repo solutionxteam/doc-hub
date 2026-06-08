@@ -607,22 +607,50 @@ export function welcomeCard(): object {
  * Bubble 3: ตั้งค่า  — connect, open app, help
  */
 export function commandMenuCard(): object {
+  // ── Slippy brand palette (matches <LogoMark/> squircle gradient) ─────────
+  // violet → indigo → pink. Every bubble below is a tint drawn from this
+  // SAME family (instead of mismatched per-card colors) so the carousel
+  // reads as one cohesive, modern, "cute mascot" world — Slippy Universe.
+  const BRAND = { violet: "#8b5cf6", indigo: "#6366f1", pink: "#ec4899" }
+
+  // Cute little mascot chip — a soft circle "face" that echoes the LogoMark
+  // (paper-slip with friendly eyes/blush/smile) used as a recurring brand cue.
+  function mascotChip(bg: string): object {
+    return {
+      type: "box", layout: "vertical", width: "30px", height: "30px", cornerRadius: "15px",
+      backgroundColor: bg, justifyContent: "center", alignItems: "center",
+      contents: [{ type: "text", text: "🫧", size: "xs", align: "center" }]
+    }
+  }
+
   function menuHeader(emoji: string, title: string, subtitle: string, c1: string, c2: string): object {
     return {
       type: "box", layout: "vertical", paddingAll: "0px",
       background: { type: "linearGradient", angle: "135deg", startColor: c1, endColor: c2 },
       contents: [{
-        type: "box", layout: "vertical", paddingAll: "16px", paddingBottom: "14px", alignItems: "center",
+        type: "box", layout: "vertical", paddingAll: "18px", paddingBottom: "16px",
         contents: [
-          { type: "text", text: emoji, size: "3xl", align: "center" },
-          { type: "text", text: title, size: "md", color: "#ffffff", weight: "bold", align: "center", margin: "xs" },
-          { type: "text", text: subtitle, size: "xxs", color: "#ffffffb3", align: "center" },
+          // top row — mascot chip + sparkle, gives a friendly "face peeking in" feel
+          {
+            type: "box", layout: "horizontal", alignItems: "center",
+            contents: [
+              mascotChip("#ffffff33"),
+              { type: "text", text: "Slippy ✨", size: "xxs", color: "#ffffffd0", weight: "bold", align: "end", flex: 1 },
+            ]
+          },
+          { type: "box", layout: "vertical", alignItems: "center", margin: "md",
+            contents: [
+              { type: "text", text: emoji, size: "3xl", align: "center" },
+              { type: "text", text: title, size: "lg", color: "#ffffff", weight: "bold", align: "center", margin: "sm" },
+              { type: "text", text: subtitle, size: "xxs", color: "#ffffffcc", align: "center", margin: "xs", wrap: true },
+            ]
+          },
         ]
       }]
     }
   }
 
-  function menuBtn(label: string, emoji: string, cmd: string, desc: string, isPrimary = false): object {
+  function menuBtn(label: string, emoji: string, cmd: string, desc: string, tint: string, isPrimary = false): object {
     return {
       type: "box", layout: "horizontal",
       paddingTop: "10px", paddingBottom: "10px",
@@ -630,17 +658,17 @@ export function commandMenuCard(): object {
       action: { type: "message", label, text: cmd },
       contents: [
         {
-          type: "box", layout: "vertical", width: "36px", height: "36px",
-          cornerRadius: "18px",
-          backgroundColor: isPrimary ? "#ede9fe" : "#f3f4f6",
+          type: "box", layout: "vertical", width: "38px", height: "38px",
+          cornerRadius: "19px",
+          backgroundColor: tint,
           justifyContent: "center", alignItems: "center",
           contents: [{ type: "text", text: emoji, size: "sm", align: "center" }]
         },
         {
           type: "box", layout: "vertical", flex: 1, paddingStart: "10px", justifyContent: "center",
           contents: [
-            { type: "text", text: label,  size: "sm", color: "#111827", weight: isPrimary ? "bold" : "regular" },
-            { type: "text", text: desc,   size: "xxs", color: "#9ca3af", margin: "xs" },
+            { type: "text", text: label,  size: "sm", color: "#1f2937", weight: isPrimary ? "bold" : "regular" },
+            { type: "text", text: desc,   size: "xxs", color: "#9ca3af", margin: "xs", wrap: true },
           ]
         },
         { type: "text", text: "›", size: "lg", color: "#d1d5db", align: "end", gravity: "center" }
@@ -648,7 +676,7 @@ export function commandMenuCard(): object {
     }
   }
 
-  function uriBtn(label: string, emoji: string, uri: string, desc: string): object {
+  function uriBtn(label: string, emoji: string, uri: string, desc: string, tint: string, arrowColor: string): object {
     return {
       type: "box", layout: "horizontal",
       paddingTop: "10px", paddingBottom: "10px",
@@ -656,123 +684,114 @@ export function commandMenuCard(): object {
       action: { type: "uri", label, uri },
       contents: [
         {
-          type: "box", layout: "vertical", width: "36px", height: "36px",
-          cornerRadius: "18px", backgroundColor: "#ecfdf5",
+          type: "box", layout: "vertical", width: "38px", height: "38px",
+          cornerRadius: "19px", backgroundColor: tint,
           justifyContent: "center", alignItems: "center",
           contents: [{ type: "text", text: emoji, size: "sm", align: "center" }]
         },
         {
           type: "box", layout: "vertical", flex: 1, paddingStart: "10px", justifyContent: "center",
           contents: [
-            { type: "text", text: label, size: "sm", color: "#111827" },
-            { type: "text", text: desc,  size: "xxs", color: "#9ca3af", margin: "xs" },
+            { type: "text", text: label, size: "sm", color: "#1f2937", weight: "bold" },
+            { type: "text", text: desc,  size: "xxs", color: "#9ca3af", margin: "xs", wrap: true },
           ]
         },
-        { type: "text", text: "↗", size: "sm", color: "#10b981", align: "end", gravity: "center", weight: "bold" }
+        { type: "text", text: "↗", size: "sm", color: arrowColor, align: "end", gravity: "center", weight: "bold" }
       ]
+    }
+  }
+
+  // Cute pastel "tip" footer — soft tinted bubble instead of flat grey,
+  // keeps the friendly/rounded vibe going all the way to the bottom edge.
+  function tipFooter(text: string, tint: string, textColor: string): object {
+    return {
+      type: "box", layout: "vertical", paddingAll: "12px", backgroundColor: tint,
+      contents: [{ type: "text", align: "center", size: "xxs", color: textColor, wrap: true, text }]
     }
   }
 
   const docBubble = {
     type: "bubble", size: "kilo",
-    header: menuHeader("📄", "เอกสาร", "จัดการสลิปและใบเสร็จ", "#3b82f6", "#6366f1"),
+    header: menuHeader("📄", "เอกสาร", "แปลงสลิปให้เป็นบัญชีอัตโนมัติ", BRAND.violet, BRAND.indigo),
     body: {
       type: "box", layout: "vertical", paddingAll: "14px", spacing: "none",
       contents: [
-        menuBtn("ส่งสลิป / ใบเสร็จ", "📸", "/scan",       "ถ่ายภาพหรือเลือกรูปจากอัลบั้ม", true),
-        menuBtn("เอกสารล่าสุด",       "📋", "/status",     "ดูรายการ 5 ล่าสุด"),
-        menuBtn("สรุปค่าใช้จ่าย",     "📊", "/summary",    "สรุปยอดและ VAT เดือนนี้"),
-        menuBtn("อนุมัติเอกสาร",      "✅", "/approve",    "พิมพ์ /approve [ID]"),
-        menuBtn("ปฏิเสธเอกสาร",      "❌", "/reject",     "พิมพ์ /reject [ID]"),
+        menuBtn("ส่งสลิป / ใบเสร็จ", "📸", "/scan",       "ถ่ายภาพหรือเลือกรูปจากอัลบั้ม", "#ede9fe", true),
+        menuBtn("เอกสารล่าสุด",       "📋", "/status",     "ดูรายการ 5 ล่าสุด", "#ede9fe"),
+        menuBtn("สรุปค่าใช้จ่าย",     "📊", "/summary",    "สรุปยอดและ VAT เดือนนี้", "#ede9fe"),
+        menuBtn("อนุมัติเอกสาร",      "✅", "/approve",    "พิมพ์ /approve [ID]", "#ede9fe"),
+        menuBtn("ปฏิเสธเอกสาร",      "❌", "/reject",     "พิมพ์ /reject [ID]", "#ede9fe"),
       ]
     }
   }
 
   const splitBubble = {
     type: "bubble", size: "kilo",
-    header: menuHeader("🤝", "หารบิล", "แบ่งจ่ายกับเพื่อน", "#f59e0b", "#ef4444"),
+    header: menuHeader("🤝", "หารบิล", "แบ่งจ่ายกับเพื่อนแบบไม่มีดราม่า", BRAND.indigo, BRAND.pink),
     body: {
       type: "box", layout: "vertical", paddingAll: "14px", spacing: "none",
       contents: [
-        menuBtn("เริ่มหารบิล",     "🆕", "/split",       "พิมพ์ /split [DocID]", true),
-        menuBtn("เลือกรายการ",     "☝️", "/claim",       "พิมพ์ /claim [BillID] [เลขรายการ]"),
-        menuBtn("ดูสถานะบิล",     "👀", "/splitstatus", "พิมพ์ /splitstatus [BillID]"),
-        menuBtn("ปิดบิล & สรุป",  "🏁", "/splitdone",   "พิมพ์ /splitdone [BillID]"),
-        uriBtn("เปิดลิงก์บิล",    "🌐", "https://slippy.ai", "สำหรับเพื่อนที่ไม่มี LINE"),
+        menuBtn("เริ่มหารบิล",     "🆕", "/split",       "พิมพ์ /split [DocID]", "#e0e7ff", true),
+        menuBtn("เลือกรายการ",     "☝️", "/claim",       "พิมพ์ /claim [BillID] [เลขรายการ]", "#e0e7ff"),
+        menuBtn("ดูสถานะบิล",     "👀", "/splitstatus", "พิมพ์ /splitstatus [BillID]", "#e0e7ff"),
+        menuBtn("ปิดบิล & สรุป",  "🏁", "/splitdone",   "พิมพ์ /splitdone [BillID]", "#e0e7ff"),
+        uriBtn("เปิดลิงก์บิล",    "🌐", "https://slippy.ai", "สำหรับเพื่อนที่ไม่มี LINE", "#fce7f3", BRAND.pink),
       ]
     }
   }
 
   const sportBubble = {
     type: "bubble", size: "kilo",
-    header: menuHeader("🏸", "กลุ่มกีฬา", "ตั้งกลุ่ม หารบิล ติดตามยอด", "#6366f1", "#4f46e5"),
+    header: menuHeader("🏸", "กลุ่มกีฬา", "ตั้งกลุ่ม หารบิล ติดตามยอด ในที่เดียว", BRAND.violet, BRAND.pink),
     body: {
       type: "box", layout: "vertical", paddingAll: "14px", spacing: "none",
       contents: [
         uriBtn("เปิดแดชบอร์ดกีฬา", "🏸", `https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID ?? ""}/liff/sport`,
-          "ดู/สร้าง/หาร/ติดตามยอด ครบในที่เดียว — แบบ KhunThong"),
-        menuBtn("ตั้งกลุ่มใหม่ (พิมพ์)", "🆕", "/sportgroup",  "พิมพ์ /sportgroup [กีฬา] [ค่าใช้จ่าย] [สถานที่]\nเช่น /sportgroup แบด 400 สนามบางนา"),
-        menuBtn("ดูสถานะกลุ่ม",     "📊", "/sportstatus", "พิมพ์ /sportstatus [รหัสกลุ่ม]"),
-        menuBtn("แจ้งจ่ายแล้ว",     "✅", "/sportpay",    "พิมพ์ /sportpay [รหัสกลุ่ม]"),
-        menuBtn("ปิดกลุ่ม & สรุป",  "🔒", "/sportdone",   "พิมพ์ /sportdone [รหัสกลุ่ม]"),
+          "ดู/สร้าง/หาร/ติดตามยอด ครบในที่เดียว — แบบ KhunThong", "#f3e8ff", BRAND.violet),
+        menuBtn("ตั้งกลุ่มใหม่ (พิมพ์)", "🆕", "/sportgroup",  "พิมพ์ /sportgroup [กีฬา] [ค่าใช้จ่าย] [สถานที่]\nเช่น /sportgroup แบด 400 สนามบางนา", "#f3e8ff"),
+        menuBtn("ดูสถานะกลุ่ม",     "📊", "/sportstatus", "พิมพ์ /sportstatus [รหัสกลุ่ม]", "#f3e8ff"),
+        menuBtn("แจ้งจ่ายแล้ว",     "✅", "/sportpay",    "พิมพ์ /sportpay [รหัสกลุ่ม]", "#f3e8ff"),
+        menuBtn("ปิดกลุ่ม & สรุป",  "🔒", "/sportdone",   "พิมพ์ /sportdone [รหัสกลุ่ม]", "#f3e8ff"),
       ]
     },
-    footer: {
-      type: "box", layout: "vertical", paddingAll: "12px", backgroundColor: "#f9fafb",
-      contents: [{
-        type: "text", align: "center", size: "xxs", color: "#9ca3af", wrap: true,
-        text: "💡 หารค่าสนาม/อุปกรณ์เท่าๆ กันอัตโนมัติ — แชร์ลิงก์ให้เพื่อนกดเข้าร่วมได้เลย (เหมือน KhunThong)"
-      }]
-    }
+    footer: tipFooter("💡 หารค่าสนาม/อุปกรณ์เท่าๆ กันอัตโนมัติ — แชร์ลิงก์ให้เพื่อนกดเข้าร่วมได้เลย (เหมือน KhunThong)", "#f3e8ff", "#7c3aed")
   }
 
   const tripBubble = {
     type: "bubble", size: "kilo",
-    header: menuHeader("✈️", "กลุ่มทริป", "ตั้งกลุ่ม หารบิล ติดตามยอด", "#0ea5e9", "#2563eb"),
+    header: menuHeader("✈️", "กลุ่มทริป", "ตั้งกลุ่ม หารบิล ติดตามยอด ในที่เดียว", BRAND.indigo, BRAND.violet),
     body: {
       type: "box", layout: "vertical", paddingAll: "14px", spacing: "none",
       contents: [
         uriBtn("เปิดแดชบอร์ดทริป", "✈️", `https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID ?? ""}/liff/trip`,
-          "ดู/สร้าง/หาร/ติดตามยอด ครบในที่เดียว — แบบ KhunThong"),
-        menuBtn("ตั้งกลุ่มใหม่ (พิมพ์)", "🆕", "/tripgroup",  "พิมพ์ /tripgroup [ธีมทริป] [ค่าใช้จ่าย] [จุดหมาย]\nเช่น /tripgroup เที่ยวทะเล 3000 ภูเก็ต"),
-        menuBtn("ดูสถานะกลุ่ม",     "📊", "/tripstatus", "พิมพ์ /tripstatus [รหัสกลุ่ม]"),
-        menuBtn("แจ้งจ่ายแล้ว",     "✅", "/trippay",    "พิมพ์ /trippay [รหัสกลุ่ม]"),
-        menuBtn("ปิดกลุ่ม & สรุป",  "🔒", "/tripdone",   "พิมพ์ /tripdone [รหัสกลุ่ม]"),
+          "ดู/สร้าง/หาร/ติดตามยอด ครบในที่เดียว — แบบ KhunThong", "#e0e7ff", BRAND.indigo),
+        menuBtn("ตั้งกลุ่มใหม่ (พิมพ์)", "🆕", "/tripgroup",  "พิมพ์ /tripgroup [ธีมทริป] [ค่าใช้จ่าย] [จุดหมาย]\nเช่น /tripgroup เที่ยวทะเล 3000 ภูเก็ต", "#e0e7ff"),
+        menuBtn("ดูสถานะกลุ่ม",     "📊", "/tripstatus", "พิมพ์ /tripstatus [รหัสกลุ่ม]", "#e0e7ff"),
+        menuBtn("แจ้งจ่ายแล้ว",     "✅", "/trippay",    "พิมพ์ /trippay [รหัสกลุ่ม]", "#e0e7ff"),
+        menuBtn("ปิดกลุ่ม & สรุป",  "🔒", "/tripdone",   "พิมพ์ /tripdone [รหัสกลุ่ม]", "#e0e7ff"),
       ]
     },
-    footer: {
-      type: "box", layout: "vertical", paddingAll: "12px", backgroundColor: "#f9fafb",
-      contents: [{
-        type: "text", align: "center", size: "xxs", color: "#9ca3af", wrap: true,
-        text: "💡 หารค่าทริปเท่าๆ กันอัตโนมัติ — แชร์ลิงก์ให้เพื่อนกดเข้าร่วมได้เลย (เหมือน KhunThong)"
-      }]
-    }
+    footer: tipFooter("💡 หารค่าทริปเท่าๆ กันอัตโนมัติ — แชร์ลิงก์ให้เพื่อนกดเข้าร่วมได้เลย (เหมือน KhunThong)", "#e0e7ff", "#4f46e5")
   }
 
   const settingsBubble = {
     type: "bubble", size: "kilo",
-    header: menuHeader("⚙️", "ตั้งค่า", "เชื่อมต่อและการตั้งค่า", "#10b981", "#059669"),
+    header: menuHeader("⚙️", "ตั้งค่า", "เชื่อมต่อบัญชีและปรับแต่ง Slippy", BRAND.pink, BRAND.violet),
     body: {
       type: "box", layout: "vertical", paddingAll: "14px", spacing: "none",
       contents: [
-        menuBtn("เชื่อมต่อบัญชี",    "🔗", "/connect",    "พิมพ์ /connect [CODE]", true),
-        menuBtn("คำสั่งทั้งหมด",     "📖", "/help",       "ดูรายการคำสั่งทั้งหมด"),
-        uriBtn("เปิด Slippy App",   "🚀", "https://slippy.ai", "จัดการเอกสารบนเว็บ"),
-        uriBtn("ตั้งค่า LINE Bot",   "⚙️", "https://slippy.ai/settings/line", "สร้าง code เชื่อมต่อ"),
+        menuBtn("เชื่อมต่อบัญชี",    "🔗", "/connect",    "พิมพ์ /connect [CODE]", "#fce7f3", true),
+        menuBtn("คำสั่งทั้งหมด",     "📖", "/help",       "ดูรายการคำสั่งทั้งหมด", "#fce7f3"),
+        uriBtn("เปิด Slippy App",   "🚀", "https://slippy.ai", "จัดการเอกสารบนเว็บ", "#f3e8ff", BRAND.violet),
+        uriBtn("ตั้งค่า LINE Bot",   "💬", "https://slippy.ai/settings/line", "สร้าง code เชื่อมต่อ", "#f3e8ff", BRAND.violet),
       ]
     },
-    footer: {
-      type: "box", layout: "vertical", paddingAll: "12px", backgroundColor: "#f9fafb",
-      contents: [{
-        type: "text", align: "center", size: "xxs", color: "#d1d5db",
-        text: "Slippy — ระบบบัญชี AI สำหรับธุรกิจไทย"
-      }]
-    }
+    footer: tipFooter("🫧 Slippy — ผู้ช่วย AI ที่เก็บทุกสลิป ทุกทริป ทุกเรื่องราวของคุณ", "#fce7f3", "#db2777")
   }
 
   return {
     type: "flex",
-    altText: "📱 เมนูคำสั่ง Slippy Bot",
+    altText: "📱 เมนูคำสั่ง Slippy",
     contents: {
       type: "carousel",
       contents: [docBubble, splitBubble, sportBubble, tripBubble, settingsBubble]
