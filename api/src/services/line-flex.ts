@@ -2,6 +2,14 @@
  * LINE Flex Message builders for Slippy Bot — Modern Design
  */
 
+// ⚠️ Single source of truth for the public app URL used inside Flex Messages.
+// `slippy.ai` is currently DNS-parked at Namecheap (NOT pointing at Vercel) —
+// tapping a hardcoded "https://slippy.ai/..." link lands on the registrar's
+// parking page, which injects ad/redirect chains (incl. fake Facebook-login
+// phishing pages users have reported seeing). Always resolve through APP_URL
+// (falls back to the stable Vercel alias) — never hardcode "slippy.ai" below.
+const APP_URL = process.env.APP_URL ?? "https://slippy-solutionxteams-projects.vercel.app"
+
 const STATUS_TH: Record<string, string> = {
   pending:    "รอดำเนินการ", processing: "กำลังประมวลผล", reviewing: "รอตรวจสอบ",
   approved:   "อนุมัติแล้ว", pushed:     "ส่งเข้าบัญชีแล้ว",
@@ -191,7 +199,7 @@ export function docResultCard(params: {
               backgroundColor: "#ffffff",
               contents: [{
                 type: "image",
-                url: `${process.env.APP_URL ?? process.env.API_PUBLIC_URL ?? "https://slippy.ai"}/icon-192.png`,
+                url: `${APP_URL}/icon-192.png`,
                 size: "full", aspectRatio: "1:1", aspectMode: "cover",
               }]
             },
@@ -388,7 +396,7 @@ export function docResultCard(params: {
   footerContents.push({
     type: "button", style: "secondary", height: "sm", margin: "sm",
     action: { type: "uri", label: "🌐 ตรวจสอบในแอป",
-      uri: `https://slippy.ai/documents/${docId}/review` }
+      uri: `${APP_URL}/documents/${docId}/review` }
   })
 
   return {
@@ -592,7 +600,7 @@ export function welcomeCard(): object {
         type: "box", layout: "vertical", paddingAll: "12px", backgroundColor: "#f9fafb",
         contents: [{
           type: "button", style: "primary", color: "#6366f1",
-          action: { type: "uri", label: "เปิด Slippy App", uri: "https://slippy.ai" }
+          action: { type: "uri", label: "เปิด Slippy App", uri: APP_URL }
         }]
       }
     }
@@ -735,7 +743,7 @@ export function commandMenuCard(): object {
         menuBtn("เลือกรายการ",     "☝️", "/claim",       "พิมพ์ /claim [BillID] [เลขรายการ]", "#e0e7ff"),
         menuBtn("ดูสถานะบิล",     "👀", "/splitstatus", "พิมพ์ /splitstatus [BillID]", "#e0e7ff"),
         menuBtn("ปิดบิล & สรุป",  "🏁", "/splitdone",   "พิมพ์ /splitdone [BillID]", "#e0e7ff"),
-        uriBtn("เปิดลิงก์บิล",    "🌐", "https://slippy.ai", "สำหรับเพื่อนที่ไม่มี LINE", "#fce7f3", BRAND.pink),
+        uriBtn("เปิดลิงก์บิล",    "🌐", APP_URL, "สำหรับเพื่อนที่ไม่มี LINE", "#fce7f3", BRAND.pink),
       ]
     }
   }
@@ -782,8 +790,8 @@ export function commandMenuCard(): object {
       contents: [
         menuBtn("เชื่อมต่อบัญชี",    "🔗", "/connect",    "พิมพ์ /connect [CODE]", "#fce7f3", true),
         menuBtn("คำสั่งทั้งหมด",     "📖", "/help",       "ดูรายการคำสั่งทั้งหมด", "#fce7f3"),
-        uriBtn("เปิด Slippy App",   "🚀", "https://slippy.ai", "จัดการเอกสารบนเว็บ", "#f3e8ff", BRAND.violet),
-        uriBtn("ตั้งค่า LINE Bot",   "💬", "https://slippy.ai/settings/line", "สร้าง code เชื่อมต่อ", "#f3e8ff", BRAND.violet),
+        uriBtn("เปิด Slippy App",   "🚀", APP_URL, "จัดการเอกสารบนเว็บ", "#f3e8ff", BRAND.violet),
+        uriBtn("ตั้งค่า LINE Bot",   "💬", `${APP_URL}/settings/line`, "สร้าง code เชื่อมต่อ", "#f3e8ff", BRAND.violet),
       ]
     },
     footer: tipFooter("🫧 Slippy — ผู้ช่วย AI ที่เก็บทุกสลิป ทุกทริป ทุกเรื่องราวของคุณ", "#fce7f3", "#db2777")
