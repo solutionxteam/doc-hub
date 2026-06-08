@@ -240,7 +240,7 @@ export async function GET(req: NextRequest) {
     // to a CLIENT-SIDE page (/auth/line-callback) that can read the hash,
     // call supabase.auth.onAuthStateChange(), set cookies, then navigate to dashboard.
     // (Server-side middleware cannot read hash fragments)
-    log("generating sign-in link for", targetEmail, { redirectTo: sessionRedirectTarget })
+    log("generating sign-in link", { email: targetEmail, redirectTo: sessionRedirectTarget })
     // NOTE: `sessionRedirectTarget` (either the web hash-reader page or, for
     // iOS, the `slippy://auth/callback` custom scheme) must be present in
     // Supabase Dashboard → Authentication → URL Configuration → Redirect URLs,
