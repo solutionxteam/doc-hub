@@ -1,14 +1,21 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter }           from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { createClient }        from "@/lib/supabase/client"
 import { LogoMark }            from "@/components/ui/logo"
 
 export default function LineCallbackPage() {
   const router   = useRouter()
+  const params   = useSearchParams()
   const supabase = createClient()
   const [status, setStatus] = useState("กำลังเข้าสู่ระบบ...")
+
+  // `next` — optional deep-link destination (e.g. from a LIFF Rich-Menu tap,
+  // such as "/personal/health"). Falls back to the usual dashboard/onboarding
+  // routing when absent. Only same-origin relative paths are honoured.
+  const next = params.get("next")
+  const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : null
 
   useEffect(() => {
     async function handleSession() {
@@ -68,6 +75,11 @@ export default function LineCallbackPage() {
 
     async function redirectAfterLogin(userId: string) {
       setStatus("เข้าสู่ระบบสำเร็จ กำลังโหลด...")
+
+      // A `next` deep-link (e.g. opened from the LINE Rich Menu) always wins —
+      // it skips the onboarding gate since the user is just browsing a pillar.
+      if (safeNext) { router.replace(safeNext); return }
+
       const { data: membership } = await supabase
         .from("organization_members")
         .select("organization_id")

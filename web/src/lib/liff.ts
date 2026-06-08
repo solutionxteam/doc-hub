@@ -103,3 +103,21 @@ export function makeLiffTripUrl(): string {
   if (liffId) return `https://liff.line.me/${liffId}/liff/trip`
   return `${process.env.NEXT_PUBLIC_APP_URL ?? "https://slippy.ai"}/liff/trip`
 }
+
+/**
+ * Generate a LIFF deep link that lands on the LINE-only login gate
+ * (`/liff/home`) and then forwards into `destPath` once a Slippy session has
+ * been minted from the user's existing LINE login — no Supabase email/
+ * password form, mobile-optimized. This is what every "Slippy Universe"
+ * pillar card on the Rich Menu (Health/Wealth/Lifestyle/Dashboard/
+ * Community/...) should open instead of a bare `${APP_URL}${destPath}` link.
+ */
+export function makeLiffGateUrl(destPath: string): string {
+  const liffId = process.env.NEXT_PUBLIC_LIFF_ID
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://slippy.ai"
+  const qs     = `?next=${encodeURIComponent(destPath)}`
+  if (liffId) return `https://liff.line.me/${liffId}/liff/home${qs}`
+  // Outside LIFF context (no LIFF ID configured) — fall back to a direct link;
+  // the destination page's own (web) auth gate will handle the login.
+  return `${appUrl}${destPath}`
+}

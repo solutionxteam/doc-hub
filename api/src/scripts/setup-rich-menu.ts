@@ -43,6 +43,20 @@ const headers = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application
 // live inside the "/menu" command-menu carousel (see "More" card below) —
 // freeing up the grid for the broader "Slippy Universe" pillar navigation.
 const APP_URL = process.env.APP_URL ?? "https://slippy.ai"
+const LIFF_ID = process.env.NEXT_PUBLIC_LIFF_ID
+
+// Pillar cards (Health/Wealth/Lifestyle/Dashboard/Community/...) open through
+// the LINE-only login gate at `/liff/home` instead of a bare web URL — inside
+// LIFF the user is ALREADY signed into LINE, so the gate mints a Slippy
+// session in one tap (no desktop-style email/password form on a phone) and
+// then forwards into `destPath`. See web/src/app/liff/home/page.tsx +
+// web/src/lib/liff.ts → makeLiffGateUrl() (same logic, kept in sync here
+// since the Rich Menu is generated server-side, outside the Next.js bundle).
+function liffGate(destPath: string): string {
+  const qs = `?next=${encodeURIComponent(destPath)}`
+  if (LIFF_ID) return `https://liff.line.me/${LIFF_ID}/liff/home${qs}`
+  return `${APP_URL}${destPath}`   // fallback if LIFF isn't configured
+}
 
 // ─── Dimensions ────────────────────────────────────────────────────────────────
 // v5 — canvas matches LINE's required full-menu size; tap areas are mapped onto
@@ -69,24 +83,24 @@ const RICH_MENU_BODY = {
     { bounds: { x: 0,          y: 0,           width: CW, height: CH }, action: { type: "message", text: "คุยกับ Nova 🤖" } },
     // 📸 ส่งสลิป → triggers the upload flow
     { bounds: { x: CW,         y: 0,           width: CW, height: CH }, action: { type: "message", text: "📸 ส่งสลิป" } },
-    // ❤️ Health → opens the Health pillar in the web app
-    { bounds: { x: CW * 2,     y: 0,           width: CW, height: CH }, action: { type: "uri", uri: `${APP_URL}/personal/health` } },
-    // 🪙 Wealth → opens the Wealth pillar (budget/expense insight)
-    { bounds: { x: CW * 3,     y: 0,           width: W - CW * 3, height: CH }, action: { type: "uri", uri: `${APP_URL}/personal/wealth` } },
+    // ❤️ Health → LINE-only login gate → Health pillar (mobile-optimized, no password form)
+    { bounds: { x: CW * 2,     y: 0,           width: CW, height: CH }, action: { type: "uri", uri: liffGate("/personal/health") } },
+    // 🪙 Wealth → LINE-only login gate → Wealth pillar (budget/expense insight)
+    { bounds: { x: CW * 3,     y: 0,           width: W - CW * 3, height: CH }, action: { type: "uri", uri: liffGate("/personal/wealth") } },
 
     // ── Row 2 ──────────────────────────────────────────────────────────────
-    // 🛍️ Lifestyle → travel/shopping/experiences pillar
-    { bounds: { x: 0,          y: CH,          width: CW, height: GRID_H - CH }, action: { type: "uri", uri: `${APP_URL}/personal/vita` } },
-    // 📊 Dashboard → life overview / insight summary
-    { bounds: { x: CW,         y: CH,          width: CW, height: GRID_H - CH }, action: { type: "uri", uri: `${APP_URL}/dashboard` } },
-    // 👥 Community → friends, clubs, challenges
-    { bounds: { x: CW * 2,     y: CH,          width: CW, height: GRID_H - CH }, action: { type: "uri", uri: `${APP_URL}/social` } },
+    // 🛍️ Lifestyle → LINE-only login gate → travel/shopping/experiences pillar
+    { bounds: { x: 0,          y: CH,          width: CW, height: GRID_H - CH }, action: { type: "uri", uri: liffGate("/personal/vita") } },
+    // 📊 Dashboard → LINE-only login gate → life overview / insight summary
+    { bounds: { x: CW,         y: CH,          width: CW, height: GRID_H - CH }, action: { type: "uri", uri: liffGate("/dashboard") } },
+    // 👥 Community → LINE-only login gate → friends, clubs, challenges
+    { bounds: { x: CW * 2,     y: CH,          width: CW, height: GRID_H - CH }, action: { type: "uri", uri: liffGate("/social") } },
     // ⋯ More → opens the full in-chat command menu carousel
     //   (this is where กลุ่มกีฬา / กลุ่มทริป / หารบิล / ตั้งค่า all live now)
     { bounds: { x: CW * 3,     y: CH,          width: W - CW * 3, height: GRID_H - CH }, action: { type: "message", text: "/menu" } },
 
-    // ── Footer branding bar → open the web app ────────────────────────────
-    { bounds: { x: 0,          y: GRID_H,      width: W, height: FOOTER }, action: { type: "uri", uri: APP_URL } },
+    // ── Footer branding bar → LINE-only login gate → dashboard ────────────
+    { bounds: { x: 0,          y: GRID_H,      width: W, height: FOOTER }, action: { type: "uri", uri: liffGate("/dashboard") } },
   ],
 }
 
