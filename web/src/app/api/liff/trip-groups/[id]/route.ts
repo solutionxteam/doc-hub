@@ -15,6 +15,18 @@ const TRIP_EMOJI: Record<string, string> = {
 }
 function tripEmoji(t: string) { return TRIP_EMOJI[(t ?? "").toLowerCase()] ?? "✈️" }
 
+// Fire-and-forget call to api/trip/notify — pushes pay/unpay/finalize update
+// cards back into the LINE group chat where the trip group was created.
+// No-op server-side if the bill has no line_group_id (LIFF-only group).
+function notifyTripGroup(billId: string, event: "pay" | "unpay" | "finalize", lineUserId: string) {
+  if (!process.env.API_BASE_URL || !process.env.INTERNAL_API_KEY) return
+  fetch(`${process.env.API_BASE_URL}/trip/notify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY },
+    body: JSON.stringify({ billId, event, lineUserId }),
+  }).catch(err => console.error("[trip-notify] failed:", err.message))
+}
+
 async function rebalance(admin: ReturnType<typeof createAdminClient>, billId: string, totalAmount: number) {
   const { data: parts } = await admin.from("split_participants")
     .select("id").eq("split_bill_id", billId)
@@ -110,6 +122,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (bill.status === "finalized") return NextResponse.json({ error: "กลุ่มนี้ปิดไปแล้วครับ" }, { status: 400 })
     await rebalance(admin, id, Number(bill.total_amount))
     await admin.from("split_bills").update({ status: "finalized" }).eq("id", id)
+  }
+
+  // Push a "KhunThong-style" update card back into the LINE group chat (if this
+  // trip group was created from one) — fire-and-forget, never block the response.
+  if (action === "pay" || action === "unpay" || action === "finalize") {
+    notifyTripGroup(id, action, lineUserId)
   }
 
   const detail = await loadDetail(admin, id, lineUserId)

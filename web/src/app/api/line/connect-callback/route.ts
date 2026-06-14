@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { cookies }            from "next/headers"
 import { createAdminClient }  from "@/lib/supabase/admin"
+import { findLineConnection, findUserByLineMetadata } from "@/lib/line-identity"
 
 const LINE_TOKEN_URL   = "https://api.line.me/oauth2/v2.1/token"
 const LINE_PROFILE_URL = "https://api.line.me/v2/profile"
@@ -87,8 +88,22 @@ export async function GET(req: NextRequest) {
       pictureUrl?: string
     }
 
-    // ── Upsert line_connections ───────────────────────────────────
+    // ── Prevent linking this LINE account to more than one Slippy account ──
     const admin = createAdminClient()
+
+    const existingConnection = await findLineConnection(admin, profile.userId)
+    if (existingConnection?.user_id && existingConnection.user_id !== userId) {
+      console.warn(`[LINE connect-callback] ⚠️ ${profile.userId.slice(0,8)}… already linked to a different account`)
+      return NextResponse.redirect(`${redirectBack}?error=line_already_linked`)
+    }
+
+    const existingMetaUser = await findUserByLineMetadata(admin, profile.userId)
+    if (existingMetaUser && existingMetaUser.id !== userId) {
+      console.warn(`[LINE connect-callback] ⚠️ ${profile.userId.slice(0,8)}… already used by account ${existingMetaUser.id.slice(0,8)}`)
+      return NextResponse.redirect(`${redirectBack}?error=line_already_linked`)
+    }
+
+    // ── Upsert line_connections ───────────────────────────────────
     const { error: upsertErr } = await admin
       .from("line_connections")
       .upsert({
@@ -101,6 +116,15 @@ export async function GET(req: NextRequest) {
     if (upsertErr) {
       console.error("[LINE connect-callback] upsert failed:", upsertErr)
       return NextResponse.redirect(`${redirectBack}?error=upsert_failed`)
+    }
+
+    // ── Mirror onto user_metadata so the LIFF bridge / LINE Login button
+    // resolve straight to this account too (keeps all 3 entry points consistent)
+    const { data: { user: connectingUser } } = await admin.auth.admin.getUserById(userId)
+    if (connectingUser && connectingUser.user_metadata?.line_user_id !== profile.userId) {
+      await admin.auth.admin.updateUserById(userId, {
+        user_metadata: { ...connectingUser.user_metadata, line_user_id: profile.userId },
+      })
     }
 
     console.log(`[LINE connect-callback] ✅ Connected ${profile.displayName} (${profile.userId.slice(0,8)}…) → org ${orgId.slice(0,8)}`)

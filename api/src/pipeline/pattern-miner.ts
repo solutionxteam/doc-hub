@@ -294,6 +294,15 @@ export function formatErrorPatternBlock(patterns: ErrorPattern[]): string {
     sections.push(`Dates: ${examples.join("; ")}`)
   }
 
+  // Line item / menu name errors — Thai thermal-receipt OCR misreads
+  const lineItemPatterns = byField.get("line_items.description") ?? []
+  if (lineItemPatterns.length) {
+    const examples = lineItemPatterns
+      .slice(0, 10)
+      .map(p => `"${p.wrong_value}" → should be "${p.correct_value}"`)
+    sections.push(`Menu/item names: ${examples.join("; ")}`)
+  }
+
   if (!sections.length) return ""
 
   return `## ⚠️ Known OCR errors for this organisation — you have made these mistakes before:\n` +

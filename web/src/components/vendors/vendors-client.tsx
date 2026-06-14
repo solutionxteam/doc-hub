@@ -33,7 +33,13 @@ export interface Vendor {
   total_amount:    number
   vat_total:       number
   last_doc_date:   string | null
+  status_counts?:  Record<string, number>
 }
+
+// Statuses excluded from totals/doc_count — shown separately so users know
+// why a vendor's figures don't match the raw document count.
+const PENDING_STATUSES  = ["pending", "processing", "reviewing", "flagged"]
+const EXCLUDED_STATUSES = ["rejected", "failed"]
 
 interface Props { vendors: Vendor[] }
 
@@ -220,6 +226,10 @@ function VendorCard({ v, onEdit }: { v: Vendor; onEdit: (v: Vendor) => void }) {
   const thumb = getThumb(v.name)
   const docsHref = `/documents?vendor=${encodeURIComponent(v.name)}`
 
+  const counts = v.status_counts ?? {}
+  const pendingCount  = PENDING_STATUSES.reduce((s, k) => s + (counts[k] ?? 0), 0)
+  const excludedCount = EXCLUDED_STATUSES.reduce((s, k) => s + (counts[k] ?? 0), 0)
+
   return (
     <div className="bg-card border border-border rounded-[10px] p-3.5
       hover:shadow-md hover:border-brand-300 dark:hover:border-brand-600
@@ -286,6 +296,24 @@ function VendorCard({ v, onEdit }: { v: Vendor; onEdit: (v: Vendor) => void }) {
           </div>
         )}
       </div>
+
+      {/* Status badges — pending review / excluded (rejected, cancelled) */}
+      {(pendingCount > 0 || excludedCount > 0) && (
+        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+          {pendingCount > 0 && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium
+              bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+              <Clock className="w-2.5 h-2.5" /> รอตรวจสอบ {pendingCount}
+            </span>
+          )}
+          {excludedCount > 0 && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium
+              bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400">
+              <X className="w-2.5 h-2.5" /> ไม่รวม {excludedCount}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Footer — link to documents */}
       <Link href={docsHref}
@@ -409,7 +437,7 @@ export function VendorsClient({ vendors: initialVendors }: Props) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="ผู้ขายทั้งหมด"  value={vendors.length.toString()}              icon={Building2}  tone="brand"   />
         <StatCard label="รวมยอดทั้งสิ้น" value={formatThb(totalSpend).replace(".00","")} icon={TrendingUp} tone="emerald"
-          sub={`${vendors.filter(v => v.vat_total > 0).length} ราย มี VAT`} />
+          sub="ไม่รวมรายการที่ยกเลิก/ปฏิเสธ" />
         <StatCard label="จำนวนเอกสาร"   value={totalDocs.toLocaleString()}              icon={FileText}   tone="purple"  />
         <StatCard label="บนแผนที่"       value={geoCount.toString()}                     icon={MapPin}     tone="amber"
           sub={vendors.length ? `${Math.round(geoCount/vendors.length*100)}% ระบุตำแหน่งได้` : ""} />

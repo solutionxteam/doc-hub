@@ -613,6 +613,20 @@ export function ReviewClient({ doc, fileUrl, integrations, userRole, duplicateOr
         correctedValue:  c.correctedValue != null ? String(c.correctedValue) : null,
       }))
 
+      // Line-item descriptions — compare AI's original reading (rawAI.line_items)
+      // against what the user edited (items), index-by-index. Catches misread
+      // Thai menu names on thermal receipts (e.g. "ตับบำรุง" → "ต้มยำกุ้ง").
+      const aiLineItems: any[] = ai.line_items ?? []
+      const lineItemCorrections = items
+        .map((it, i) => ({
+          field:          "line_items.description",
+          aiValue:        aiLineItems[i]?.description ?? null,
+          correctedValue: it.description,
+        }))
+        .filter(c => c.aiValue && c.correctedValue && c.aiValue !== c.correctedValue)
+
+      corrections.push(...lineItemCorrections)
+
       // fire-and-forget — ไม่บล็อก save
       fetch(`/api/documents/${doc.id}/corrections`, {
         method:  "POST",

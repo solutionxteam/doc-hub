@@ -42,6 +42,7 @@ export async function middleware(request: NextRequest) {
     || pathname.startsWith("/cookie-policy")
     || pathname.startsWith("/liff/")          // LIFF mini-apps — auth via LINE profile, not Supabase session
     || pathname.startsWith("/api/liff/")      // LIFF backing APIs (join, bill-info, sport-groups, …)
+    || pathname.startsWith("/api/places")     // venue/place search used by LIFF mini-apps (no Supabase session)
     || pathname === "/"
 
   if (!user && !isPublic) {

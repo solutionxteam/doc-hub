@@ -9,6 +9,20 @@
 // phishing pages users have reported seeing). Always resolve through APP_URL
 // (falls back to the stable Vercel alias) — never hardcode "slippy.ai" below.
 const APP_URL = process.env.APP_URL ?? "https://slippy-solutionxteams-projects.vercel.app"
+const LIFF_ID = process.env.NEXT_PUBLIC_LIFF_ID
+
+// "เปิด Slippy App" / "ตรวจสอบในแอป" buttons should land users on a page that's
+// already signed in — not the public landing/login page (which then needs an
+// email/password form on a phone). Inside LINE the user is ALREADY signed into
+// LINE, so route through the LINE-only login gate at `/liff/home`, which mints
+// a Slippy session in one tap and forwards into `destPath`.
+// See web/src/app/liff/home/page.tsx + web/src/lib/liff.ts → makeLiffGateUrl()
+// (kept in sync with api/src/scripts/setup-rich-menu.ts → liffGate()).
+function liffGate(destPath: string): string {
+  const qs = `?next=${encodeURIComponent(destPath)}`
+  if (LIFF_ID) return `https://liff.line.me/${LIFF_ID}/liff/home${qs}`
+  return `${APP_URL}${destPath}`   // fallback if LIFF isn't configured
+}
 
 const STATUS_TH: Record<string, string> = {
   pending:    "รอดำเนินการ", processing: "กำลังประมวลผล", reviewing: "รอตรวจสอบ",
@@ -396,7 +410,7 @@ export function docResultCard(params: {
   footerContents.push({
     type: "button", style: "secondary", height: "sm", margin: "sm",
     action: { type: "uri", label: "🌐 ตรวจสอบในแอป",
-      uri: `${APP_URL}/documents/${docId}/review` }
+      uri: liffGate(`/documents/${docId}/review`) }
   })
 
   return {
@@ -600,7 +614,7 @@ export function welcomeCard(): object {
         type: "box", layout: "vertical", paddingAll: "12px", backgroundColor: "#f9fafb",
         contents: [{
           type: "button", style: "primary", color: "#6366f1",
-          action: { type: "uri", label: "เปิด Slippy App", uri: APP_URL }
+          action: { type: "uri", label: "เปิด Slippy App", uri: liffGate("/dashboard") }
         }]
       }
     }
@@ -739,7 +753,9 @@ export function commandMenuCard(): object {
     body: {
       type: "box", layout: "vertical", paddingAll: "14px", spacing: "none",
       contents: [
-        menuBtn("เริ่มหารบิล",     "🆕", "/split",       "พิมพ์ /split [DocID]", "#e0e7ff", true),
+        uriBtn("เปิดแดชบอร์ดหารบิล", "🧾", `https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID ?? ""}/liff/split`,
+          "สร้างบิลหารยอดเท่าๆ กัน แชร์ลิงก์ให้เพื่อนกดเข้าร่วม", "#e0e7ff", BRAND.indigo),
+        menuBtn("หารบิลจากใบเสร็จ", "🆕", "/split",       "พิมพ์ /split [DocID]", "#e0e7ff", true),
         menuBtn("เลือกรายการ",     "☝️", "/claim",       "พิมพ์ /claim [BillID] [เลขรายการ]", "#e0e7ff"),
         menuBtn("ดูสถานะบิล",     "👀", "/splitstatus", "พิมพ์ /splitstatus [BillID]", "#e0e7ff"),
         menuBtn("ปิดบิล & สรุป",  "🏁", "/splitdone",   "พิมพ์ /splitdone [BillID]", "#e0e7ff"),
@@ -790,8 +806,8 @@ export function commandMenuCard(): object {
       contents: [
         menuBtn("เชื่อมต่อบัญชี",    "🔗", "/connect",    "พิมพ์ /connect [CODE]", "#fce7f3", true),
         menuBtn("คำสั่งทั้งหมด",     "📖", "/help",       "ดูรายการคำสั่งทั้งหมด", "#fce7f3"),
-        uriBtn("เปิด Slippy App",   "🚀", APP_URL, "จัดการเอกสารบนเว็บ", "#f3e8ff", BRAND.violet),
-        uriBtn("ตั้งค่า LINE Bot",   "💬", `${APP_URL}/settings/line`, "สร้าง code เชื่อมต่อ", "#f3e8ff", BRAND.violet),
+        uriBtn("เปิด Slippy App",   "🚀", liffGate("/dashboard"), "จัดการเอกสารบนเว็บ", "#f3e8ff", BRAND.violet),
+        uriBtn("ตั้งค่า LINE Bot",   "💬", liffGate("/settings/line"), "สร้าง code เชื่อมต่อ", "#f3e8ff", BRAND.violet),
       ]
     },
     footer: tipFooter("🫧 Slippy — ผู้ช่วย AI ที่เก็บทุกสลิป ทุกทริป ทุกเรื่องราวของคุณ", "#fce7f3", "#db2777")

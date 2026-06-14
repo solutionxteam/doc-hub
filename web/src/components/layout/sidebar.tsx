@@ -28,26 +28,36 @@ const SHOW_MOBILE_PREVIEW = false  // internal dev tool
 
 // ─── Business / Organization (Phase 1) ───────────────────────────────────────
 // Tax here = VAT (ภ.พ.30) + WHT (ภ.ง.ด.3/53) — corporate tax only
+
+// Group 1: ภาพรวม (Overview) — core, always-visible items
 const navItems = [
   { key: "dashboard",  href: "/dashboard",   icon: Icons.Dashboard },
   { key: "life",       href: "/life",         icon: Icons.Brain     },  // Life Graph ← core
   { key: "documents",  href: "/documents",   icon: Icons.FileText  },
+]
+
+// Group 2: การเงิน & ภาษี (Finance & Tax)
+const financeItems = [
   { key: "analytics",  href: "/analytics",   icon: Icons.BarChart  },
   { key: "budget",     href: "/budget",       icon: Icons.Target    },
-  { key: "trips",      href: "/trips",        icon: Icons.MapPin    },  // ทริป & กิจกรรม
-  { key: "split",      href: "/split",        icon: Icons.Split     },
   { key: "claims",     href: "/claims",       icon: Icons.Briefcase },  // Business Suite V4
   { key: "tax",        href: "/tax",          icon: Icons.Receipt   },
   { key: "vendors",    href: "/vendors",      icon: Icons.Building  },
+]
+
+// Group 3: กิจกรรม & เครื่องมือ (Activities & Tools)
+const activityItems = [
+  { key: "trips",      href: "/trips",        icon: Icons.MapPin    },  // ทริป & กิจกรรม
+  { key: "split",      href: "/split",        icon: Icons.Split     },  // หารบิล (ใช้ร่วมกันทั้งโหมดองค์กร/ส่วนตัว)
   ...(SHOW_LINE_STUDIO    ? [{ key: "lineStudio", href: "/line-studio", icon: Icons.LineBot  }] : []),
   ...(SHOW_MOBILE_PREVIEW ? [{ key: "mobile",     href: "/mobile",      icon: Icons.Smartphone }] : []),
 ]
 
 // ─── Personal Space (Phase 2) ─────────────────────────────────────────────────
-// Note: tax is in navItems because /tax now has BOTH org + personal tabs in one page
+// Note: tax/split live in the shared groups above — /tax has org + personal tabs,
+// and หารบิล works the same in both modes, so we don't duplicate them here.
 const personalItems = [
   { key: "personal",   href: "/personal",          icon: Icons.Leaf     },  // overview
-  { key: "split",      href: "/split",             icon: Icons.Split    },  // หารบิล (ส่วนตัว)
   { key: "health",     href: "/personal/health",   icon: Icons.Activity },
   { key: "planner",    href: "/personal/planner",  icon: Icons.Target   },
   // Phase 2 — hidden until Vita scoring is stable:
@@ -284,7 +294,37 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
         "flex-1 overflow-y-auto py-4 space-y-0.5 scrollbar-thin",
         collapsed ? "lg:px-2 px-3" : "px-3"
       )}>
+        {/* ── Group 1: ภาพรวม ── */}
         {navItems.map(({ key, href, icon: Icon }) => {
+          const active = isActive(href)
+          return (
+            <Link
+              key={key}
+              href={href}
+              title={collapsed ? t(key as any) : undefined}
+              className={cn(
+                "sidebar-item",
+                active && "active",
+                collapsed && "lg:justify-center lg:px-0"
+              )}
+            >
+              <Icon className={cn("w-[18px] h-[18px] shrink-0", active ? "text-brand-600 dark:text-brand-300" : "text-sidebar-muted")} />
+              <span className={cn("truncate", collapsed && "lg:hidden")}>{t(key as any)}</span>
+              {active && !collapsed && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-brand-500 shrink-0 lg:block hidden" />}
+            </Link>
+          )
+        })}
+
+        {/* ── Group 2: การเงิน & ภาษี ── */}
+        <div className={cn(collapsed ? "lg:block hidden pt-3 pb-1" : "hidden")}>
+          <div className="border-t border-sidebar-border" />
+        </div>
+        <div className={cn(collapsed ? "lg:hidden pt-4 pb-1" : "pt-4 pb-1")}>
+          <p className="px-3 text-xs font-medium text-sidebar-muted uppercase tracking-wider">
+            การเงิน & ภาษี
+          </p>
+        </div>
+        {financeItems.map(({ key, href, icon: Icon }) => {
           const active = isActive(href)
           // Show tax label based on current account type
           const label = key === "tax"
@@ -308,6 +348,35 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
           )
         })}
 
+        {/* ── Group 3: กิจกรรม & เครื่องมือ ── */}
+        <div className={cn(collapsed ? "lg:block hidden pt-3 pb-1" : "hidden")}>
+          <div className="border-t border-sidebar-border" />
+        </div>
+        <div className={cn(collapsed ? "lg:hidden pt-4 pb-1" : "pt-4 pb-1")}>
+          <p className="px-3 text-xs font-medium text-sidebar-muted uppercase tracking-wider">
+            กิจกรรม & เครื่องมือ
+          </p>
+        </div>
+        {activityItems.map(({ key, href, icon: Icon }) => {
+          const active = isActive(href)
+          return (
+            <Link
+              key={key}
+              href={href}
+              title={collapsed ? t(key as any) : undefined}
+              className={cn(
+                "sidebar-item",
+                active && "active",
+                collapsed && "lg:justify-center lg:px-0"
+              )}
+            >
+              <Icon className={cn("w-[18px] h-[18px] shrink-0", active ? "text-brand-600 dark:text-brand-300" : "text-sidebar-muted")} />
+              <span className={cn("truncate", collapsed && "lg:hidden")}>{t(key as any)}</span>
+              {active && !collapsed && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-brand-500 shrink-0 lg:block hidden" />}
+            </Link>
+          )
+        })}
+
         {/* ── Personal Space (Phase 2 — hidden in Phase 1) ── */}
         {SHOW_PERSONAL_SPACE && (<>
           <div className={cn(collapsed ? "lg:block hidden pt-3 pb-1" : "hidden")}>
@@ -316,7 +385,7 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
           <div className={cn(collapsed ? "lg:hidden pt-4 pb-1" : "pt-4 pb-1")}>
             <p className="px-3 text-xs font-medium text-sidebar-muted uppercase tracking-wider flex items-center gap-1.5">
               <Icons.Leaf size={11} className="text-emerald-500" />
-              Personal
+              พื้นที่ส่วนตัว
             </p>
           </div>
           {personalItems.map(({ key, href, icon: Icon }) => {
@@ -443,13 +512,23 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
         collapsed ? "lg:px-2 px-3" : "px-3"
       )}>
         <div className={cn("flex-col items-center gap-2", collapsed ? "lg:flex hidden" : "hidden")}>
-          <div
-            className="w-8 h-8 rounded-full bg-brand-500/20 flex items-center justify-center
-              text-brand-500 font-semibold text-sm"
-            title={user.full_name ?? user.email}
-          >
-            {avatar}
-          </div>
+          {user.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={user.avatar_url}
+              alt={user.full_name ?? user.email}
+              title={user.full_name ?? user.email}
+              className="w-8 h-8 rounded-full object-cover bg-muted"
+            />
+          ) : (
+            <div
+              className="w-8 h-8 rounded-full bg-brand-500/20 flex items-center justify-center
+                text-brand-500 font-semibold text-sm"
+              title={user.full_name ?? user.email}
+            >
+              {avatar}
+            </div>
+          )}
           <button
             onClick={handleLogout}
             title={t("logout")}
@@ -460,10 +539,19 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
           </button>
         </div>
         <div className={cn("flex items-center gap-3 px-3 py-2 rounded-lg", collapsed && "lg:hidden")}>
-          <div className="w-8 h-8 rounded-full bg-brand-500/20 flex items-center justify-center
-            text-brand-500 font-semibold text-sm shrink-0">
-            {avatar}
-          </div>
+          {user.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={user.avatar_url}
+              alt={user.full_name ?? user.email}
+              className="w-8 h-8 rounded-full object-cover bg-muted shrink-0"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-brand-500/20 flex items-center justify-center
+              text-brand-500 font-semibold text-sm shrink-0">
+              {avatar}
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <p className="text-sidebar-fg text-sm font-medium truncate">
               {user.full_name ?? user.email}

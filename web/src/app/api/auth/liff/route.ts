@@ -19,6 +19,7 @@
  */
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient }         from "@/lib/supabase/admin"
+import { resolveOrCreateLineUser, ensureLineLinkage } from "@/lib/line-identity"
 
 const LINE_VERIFY_URL = "https://api.line.me/oauth2/v2.1/verify"
 
@@ -67,65 +68,30 @@ export async function POST(req: NextRequest) {
     log("verified", { lineUserId: lineUserId.slice(0, 6), displayName, hasEmail: !!lineEmail })
 
     // ── Step 2: Find-or-create the linked Supabase user ───────────────────
-    // (mirrors /api/auth/line/callback so both entry points stay consistent)
+    // Shared resolver — keeps this in sync with /api/auth/line/callback and
+    // /api/line/connect-callback.
     const admin = createAdminClient()
-    let   targetEmail: string
-
-    let existingUser: any = null
-    let page = 1
-    while (!existingUser) {
-      const { data: list } = await admin.auth.admin.listUsers({ page, perPage: 1000 })
-      if (!list?.users?.length) break
-      existingUser = list.users.find((u: any) => u.user_metadata?.line_user_id === lineUserId)
-      if (list.users.length < 1000) break
-      page++
-    }
-
-    if (existingUser) {
-      log("found existing user", { id: existingUser.id.slice(0, 8) })
-      const hasPlaceholderEmail = (existingUser.email ?? "").includes("@noreply.slippy.app")
-        || (existingUser.email ?? "").includes("@line.slippy.app")
-
-      if (lineEmail && hasPlaceholderEmail) {
-        await admin.auth.admin.updateUserById(existingUser.id, {
-          email: lineEmail, email_confirm: true,
-          user_metadata: { ...existingUser.user_metadata, avatar_url: avatarUrl },
-        })
-        targetEmail = lineEmail
-      } else {
-        targetEmail = existingUser.email!
-        if (avatarUrl && existingUser.user_metadata?.avatar_url !== avatarUrl) {
-          await admin.auth.admin.updateUserById(existingUser.id, {
-            user_metadata: { ...existingUser.user_metadata, avatar_url: avatarUrl },
-          })
-        }
-      }
-    } else {
-      targetEmail = lineEmail ?? `line.${lineUserId.toLowerCase()}@noreply.slippy.app`
-      log("creating new user", { email: targetEmail })
-
-      const { data: created, error: createErr } = await admin.auth.admin.createUser({
-        email: targetEmail, email_confirm: true,
-        user_metadata: { full_name: displayName, avatar_url: avatarUrl, line_user_id: lineUserId, provider: "line" },
+    let resolved
+    try {
+      resolved = await resolveOrCreateLineUser(admin, {
+        lineUserId, displayName, avatarUrl, email: lineEmail,
       })
+    } catch (err: any) {
+      log("resolve user failed", err.message)
+      return NextResponse.json({ error: "line_create", detail: err.message }, { status: 500 })
+    }
+    const { userId: resolvedUserId, email: targetEmail } = resolved
+    log(resolved.isNewUser ? "created new user" : "found existing user", { id: resolvedUserId.slice(0, 8) })
 
-      if (createErr) {
-        if (createErr.message.includes("already been registered") || createErr.message.includes("duplicate")) {
-          const { data: byEmail } = await admin.auth.admin.listUsers({ perPage: 1000 })
-          const matched = byEmail?.users?.find((u: any) => u.email === targetEmail)
-          if (!matched) return NextResponse.json({ error: "line_create" }, { status: 500 })
-          await admin.auth.admin.updateUserById(matched.id, {
-            user_metadata: { ...matched.user_metadata, line_user_id: lineUserId },
-          })
-        } else {
-          return NextResponse.json({ error: "line_create", detail: createErr.message }, { status: 500 })
-        }
-      } else if (created?.user) {
-        await admin.from("users").upsert(
-          { id: created.user.id, email: targetEmail, full_name: displayName },
-          { onConflict: "id" }
-        )
-      }
+    // ── Step 2.5: Ensure org + line_connections exist ─────────────────────
+    // A brand-new LINE-only account (first time tapping the Rich Menu, never
+    // used the website's "เข้าสู่ระบบด้วย LINE" button) otherwise has no
+    // organization, which breaks every LIFF pillar page that depends on one.
+    try {
+      const orgId = await ensureLineLinkage(admin, resolvedUserId, lineUserId, displayName)
+      if (orgId) log("✅ line_connections linked", { lineUserId: lineUserId.slice(0, 6), orgId: orgId.slice(0, 8) })
+    } catch (linkErr: any) {
+      log("auto-link error (non-fatal)", linkErr.message)
     }
 
     // ── Step 3: Mint a Supabase session (magic-link action_link) ──────────

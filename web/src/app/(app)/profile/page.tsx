@@ -25,7 +25,7 @@ export default async function ProfilePage() {
     { data: lineConn },
   ] = await Promise.all([
     supabase.from("organizations").select("name, plan").eq("id", orgId).single(),
-    supabase.from("users").select("full_name, email").eq("id", user?.id ?? "").single(),
+    supabase.from("users").select("full_name, email, avatar_url").eq("id", user?.id ?? "").single(),
     supabase.from("organization_members").select("joined_at")
       .eq("user_id", user?.id ?? "").eq("organization_id", orgId).single(),
     // Real activity from privacy logs
@@ -45,11 +45,12 @@ export default async function ProfilePage() {
   return (
     <ProfileClient
       userId={user?.id ?? ""}
-      name={profile?.full_name ?? "—"}
+      name={profile?.full_name ?? user?.email?.split("@")[0] ?? "ผู้ใช้งาน"}
       email={profile?.email    ?? user?.email ?? "—"}
       role={role}
       orgName={org?.name ?? "—"}
       orgPlan={org?.plan ?? "free"}
+      avatarUrl={profile?.avatar_url ?? (user?.user_metadata?.avatar_url as string | undefined) ?? undefined}
       joinedAt={membership?.joined_at ?? undefined}
       activityLogs={activityLogs ?? []}
       lineConnection={lineConn ?? null}

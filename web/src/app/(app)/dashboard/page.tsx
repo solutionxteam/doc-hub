@@ -20,6 +20,7 @@ import {
 import Link from "next/link"
 import { SeedDemoButton }        from "@/components/dashboard/seed-demo-button"
 import { DashboardUploadZone }   from "@/components/documents/dashboard-upload-zone"
+import { LifeRadarCard }         from "@/components/dashboard/life-radar-card"
 
 // ── Thumb map ──────────────────────────────────────────────────────────────────
 const THUMB_MAP: Record<string, string> = {
@@ -89,11 +90,40 @@ export default async function DashboardPage() {
 
   const { organization_id: orgId } = await getMembership()
 
+  const { data: { user } } = await supabase.auth.getUser()
+
   const { data: org } = await supabase
     .from("organizations")
     .select("name, doc_used, doc_quota, plan, slug")
     .eq("id", orgId)
     .single()
+
+  // Latest Life Score snapshot — powers the "เป้าหมายชีวิต" spider chart
+  // (see supabase/migrations/028_life_score_complete.sql — 4 domains:
+  // Wealth · Lifestyle · Journey · Social, the goals Slippy is built around)
+  const { data: lifeScore } = await supabase
+    .from("life_score_snapshots")
+    .select("wealth_score, lifestyle_score, journey_score, social_score, overall_score")
+    .eq("organization_id", orgId)
+    .order("snapshot_date", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("full_name, avatar_url")
+    .eq("id", user?.id ?? "")
+    .single()
+
+  const displayName =
+    profile?.full_name?.trim()
+    || (user?.user_metadata?.full_name as string | undefined)?.trim()
+    || (user?.user_metadata?.name as string | undefined)?.trim()
+    || user?.email?.split("@")[0]
+    || "เพื่อน Slippy"
+  const avatarUrl = profile?.avatar_url
+    ?? (user?.user_metadata?.avatar_url as string | undefined)
+    ?? null
 
   const orgSlug = org?.slug ?? ""
 
@@ -324,8 +354,20 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* Right 1/3: Activity feed + LINE Bot teaser */}
+        {/* Right 1/3: Profile + Life-goal radar, Activity feed, LINE Bot teaser */}
         <div className="space-y-5">
+
+          {/* "เป้าหมายชีวิต" — profile + spider chart of the 4 Life Score domains */}
+          <LifeRadarCard
+            displayName={displayName}
+            orgName={org?.name ?? null}
+            avatarUrl={avatarUrl}
+            wealth={Number(lifeScore?.wealth_score ?? 0)}
+            lifestyle={Number(lifeScore?.lifestyle_score ?? 0)}
+            journey={Number(lifeScore?.journey_score ?? 0)}
+            social={Number(lifeScore?.social_score ?? 0)}
+            overall={Number(lifeScore?.overall_score ?? 0)}
+          />
 
           {/* Activity feed — from notifications table */}
           <div className="rounded-[12px] border bg-card overflow-hidden">

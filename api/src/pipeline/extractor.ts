@@ -233,7 +233,20 @@ wet markets, coffee carts, hospitals (OPD receipts), etc.
 - For consumer_receipt: delivery_fee = ค่าจัดส่ง, discount_amount = ส่วนลด/คูปอง
 - If image appears rotated, try to read text at correct orientation. Look for numbers in all directions.
 - Unknown fields → null. Unknown amounts → 0
-- Confidence 0.0–1.0 reflects actual certainty. Never fabricate data.`
+- Confidence 0.0–1.0 reflects actual certainty. Never fabricate data.
+
+## Thai menu/line-item names — validate against real words
+Thermal-printer receipts often blur Thai consonants that look alike at low resolution.
+Common confusions to double-check: ท↔ก, ม↔บ, ย↔บ, ข↔ช, น↔ม, เ↔แ, ใ↔ไ, ั↔ิ, ่↔ี.
+Examples of how a blurred dot-matrix print can mislead a quick read:
+  "ต้มยำกุ้ง น้ำข้น" → misread as "ตับบำรุง น้ำชำน"
+  "เต้าหู้ทรงเครื่อง" → misread as "เต้าหู้กรงเครื่อง"
+  "กุ้งโดนัท"        → misread as "กุ้งโดนัก"
+For every line_item description, ask: "is this a real Thai word/dish name?" If the
+literal characters you read do NOT form a recognizable Thai word or common menu item,
+re-examine the image stroke-by-stroke and pick the closest REAL Thai word that matches
+the visible shapes — never output a non-word string. If still uncertain, lower that
+item's confidence rather than guessing a low-confidence non-word.`
 
 // ── Shared JSON schema string ──────────────────────────────────────────────────
 const DOC_SCHEMA = `{
@@ -296,9 +309,12 @@ async function ocrAndClassify(imageBlocks: Anthropic.ImageBlockParam[]): Promise
 
 CRITICAL — OCR errors to avoid:
 - Digits: never confuse 1↔7, 3↔8, 0↔6, 6↔5 — check curves carefully
-- Thai chars: น vs ม, เ vs แ, ใ vs ไ — look carefully
+- Thai chars: น vs ม, เ vs แ, ใ vs ไ, ท vs ก, ม vs บ, ย vs บ, ข vs ช — look carefully
 - Tax IDs: always 13 digits
 - Dates: Buddhist year 2567=2024, 2568=2025, 2569=2026 — transcribe as-is
+- Menu/item names should form REAL Thai words — if your reading produces a non-word
+  (e.g. "ตับบำรุง" for what should be "ต้มยำกุ้ง"), re-examine the strokes and pick
+  the real word that matches
 
 Output in this EXACT format (two sections):
 CATEGORY: <one of: tax_invoice_full|tax_invoice_simplified|receipt_with_tax|receipt|consumer_receipt|invoice|credit_note|other>
@@ -351,11 +367,16 @@ async function ocrPass(imageBlocks: Anthropic.ImageBlockParam[]): Promise<string
 
 CRITICAL — Thai thermal receipt OCR errors to avoid:
 - Digits: never confuse 1↔7, 3↔8, 0↔6, 6↔5 — look carefully at curves and strokes
-- Thai chars: น vs ม (different right stroke), เ vs แ (แ has extra stroke), ใ vs ไ (different left curve)
+- Thai chars: น vs ม (different right stroke), เ vs แ (แ has extra stroke), ใ vs ไ (different left curve),
+  ท vs ก, ม vs บ, ย vs บ, ข vs ช, ั vs ิ, ่ vs ี — look carefully at low-res dot-matrix shapes
 - Prices: always read all digits e.g. "1,234.56" not "1,23.56" — never drop digits
 - Tax IDs: always 13 digits — if you see fewer, recount
 - Dates: Buddhist year 2567=2024, 2568=2025, 2569=2026 — do NOT convert, transcribe as-is
 - Store names: copy exactly including ห้าง/บมจ/บจก prefixes
+- Menu/item names (รายการสินค้า) should form REAL Thai words/dish names — common Thai
+  thermal-printer misreads: "ต้มยำกุ้ง น้ำข้น" → "ตับบำรุง น้ำชำน", "เต้าหู้ทรงเครื่อง" → "เต้าหู้กรงเครื่อง",
+  "กุ้งโดนัท" → "กุ้งโดนัก". If a transcribed item name is not a recognizable Thai word,
+  re-examine the strokes and transcribe the closest real word/dish name instead.
 
 Output sections in this order (skip if absent):
 1. ชื่อร้าน/บริษัท (store/company name + branch)
@@ -632,29 +653,41 @@ Extract all accounting data from ${pages.length > 1 ? `these ${pages.length} doc
   }
 
   // ── Pass 3: Google Document AI fallback ──────────────────────────────────────
-  // Triggered when: confidence < threshold even after potential escalation
+  // Triggered when: overall confidence < threshold even after potential escalation,
+  // OR any individual line_item is low-confidence (overall score can stay high
+  // even when a couple of menu-item descriptions were misread on a thermal receipt).
   // Adds a second OCR source and re-runs Sonnet — costs ~2x but saves low-confidence docs
   const currentConfidence = Array.isArray(rawParsed)
     ? rawParsed[0]?.confidence_score ?? 0
     : rawParsed.confidence_score ?? 0
 
-  if (currentConfidence < FALLBACK_CONFIDENCE_THRESHOLD) {
-    console.log(`[extractor] confidence ${currentConfidence.toFixed(2)} < ${FALLBACK_CONFIDENCE_THRESHOLD} — triggering Google DocAI fallback`)
+  const firstDoc = Array.isArray(rawParsed) ? rawParsed[0] : rawParsed
+  const minLineItemConfidence = (firstDoc?.line_items ?? [])
+    .map(item => item.confidence ?? 1)
+    .reduce((min, c) => Math.min(min, c), 1)
+
+  if (currentConfidence < FALLBACK_CONFIDENCE_THRESHOLD || minLineItemConfidence < FALLBACK_CONFIDENCE_THRESHOLD) {
+    console.log(`[extractor] confidence ${currentConfidence.toFixed(2)} (min line item ${minLineItemConfidence.toFixed(2)}) — triggering Google DocAI fallback`)
     const docAiText = await docAiPass(pages[0])
     if (docAiText) {
       const retryRaw = await runSonnetExtraction(
         buildTextBlock(buildOcrSection(rawOcrText, docAiText))
       )
       const retryParsed = parseRaw(retryRaw)
-      const retryConfidence = Array.isArray(retryParsed)
-        ? retryParsed[0]?.confidence_score ?? 0
-        : retryParsed.confidence_score ?? 0
+      const retryFirstDoc = Array.isArray(retryParsed) ? retryParsed[0] : retryParsed
+      const retryConfidence = retryFirstDoc?.confidence_score ?? 0
+      const retryMinLineItemConfidence = (retryFirstDoc?.line_items ?? [])
+        .map(item => item.confidence ?? 1)
+        .reduce((min, c) => Math.min(min, c), 1)
 
-      if (retryConfidence > currentConfidence) {
-        console.log(`[extractor] DocAI fallback improved: ${currentConfidence.toFixed(2)} → ${retryConfidence.toFixed(2)}`)
+      const before = Math.min(currentConfidence, minLineItemConfidence)
+      const after  = Math.min(retryConfidence, retryMinLineItemConfidence)
+
+      if (after > before) {
+        console.log(`[extractor] DocAI fallback improved: ${before.toFixed(2)} → ${after.toFixed(2)}`)
         rawParsed = retryParsed
       } else {
-        console.log(`[extractor] DocAI fallback did not improve (${retryConfidence.toFixed(2)}) — keeping current result`)
+        console.log(`[extractor] DocAI fallback did not improve (${after.toFixed(2)}) — keeping current result`)
       }
     }
   }

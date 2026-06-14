@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { cookies }            from "next/headers"
 import { createAdminClient }  from "@/lib/supabase/admin"
 import { createServerClient, type CookieOptions } from "@supabase/ssr"
+import { resolveOrCreateLineUser, ensureLineLinkage } from "@/lib/line-identity"
 
 const LINE_TOKEN_URL   = "https://api.line.me/oauth2/v2.1/token"
 const LINE_PROFILE_URL = "https://api.line.me/v2/profile"
@@ -38,7 +39,14 @@ export async function GET(req: NextRequest) {
   // there lets the app capture the session directly (mirrors how Google/
   // Facebook OAuth completes via `slippy://auth/callback`). Web keeps using
   // the client-side hash-reader page since middleware can't read fragments.
-  const sessionRedirectTarget = isIOS ? "slippy://auth/callback" : `${appUrl}/auth/line-callback`
+  // Forward `next` (e.g. /liff/sport, /liff/trip) so the client-side
+  // hash-reader page can route the user straight back to where they
+  // started after auto-link completes. Only forward safe relative paths.
+  const isSafeNext = next.startsWith("/") && !next.startsWith("//")
+  const webRedirectTarget = isSafeNext && next !== "/dashboard"
+    ? `${appUrl}/auth/line-callback?next=${encodeURIComponent(next)}`
+    : `${appUrl}/auth/line-callback`
+  const sessionRedirectTarget = isIOS ? "slippy://auth/callback" : webRedirectTarget
   const errorRedirect = (code: string, detail?: string) => {
     const qs = new URLSearchParams({ error: code, ...(detail ? { detail } : {}) })
     const base = isIOS ? "slippy://auth/callback" : `${appUrl}/login`
@@ -151,88 +159,35 @@ export async function GET(req: NextRequest) {
 
     log("LINE user", { lineUserId: lineUserId.slice(0,6), displayName, hasEmail: !!lineEmail, email: lineEmail })
 
-    // ── Step 3: Find or create Supabase user ────────────────────
+    // ── Step 3: Find or create the linked Slippy account ────────
+    // Shared resolver — keeps this in sync with the LIFF bridge
+    // (/api/auth/liff) and "เชื่อมต่อ LINE" (/api/line/connect-callback).
     const admin = createAdminClient()
-    let   targetEmail: string
-    let   isNewUser = false
-
-    // Search by line_user_id in metadata (paginate to be safe)
-    log("searching for existing user...")
-    let   existingUser: any = null
-    let   page = 1
-    while (!existingUser) {
-      const { data: list } = await admin.auth.admin.listUsers({ page, perPage: 1000 })
-      if (!list?.users?.length) break
-      existingUser = list.users.find(
-        u => u.user_metadata?.line_user_id === lineUserId
-      )
-      if (list.users.length < 1000) break
-      page++
-    }
-
-    if (existingUser) {
-      log("found existing user", { id: existingUser.id.slice(0,8) })
-
-      const hasPlaceholderEmail = (existingUser.email ?? "").includes("@noreply.slippy.app")
-        || (existingUser.email ?? "").includes("@line.slippy.app")
-
-      // If LINE now provides a real email and user had a placeholder → upgrade it
-      if (lineEmail && hasPlaceholderEmail) {
-        log("upgrading placeholder email to real LINE email", lineEmail)
-        await admin.auth.admin.updateUserById(existingUser.id, {
-          email:         lineEmail,
-          email_confirm: true,
-          user_metadata: { ...existingUser.user_metadata, avatar_url: avatarUrl },
-        })
-        targetEmail = lineEmail
-      } else {
-        targetEmail = existingUser.email!
-        // Update avatar if changed
-        if (avatarUrl && existingUser.user_metadata?.avatar_url !== avatarUrl) {
-          await admin.auth.admin.updateUserById(existingUser.id, {
-            user_metadata: { ...existingUser.user_metadata, avatar_url: avatarUrl },
-          })
-        }
-      }
-    } else {
-      // Create new user
-      isNewUser     = true
-      // LINE doesn't always provide email — use a placeholder that's clearly
-      // not a real email. Domain "noreply.slippy.app" signals internal-only.
-      targetEmail   = lineEmail ?? `line.${lineUserId.toLowerCase()}@noreply.slippy.app`
-      log("creating new user", { email: targetEmail })
-
-      const { data: created, error: createErr } = await admin.auth.admin.createUser({
-        email:          targetEmail,
-        email_confirm:  true,
-        user_metadata:  { full_name: displayName, avatar_url: avatarUrl, line_user_id: lineUserId, provider: "line" },
+    let resolved
+    try {
+      resolved = await resolveOrCreateLineUser(admin, {
+        lineUserId, displayName, avatarUrl, email: lineEmail,
       })
+    } catch (err: any) {
+      log("resolve user failed", err.message)
+      return errorRedirect("line_create", err.message)
+    }
+    const { userId: resolvedUserId, email: targetEmail } = resolved
+    log(resolved.isNewUser ? "created new user" : "found existing user", { id: resolvedUserId.slice(0,8) })
 
-      if (createErr) {
-        log("createUser error", createErr.message)
-        // Email already exists — link LINE to existing account
-        if (createErr.message.includes("already been registered") || createErr.message.includes("duplicate")) {
-          const { data: byEmail } = await admin.auth.admin.listUsers({ perPage: 1000 })
-          const matched = byEmail?.users?.find(u => u.email === targetEmail)
-          if (!matched) return errorRedirect("line_create")
-          await admin.auth.admin.updateUserById(matched.id, {
-            user_metadata: { ...matched.user_metadata, line_user_id: lineUserId },
-          })
-          log("linked LINE to existing account", matched.id.slice(0,8))
-          isNewUser = false
-        } else {
-          return errorRedirect("line_create", createErr.message)
-        }
-      } else {
-        log("created user", created?.user?.id?.slice(0,8))
-        // Sync to public users table
-        if (created?.user) {
-          await admin.from("users").upsert(
-            { id: created.user.id, email: targetEmail, full_name: displayName },
-            { onConflict: "id" }
-          )
-        }
-      }
+    // ── Step 3.5: Ensure org + line_connections exist ────────────
+    // This is the "no /connect CODE" path: signing in via LINE Login here
+    // (a button on /login, NOT Slippy's main email/password form) is enough
+    // to upsert `line_connections`, so that later opening /liff/sport,
+    // /liff/trip, etc. inside LINE (via liff.getProfile() — no Slippy
+    // session) resolves straight to this user/org without any manual code.
+    try {
+      const orgId = await ensureLineLinkage(admin, resolvedUserId, lineUserId, displayName)
+      if (orgId) log("✅ line_connections linked", { lineUserId: lineUserId.slice(0,6), orgId: orgId.slice(0,8) })
+    } catch (linkErr: any) {
+      // Non-fatal — the LINE Login session itself still succeeds even if
+      // auto-linking fails; user can fall back to /connect CODE.
+      log("auto-link error (non-fatal)", linkErr.message)
     }
 
     // ── Step 4: Create session via generateLink ────────────────

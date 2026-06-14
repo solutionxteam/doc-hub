@@ -13,7 +13,7 @@ import { useParams, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Loader2, CheckCircle, AlertCircle, Users, MapPin } from "lucide-react"
 
-type JoinStatus = "loading" | "identifying" | "joining" | "success" | "error" | "not_found"
+type JoinStatus = "loading" | "identifying" | "joining" | "success" | "error" | "not_found" | "closed"
 
 interface BillInfo {
   id:     string
@@ -23,6 +23,7 @@ interface BillInfo {
   host:   string
   participants: number
   total:  number
+  registrationClosed?: boolean
 }
 
 export default function LiffJoinPage() {
@@ -48,6 +49,7 @@ export default function LiffJoinPage() {
       const data = await res.json()
       if (!res.ok || !data.bill) { setStatus("not_found"); return }
       setBillInfo(data.bill)
+      if (data.bill.registrationClosed) { setStatus("closed"); return }
     } catch { setStatus("not_found"); return }
 
     // Try LIFF (auto-identify if inside LINE app)
@@ -197,6 +199,15 @@ export default function LiffJoinPage() {
                 <AlertCircle className="w-10 h-10 text-amber-500" />
                 <p className="font-semibold">ไม่พบบิลนี้</p>
                 <p className="text-sm text-muted-foreground">ลิงก์อาจหมดอายุหรือถูกลบแล้ว</p>
+              </div>
+            )}
+
+            {/* Registration closed */}
+            {status === "closed" && (
+              <div className="flex flex-col items-center py-6 gap-2 text-center">
+                <AlertCircle className="w-10 h-10 text-amber-500" />
+                <p className="font-semibold">⏰ เกินกำหนดการลงทะเบียนแล้ว</p>
+                <p className="text-sm text-muted-foreground">เซสชันนี้ปิดรับลงทะเบียนแล้ว — ติดต่อผู้จัดกลุ่มถ้าต้องการเข้าร่วมเพิ่ม</p>
               </div>
             )}
 

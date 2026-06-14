@@ -17,6 +17,11 @@
  *   5. /sportdone closes the group and posts the final settle-up summary
  */
 import { supabase } from "../lib/supabase"
+import {
+  billCreatedCard, paymentConfirmText, fullyPaidCard, reminderCard,
+} from "./line-bill-cards"
+
+const SPORT_THEME = "#5fcfb0"
 
 const APP_URL = process.env.APP_URL ?? "https://slippy.ai"
 
@@ -191,6 +196,39 @@ export function sportStatusCard(params: {
   }
 }
 
+// ─── KhunThong-style notification cards — thin teal (#5fcfb0) wrappers ────────
+// Generic builders live in line-bill-cards.ts (shared with line-trip.ts) so the
+// visual language stays identical across sport/trip groups.
+export function sportBillCreatedCard(params: {
+  title: string; total: number; collectorName: string
+  participants: Array<{ name: string; amount: number; paid: boolean; paidAt: string | null; isCollector?: boolean }>
+  payUrl: string; statusUrl?: string
+}): object {
+  return billCreatedCard({ ...params, themeColor: SPORT_THEME })
+}
+
+export function sportPaymentConfirmText(params: {
+  title: string; payerName: string; amount: number; collectorName: string
+  participants: Array<{ name: string; amount: number; paid: boolean; paidAt: string | null; isCollector?: boolean }>
+}): object {
+  return paymentConfirmText(params)
+}
+
+export function sportFullyPaidCard(params: {
+  title: string; bookingDateLabel?: string
+  participants: Array<{ name: string; amount: number; paidAt: string | null; isCollector?: boolean }>
+}): object {
+  const { title, bookingDateLabel, participants } = params
+  return fullyPaidCard({ title, subtitle: bookingDateLabel, participants, themeColor: SPORT_THEME })
+}
+
+export function sportReminderCard(params: {
+  bills: Array<{ title: string; unpaid: Array<{ name: string; amount: number }> }>
+  statusUrl: string; payUrl: string
+}): object {
+  return reminderCard({ ...params, themeColor: SPORT_THEME })
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 async function findGroup(billIdPrefix: string, orgId: string) {
   const { data } = await supabase
@@ -233,6 +271,7 @@ async function rebalance(billId: string, fee: number) {
 // ─── /sportgroup [กีฬา] [ค่าใช้จ่าย] [สถานที่...] ──────────────────────────────
 export async function handleCreateSportGroup(
   args: string[], orgId: string, lineUserId: string, displayName: string,
+  lineGroupId: string | null = null,
 ): Promise<{ card?: object; text?: string }> {
   const sportType = args[0]
   const fee       = Number(args[1]) || 0
@@ -268,6 +307,7 @@ export async function handleCreateSportGroup(
       sport_type:      sportType,
       venue,
       status:          "open",
+      line_group_id:   lineGroupId,
     })
     .select("id, share_token")
     .single()
@@ -333,6 +373,330 @@ export async function handleSportStatus(
       done:         finalize || bill.status === "finalized",
     })
   }
+}
+
+// A session's registration window closes at its end time (or start time if no
+// end time) on the booking date. Sessions with no booking date never close.
+function isRegistrationClosed(bookingDate: string | null, startTime: string | null, endTime: string | null): boolean {
+  if (!bookingDate) return false
+  const deadline = new Date(`${bookingDate}T${endTime ?? startTime ?? "23:59"}:00`)
+  return Date.now() > deadline.getTime()
+}
+
+// ─── Invite Flex card (server-side equivalent of the LIFF's buildInviteFlex) ──
+// Sent into the LINE group right after it's linked, so members can immediately
+// join/leave the upcoming session via postback buttons.
+export async function buildSportInviteFlex(bill: {
+  id: string; title: string; sport_type: string | null; total_amount: number | null
+  venue: string | null; booking_date: string | null; start_time: string | null; end_time: string | null
+  share_token: string
+}): Promise<object> {
+  const { count } = await supabase
+    .from("split_participants")
+    .select("id", { count: "exact", head: true })
+    .eq("split_bill_id", bill.id)
+
+  const n = count || 1
+  const fee = Number(bill.total_amount ?? 0)
+  const perPerson = Math.round((fee / n) * 100) / 100
+  const emoji = sportEmoji(bill.sport_type ?? "")
+
+  const rows: object[] = []
+  if (bill.booking_date) {
+    rows.push({ type: "box", layout: "baseline", spacing: "sm", contents: [
+      { type: "text", text: "📅", flex: 0, size: "sm" },
+      { type: "text", text: bill.booking_date, size: "sm", color: "#555555", margin: "md", wrap: true },
+    ] })
+  }
+  if (bill.start_time) {
+    rows.push({ type: "box", layout: "baseline", spacing: "sm", contents: [
+      { type: "text", text: "⏰", flex: 0, size: "sm" },
+      { type: "text", text: `${bill.start_time}${bill.end_time ? ` - ${bill.end_time}` : ""}`, size: "sm", color: "#555555", margin: "md", wrap: true },
+    ] })
+  }
+  if (bill.venue) {
+    rows.push({ type: "box", layout: "baseline", spacing: "sm", contents: [
+      { type: "text", text: "📍", flex: 0, size: "sm" },
+      { type: "text", text: bill.venue, size: "sm", color: "#555555", margin: "md", wrap: true },
+    ] })
+  }
+  rows.push({ type: "box", layout: "baseline", spacing: "sm", contents: [
+    { type: "text", text: "💰", flex: 0, size: "sm" },
+    { type: "text", text: `${fmtTHB(perPerson)} / คน  (รวม ${fmtTHB(fee)})`, size: "sm", color: "#555555", margin: "md", wrap: true },
+  ] })
+
+  return {
+    type: "flex",
+    altText: `${emoji} ชวนเล่น ${bill.title} — ${fmtTHB(perPerson)}/คน`,
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box", layout: "vertical", spacing: "md",
+        contents: [
+          { type: "text", text: `${emoji} ${bill.title}`, weight: "bold", size: "lg", wrap: true },
+          { type: "box", layout: "vertical", spacing: "sm", margin: "md", contents: rows },
+        ],
+      },
+      footer: {
+        type: "box", layout: "vertical", spacing: "sm",
+        contents: [
+          {
+            type: "box", layout: "horizontal", spacing: "sm",
+            contents: [
+              { type: "button", style: "primary", color: "#7c3aed", height: "sm", flex: 1,
+                action: { type: "postback", label: "🙋 เข้าร่วม", data: `sport:join:${bill.id}`, displayText: "🙋 เข้าร่วม" } },
+              { type: "button", style: "secondary", height: "sm", flex: 1,
+                action: { type: "postback", label: "❌ ยกเลิก", data: `sport:leave:${bill.id}`, displayText: "❌ ยกเลิกเข้าร่วม" } },
+            ],
+          },
+          { type: "button", style: "link", height: "sm",
+            action: { type: "uri", label: "📋 ดูรายละเอียด", uri: joinUrl(bill.share_token) } },
+        ],
+      },
+    },
+  }
+}
+
+// ─── Formats the current participant list for "เข้าร่วม/ยกเลิก" replies ───────
+async function participantListText(billId: string): Promise<string> {
+  const { data: parts } = await supabase
+    .from("split_participants")
+    .select("name")
+    .eq("split_bill_id", billId)
+    .order("created_at")
+
+  const names = (parts ?? []).map(p => p.name as string)
+  if (names.length === 0) return "👥 ยังไม่มีผู้เข้าร่วมครับ"
+  return `👥 รายชื่อผู้เข้าร่วม (${names.length} คน):\n${names.map((n, i) => `${i + 1}. ${n}`).join("\n")}`
+}
+
+// ─── In-chat join/leave via postback buttons on the invite card ──────────────
+export async function handleSportToggle(
+  billId: string, action: "join" | "leave", lineUserId: string, displayName: string,
+): Promise<{ text?: string }> {
+  const { data: bill } = await supabase
+    .from("split_bills")
+    .select("id, sport_type, total_amount, status, booking_date, start_time, end_time")
+    .eq("id", billId).eq("category", "sport")
+    .maybeSingle()
+
+  if (!bill) return { text: "❌ ไม่พบกลุ่มนี้ครับ (อาจถูกลบไปแล้ว)" }
+  if (bill.status === "finalized") return { text: "🔒 กลุ่มนี้ปิดแล้วครับ" }
+
+  const { data: existing } = await supabase
+    .from("split_participants")
+    .select("id")
+    .eq("split_bill_id", billId).eq("line_user_id", lineUserId)
+    .maybeSingle()
+
+  const emoji = sportEmoji(bill.sport_type ?? "")
+
+  if (action === "join") {
+    if (existing) return { text: `✅ ${displayName} เข้าร่วมอยู่แล้วครับ` }
+    if (isRegistrationClosed(bill.booking_date, bill.start_time, bill.end_time)) {
+      return { text: "⏰ เกินกำหนดการลงทะเบียนแล้วครับ" }
+    }
+    await supabase.from("split_participants").insert({
+      split_bill_id: billId, name: displayName, line_user_id: lineUserId,
+      line_display: displayName, is_non_line: false, amount: 0,
+    })
+    await rebalance(billId, Number(bill.total_amount ?? 0))
+    const list = await participantListText(billId)
+    return { text: `🙋 ${displayName} เข้าร่วม${emoji}${bill.sport_type ?? "กิจกรรม"}แล้วครับ!\n\n${list}` }
+  }
+
+  // action === "leave"
+  if (!existing) return { text: `${displayName} ยังไม่ได้เข้าร่วมกลุ่มนี้ครับ` }
+  await supabase.from("split_participants").delete().eq("id", existing.id)
+  await rebalance(billId, Number(bill.total_amount ?? 0))
+  const list = await participantListText(billId)
+  return { text: `👋 ${displayName} ยกเลิกการเข้าร่วมแล้วครับ\n\n${list}` }
+}
+
+// ─── Link a sport group/session to the LINE group chat it was shared into ────
+// Triggered by the "📌 ตั้งเป็นกลุ่มหลัก" postback button — only the chat that
+// actually taps the button reveals its group/room ID (shareTargetPicker never
+// returns the picked chat's ID to the LIFF), so this is the only reliable way
+// to capture it.
+export async function handleSetLineGroup(
+  targetType: "g" | "s", id: string, lineGroupId: string,
+): Promise<{ text?: string; card?: object }> {
+  if (targetType === "g") {
+    const { data: group } = await supabase.from("sport_groups")
+      .update({ line_group_id: lineGroupId })
+      .eq("id", id)
+      .select("title")
+      .maybeSingle()
+    if (!group) return { text: "❌ ไม่พบกลุ่มนี้ครับ" }
+
+    // Propagate to upcoming sessions that haven't been individually overridden
+    await supabase.from("split_bills")
+      .update({ line_group_id: lineGroupId })
+      .eq("sport_group_id", id)
+      .is("line_group_id", null)
+      .neq("status", "finalized")
+
+    // Send the upcoming session's invite card right away so members can
+    // join/leave straight from the now-linked group.
+    const { data: session } = await supabase.from("split_bills")
+      .select("id, title, sport_type, total_amount, venue, booking_date, start_time, end_time, share_token, status")
+      .eq("sport_group_id", id).eq("status", "open")
+      .order("booking_date", { ascending: true })
+      .limit(1).maybeSingle()
+
+    const card = session ? await buildSportInviteFlex(session) : undefined
+    return { text: `✅ ตั้งกลุ่มแชทนี้เป็นกลุ่มหลักของ "${group.title}" แล้วครับ — การ์ดเชิญและแจ้งเตือนของนัดต่อๆไปจะส่งมาที่นี่อัตโนมัติ`, card }
+  }
+
+  const { data: bill } = await supabase.from("split_bills")
+    .update({ line_group_id: lineGroupId })
+    .eq("id", id)
+    .select("id, title, sport_type, total_amount, venue, booking_date, start_time, end_time, share_token, status")
+    .maybeSingle()
+  if (!bill) return { text: "❌ ไม่พบกลุ่มนี้ครับ" }
+
+  const card = bill.status === "open" ? await buildSportInviteFlex(bill) : undefined
+  return { text: `✅ ตั้งกลุ่มแชทนี้เป็นกลุ่มหลักของ "${bill.title}" แล้วครับ`, card }
+}
+
+// ─── /linkgroup <code> — link the chat this command is sent from as the
+// "main" LINE group for a sport group/session, looked up by share_token.
+// Sent as a plain text command (works reliably in groups the bot has joined,
+// unlike shareTargetPicker which can't confirm delivery back to the LIFF).
+// ─── /linkgroup (no code) — bot replies in this chat with a pick-list of the
+// org's recent sport groups/sessions. Tapping one fires a postback from the
+// bot's OWN message, so event.source.groupId/roomId is reliably this chat's id.
+export async function handleLinkGroupList(
+  orgId: string,
+): Promise<{ card?: object; text?: string }> {
+  const { data: groups } = await supabase.from("sport_groups")
+    .select("id, title, sport_type")
+    .eq("organization_id", orgId).eq("status", "active")
+    .order("created_at", { ascending: false }).limit(5)
+
+  const { data: bills } = await supabase.from("split_bills")
+    .select("id, title, sport_type")
+    .eq("organization_id", orgId).eq("category", "sport")
+    .is("sport_group_id", null).eq("status", "open")
+    .order("created_at", { ascending: false }).limit(5)
+
+  const items = [
+    ...(groups ?? []).map(g => ({ targetType: "g" as const, id: g.id, title: g.title, emoji: sportEmoji(g.sport_type ?? "") })),
+    ...(bills ?? []).map(b => ({ targetType: "s" as const, id: b.id, title: b.title, emoji: sportEmoji(b.sport_type ?? "") })),
+  ].slice(0, 8)
+
+  if (items.length === 0) {
+    return { text: "❌ ไม่พบกลุ่มกีฬาในองค์กรนี้ครับ — สร้างกลุ่มก่อนจากหน้า LIFF แล้วลองใหม่" }
+  }
+
+  return {
+    card: {
+      type: "flex",
+      altText: "🔗 เลือกกลุ่มกีฬาที่จะเชื่อมกับแชทนี้",
+      contents: {
+        type: "bubble",
+        body: {
+          type: "box", layout: "vertical", spacing: "md",
+          contents: [
+            { type: "text", text: "🔗 เชื่อมกลุ่ม LINE", weight: "bold", size: "lg" },
+            { type: "text", text: "เลือกกลุ่ม/นัดที่จะตั้งแชทนี้เป็นกลุ่มหลัก — การ์ดเชิญและแจ้งเตือนจะส่งมาที่นี่อัตโนมัติ", size: "sm", color: "#555555", wrap: true, margin: "md" },
+            { type: "separator", margin: "md" },
+            ...items.map(it => ({
+              type: "button", style: "secondary", height: "sm", margin: "sm",
+              action: { type: "postback", label: `${it.emoji} ${it.title}`.slice(0, 40), data: `sport:linkgroupask:${it.targetType}:${it.id}`, displayText: `เลือก: ${it.title}` },
+            })),
+          ],
+        },
+      },
+    },
+  }
+}
+
+// ─── Confirmation step before linking — shows "อนุญาต / ปฏิเสธ" buttons,
+// same pattern as the document approve/reject card. Tapping "อนุญาต" fires
+// sport:linkgroupyes (does the actual link); "ปฏิเสธ" fires sport:linkgroupno.
+export async function handleLinkGroupAsk(
+  targetType: "g" | "s", id: string,
+): Promise<{ card?: object; text?: string }> {
+  const table = targetType === "g" ? "sport_groups" : "split_bills"
+  const { data: row } = await supabase.from(table)
+    .select("title").eq("id", id).maybeSingle()
+  if (!row) return { text: "❌ ไม่พบรายการนี้ครับ" }
+
+  return {
+    card: {
+      type: "flex",
+      altText: `ยืนยันเชื่อมกลุ่มแชทนี้กับ "${row.title}"?`,
+      contents: {
+        type: "bubble",
+        body: {
+          type: "box", layout: "vertical", spacing: "md",
+          contents: [
+            { type: "text", text: "🔗 ยืนยันการเชื่อมกลุ่ม", weight: "bold", size: "lg" },
+            { type: "text", text: `ต้องการตั้งแชทนี้เป็นกลุ่มหลักของ "${row.title}" ใช่หรือไม่?\nการ์ดเชิญและแจ้งเตือนของนัดต่อๆไปจะส่งมาที่นี่อัตโนมัติ`, size: "sm", color: "#555555", wrap: true, margin: "md" },
+            { type: "separator", margin: "md" },
+            {
+              type: "box", layout: "horizontal", spacing: "sm", margin: "md",
+              contents: [
+                { type: "button", style: "primary", height: "sm", flex: 1, color: "#10b981",
+                  action: { type: "postback", label: "✓ อนุญาต", data: `sport:linkgroupyes:${targetType}:${id}`, displayText: "✓ อนุญาต" } },
+                { type: "button", style: "primary", height: "sm", flex: 1, color: "#ef4444",
+                  action: { type: "postback", label: "✕ ปฏิเสธ", data: "sport:linkgroupno", displayText: "✕ ปฏิเสธ" } },
+              ]
+            },
+          ],
+        },
+      },
+    },
+  }
+}
+
+export async function handleLinkGroupCommand(
+  shareToken: string, lineGroupId: string,
+): Promise<{ text?: string; card?: object }> {
+  const { data: group } = await supabase.from("sport_groups")
+    .select("id").eq("share_token", shareToken).maybeSingle()
+  if (group) return handleSetLineGroup("g", group.id, lineGroupId)
+
+  const { data: bill } = await supabase.from("split_bills")
+    .select("id").eq("share_token", shareToken).eq("category", "sport").maybeSingle()
+  if (bill) return handleSetLineGroup("s", bill.id, lineGroupId)
+
+  return { text: "❌ ไม่พบรายการที่ตรงกับโค้ดนี้ครับ — ตรวจสอบโค้ดอีกครั้ง" }
+}
+
+// ─── /sportinvite <code> — post the session's invite/join card into this chat.
+// Sent as a plain text command via shareTargetPicker (same reliable pattern as
+// /linkgroup) — the picked chat receives the text, the bot replies in that
+// chat (event.source.groupId is reliable here), so the Flex card lands there.
+export async function handleSportInviteCommand(
+  shareToken: string,
+): Promise<{ text?: string; card?: object }> {
+  const sessionCols = "id, title, sport_type, total_amount, venue, booking_date, start_time, end_time, share_token, status, sport_group_id"
+
+  const { data: group } = await supabase.from("sport_groups")
+    .select("id").eq("share_token", shareToken).maybeSingle()
+
+  let bill: any = null
+  if (group) {
+    const { data } = await supabase.from("split_bills")
+      .select(sessionCols)
+      .eq("sport_group_id", group.id).eq("status", "open")
+      .order("booking_date", { ascending: true })
+      .limit(1).maybeSingle()
+    bill = data
+  } else {
+    const { data } = await supabase.from("split_bills")
+      .select(sessionCols)
+      .eq("share_token", shareToken).eq("category", "sport")
+      .maybeSingle()
+    bill = data
+  }
+
+  if (!bill) return { text: "❌ ไม่พบนัดที่จะเชิญครับ — อาจยังไม่มีนัดที่เปิดอยู่" }
+  if (bill.status !== "open") return { text: "🔒 นัดนี้ปิดแล้วครับ" }
+
+  return { card: await buildSportInviteFlex(bill) }
 }
 
 // ─── /sportpay [รหัสกลุ่ม] — mark caller's own share as paid ──────────────────

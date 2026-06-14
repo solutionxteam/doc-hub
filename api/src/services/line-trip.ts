@@ -17,8 +17,13 @@
  *   5. /tripdone closes the group and posts the final settle-up summary
  */
 import { supabase } from "../lib/supabase"
+import {
+  billCreatedCard, paymentConfirmText, fullyPaidCard, reminderCard,
+} from "./line-bill-cards"
 
 const APP_URL = process.env.APP_URL ?? "https://slippy.ai"
+
+const TRIP_THEME = "#38bdf8"
 
 const TRIP_EMOJI: Record<string, string> = {
   "เที่ยวทะเล": "🏖️", "ทะเล": "🏖️", "beach": "🏖️",
@@ -194,6 +199,39 @@ export function tripStatusCard(params: {
   }
 }
 
+// ─── KhunThong-style notification cards — thin sky/blue (#38bdf8) wrappers ────
+// Generic builders live in line-bill-cards.ts (shared with line-sport.ts) so the
+// visual language stays identical across sport/trip groups.
+export function tripBillCreatedCard(params: {
+  title: string; total: number; collectorName: string
+  participants: Array<{ name: string; amount: number; paid: boolean; paidAt: string | null; isCollector?: boolean }>
+  payUrl: string; statusUrl?: string
+}): object {
+  return billCreatedCard({ ...params, themeColor: TRIP_THEME })
+}
+
+export function tripPaymentConfirmText(params: {
+  title: string; payerName: string; amount: number; collectorName: string
+  participants: Array<{ name: string; amount: number; paid: boolean; paidAt: string | null; isCollector?: boolean }>
+}): object {
+  return paymentConfirmText(params)
+}
+
+export function tripFullyPaidCard(params: {
+  title: string; bookingDateLabel?: string
+  participants: Array<{ name: string; amount: number; paidAt: string | null; isCollector?: boolean }>
+}): object {
+  const { title, bookingDateLabel, participants } = params
+  return fullyPaidCard({ title, subtitle: bookingDateLabel, participants, themeColor: TRIP_THEME })
+}
+
+export function tripReminderCard(params: {
+  bills: Array<{ title: string; unpaid: Array<{ name: string; amount: number }> }>
+  statusUrl: string; payUrl: string
+}): object {
+  return reminderCard({ ...params, themeColor: TRIP_THEME })
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 async function findGroup(billIdPrefix: string, orgId: string) {
   const { data } = await supabase
@@ -236,6 +274,7 @@ async function rebalance(billId: string, fee: number) {
 // ─── /tripgroup [ธีมทริป] [ค่าใช้จ่าย] [จุดหมาย...] ────────────────────────────
 export async function handleCreateTripGroup(
   args: string[], orgId: string, lineUserId: string, displayName: string,
+  lineGroupId: string | null = null,
 ): Promise<{ card?: object; text?: string }> {
   const tripType    = args[0]
   const fee         = Number(args[1]) || 0
@@ -271,6 +310,7 @@ export async function handleCreateTripGroup(
       trip_type:       tripType,
       destination,
       status:          "open",
+      line_group_id:   lineGroupId,
     })
     .select("id, share_token")
     .single()

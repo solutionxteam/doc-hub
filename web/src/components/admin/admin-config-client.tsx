@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { Save, RotateCcw, AlertCircle, CheckCircle2 } from "lucide-react"
+import { Save, RotateCcw, AlertCircle, CheckCircle2, Layers, Flag, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 type Config = {
@@ -26,20 +26,28 @@ const KEY_META: Record<string, { label: string; type: "number" | "boolean" | "st
   camera_upload_enabled:   { label: "เปิดใช้ Camera Upload (web)",           type: "boolean" },
 }
 
+// Optional unit suffix shown after number inputs
+const KEY_UNIT: Record<string, string> = {
+  max_file_size_mb: "MB",
+}
+
 const GROUPS = [
   {
     title:  "Plan Limits — Organization Quota",
     desc:   "จำนวน organization สูงสุดที่ user แต่ละ plan สามารถสร้างได้ (0 = ไม่จำกัด)",
+    icon:   Layers,
     keys:   ["free_plan_org_quota", "starter_plan_org_quota", "personal_plan_org_quota"],
   },
   {
     title:  "Feature Flags",
     desc:   "เปิด-ปิด feature โดยไม่ต้อง deploy",
+    icon:   Flag,
     keys:   ["ai_extraction_enabled", "line_bot_enabled", "email_ingestion_enabled", "camera_upload_enabled"],
   },
   {
     title:  "App Settings",
     desc:   "การตั้งค่าทั่วไปของระบบ",
+    icon:   SlidersHorizontal,
     keys:   ["maintenance_mode", "new_user_default_plan", "max_file_size_mb"],
   },
 ]
@@ -91,8 +99,8 @@ function ConfigRow({ config, onSaved }: { config: Config; onSaved: (key: string)
 
   return (
     <div className={cn(
-      "flex items-start gap-4 px-5 py-4 border-b border-zinc-800/60 last:border-b-0",
-      dirty && "bg-amber-950/20"
+      "flex items-start gap-4 px-5 py-4 border-b border-zinc-800/60 last:border-b-0 transition-colors",
+      dirty ? "bg-amber-950/20" : "hover:bg-zinc-800/30"
     )}>
       <div className="flex-1 min-w-0">
         <div className="text-[13px] font-semibold text-zinc-200">
@@ -114,34 +122,46 @@ function ConfigRow({ config, onSaved }: { config: Config; onSaved: (key: string)
         {meta?.type === "boolean" ? (
           <button
             onClick={() => setVal(v => !v)}
+            role="switch"
+            aria-checked={Boolean(val)}
             className={cn(
-              "w-11 h-6 rounded-full transition-colors relative",
+              "w-11 h-6 rounded-full transition-colors relative shrink-0",
               val ? "bg-emerald-500" : "bg-zinc-700"
             )}
           >
             <span className={cn(
-              "absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform",
-              val ? "translate-x-5" : "translate-x-0.5"
+              "absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform",
+              val ? "translate-x-5" : "translate-x-0"
             )} />
           </button>
         ) : meta?.type === "select" ? (
           <select
             value={String(val)}
             onChange={e => setVal(e.target.value)}
-            className="h-8 px-2 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm outline-none focus:border-brand-500"
+            className="h-8 px-2 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/40 cursor-pointer"
           >
             {meta.options?.map(o => (
               <option key={o} value={o}>{o}</option>
             ))}
           </select>
         ) : (
-          <input
-            type={meta?.type === "number" ? "number" : "text"}
-            value={String(val)}
-            onChange={e => setVal(meta?.type === "number" ? e.target.value : e.target.value)}
-            className="h-8 w-24 px-2 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-200
-              text-sm text-right outline-none focus:border-brand-500 tabular-nums"
-          />
+          <div className="relative">
+            <input
+              type={meta?.type === "number" ? "number" : "text"}
+              value={String(val)}
+              onChange={e => setVal(meta?.type === "number" ? e.target.value : e.target.value)}
+              className={cn(
+                "h-8 px-2 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-200",
+                "text-sm text-right outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/40 tabular-nums",
+                KEY_UNIT[config.key] ? "w-24 pr-10" : "w-24"
+              )}
+            />
+            {KEY_UNIT[config.key] && (
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-zinc-500 pointer-events-none">
+                {KEY_UNIT[config.key]}
+              </span>
+            )}
+          </div>
         )}
 
         {/* Reset */}
@@ -189,11 +209,17 @@ export function AdminConfigClient({ configs }: { configs: Config[] }) {
       {GROUPS.map(group => {
         const groupConfigs = group.keys.map(k => configMap[k]).filter(Boolean)
         if (!groupConfigs.length) return null
+        const Icon = group.icon
         return (
-          <div key={group.title} className="bg-zinc-900 border border-zinc-800 rounded-[14px] overflow-hidden">
-            <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-800/40">
-              <h2 className="text-[14px] font-bold text-white">{group.title}</h2>
-              <p className="text-[12px] text-zinc-400 mt-0.5">{group.desc}</p>
+          <div key={group.title} className="bg-zinc-900 border border-zinc-800 rounded-[14px] overflow-hidden shadow-sm shadow-black/20">
+            <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-800/40 flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-amber-400 shrink-0">
+                <Icon className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-[14px] font-bold text-white">{group.title}</h2>
+                <p className="text-[12px] text-zinc-400 mt-0.5">{group.desc}</p>
+              </div>
             </div>
             {groupConfigs.map(config => (
               <ConfigRow

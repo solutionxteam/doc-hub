@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { isRegistrationClosed } from "../sport-groups/_lib"
 
 // POST — Join a split bill via LIFF
 export async function POST(req: NextRequest) {
@@ -15,12 +16,15 @@ export async function POST(req: NextRequest) {
   const admin = createAdminClient()
 
   const { data: bill } = await admin.from("split_bills")
-    .select("id, status, organization_id, category, total_amount")
+    .select("id, status, organization_id, category, total_amount, booking_date, start_time, end_time")
     .eq("share_token", token)
     .single()
 
   if (!bill) return NextResponse.json({ error: "Bill not found" }, { status: 404 })
   if (bill.status === "finalized") return NextResponse.json({ error: "Bill is finalized" }, { status: 400 })
+  if (bill.category === "sport" && isRegistrationClosed(bill.booking_date, bill.start_time, bill.end_time)) {
+    return NextResponse.json({ error: "เกินกำหนดการลงทะเบียนแล้วครับ" }, { status: 400 })
+  }
 
   // Check if already joined
   const { data: existing } = await admin.from("split_participants")
@@ -37,11 +41,11 @@ export async function POST(req: NextRequest) {
     amount:        0,
   })
 
-  // Sport/Trip groups (category='sport'|'trip') split a flat fee EVENLY across
-  // whoever has joined so far — recompute everyone's share now that the
-  // headcount changed. (Receipt-based /split bills keep their
+  // Sport/Trip/General groups (category='sport'|'trip'|'general') split a flat
+  // fee EVENLY across whoever has joined so far — recompute everyone's share
+  // now that the headcount changed. (Receipt-based /split bills keep their
   // item-claim-derived amounts as-is.)
-  if (bill.category === "sport" || bill.category === "trip") {
+  if (bill.category === "sport" || bill.category === "trip" || bill.category === "general") {
     const { data: parts } = await admin.from("split_participants")
       .select("id").eq("split_bill_id", bill.id)
     const n = parts?.length ?? 0

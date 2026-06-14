@@ -3,7 +3,7 @@ import crypto from "node:crypto"
 import { supabase } from "../lib/supabase"
 import { queueExtraction } from "../queue/setup"
 import { handleSplitCommand, handleClaimCommand, handleSplitStatus } from "../services/line-split"
-import { handleCreateSportGroup, handleSportStatus, handleSportPay } from "../services/line-sport"
+import { handleCreateSportGroup, handleSportStatus, handleSportPay, handleSportToggle, handleLinkGroupCommand, handleLinkGroupList, handleLinkGroupAsk, handleSetLineGroup, handleSportInviteCommand } from "../services/line-sport"
 import { handleCreateTripGroup, handleTripStatus, handleTripPay } from "../services/line-trip"
 import {
   docResultCard, summaryCard, statusListCard,
@@ -91,6 +91,24 @@ async function handleEvent(event: any) {
     return
   }
 
+  // ── Bot added to a group/room — greet + prompt /linkgroup ──────────────────
+  if (event.type === "join") {
+    await replyMsg(replyToken, [
+      withQuickReply(
+        txt(
+          "สวัสดีครับ ผม Slippy 🤖\n" +
+          "เชื่อมกลุ่มนี้กับกลุ่มกีฬา/นัดที่สร้างไว้ใน Slippy ได้เลย — พิมพ์ /linkgroup เพื่อเลือกจากรายการ\n" +
+          "(ถ้ายังไม่ได้เชื่อมบัญชี LINE กับ Slippy ให้พิมพ์ /connect ก่อนครับ)"
+        ),
+        [
+          { label: "🔗 /linkgroup", text: "/linkgroup" },
+          { label: "🔗 เชื่อมบัญชี", text: "/connect" },
+        ]
+      )
+    ])
+    return
+  }
+
   // ── Location message — Nearby Places ──────────────────────────────────────
   if (event.type === "message" && event.message.type === "location") {
     const lat = event.message.latitude  as number
@@ -171,6 +189,71 @@ async function handleEvent(event: any) {
         `📍 รับตำแหน่งแล้วครับ\nดูแผนที่ได้ที่:\n${mapUrl}`
       )])
     }
+    return
+  }
+
+  // ── Postback — เข้าร่วม/ยกเลิก buttons on the sport invite Flex card ──────
+  if (event.type === "postback") {
+    const data = (event.postback?.data as string) ?? ""
+    const parts = data.split(":")
+    const [ns, action] = parts
+
+    // /liff/test-share diagnostic button — confirms postback events from a
+    // shareTargetPicker-delivered Flex card actually reach this webhook.
+    if (ns === "sport" && action === "testshare") {
+      const groupId = event.source?.groupId ?? event.source?.roomId ?? "(1:1 chat)"
+      await replyMsg(replyToken, [txt(`✅ Postback ทดสอบมาถึงแล้ว!\ngroupId/roomId: ${groupId}`)])
+      return
+    }
+
+    if (ns === "sport" && (action === "join" || action === "leave") && parts[2]) {
+      const billId = parts[2]
+      const { data: conn } = await supabase
+        .from("line_connections")
+        .select("display_name")
+        .eq("line_user_id", lineUserId)
+        .maybeSingle()
+      const displayName = (conn as any)?.display_name ?? "เพื่อน"
+
+      const result = await handleSportToggle(billId, action, lineUserId, displayName)
+      if (result.text) await replyMsg(replyToken, [txt(result.text)])
+      return
+    }
+
+    // Tapping an item picked from the bot's own "/linkgroup" list — ask for
+    // confirmation before linking (✓ อนุญาต / ✕ ปฏิเสธ), same pattern as the
+    // document approve/reject card.
+    if (ns === "sport" && action === "linkgroupask" && parts[2] && parts[3]) {
+      const [targetType, id] = [parts[2] as "g" | "s", parts[3]]
+      const result = await handleLinkGroupAsk(targetType, id)
+      if (result.card) await replyMsg(replyToken, [result.card])
+      else if (result.text) await replyMsg(replyToken, [txt(result.text)])
+      return
+    }
+
+    // ✓ อนุญาต — actually link this chat as the main LINE group/room for the
+    // chosen sport group/session.
+    if (ns === "sport" && action === "linkgroupyes" && parts[2] && parts[3]) {
+      const [targetType, id] = [parts[2] as "g" | "s", parts[3]]
+      const lineGroupId = event.source?.groupId ?? event.source?.roomId
+      if (!lineGroupId) {
+        await replyMsg(replyToken, [txt("⚠️ คำสั่งนี้ใช้ได้เฉพาะในแชทกลุ่ม/ห้องแชทครับ")])
+        return
+      }
+      const result = await handleSetLineGroup(targetType, id, lineGroupId)
+      const msgs: object[] = []
+      if (result.text) msgs.push(txt(result.text))
+      if (result.card) msgs.push(result.card)
+      if (msgs.length) await replyMsg(replyToken, msgs)
+      return
+    }
+
+    // ✕ ปฏิเสธ — cancel the link request.
+    if (ns === "sport" && action === "linkgroupno") {
+      await replyMsg(replyToken, [txt("ยกเลิกการเชื่อมกลุ่มแล้วครับ")])
+      return
+    }
+
     return
   }
 
@@ -391,6 +474,54 @@ async function handleEvent(event: any) {
   const text = (event.message.text as string).trim()
   const parts = text.split(/\s+/)
   const cmd   = parts[0]?.toLowerCase()
+
+  // /linkgroup CODE — set the chat this is sent from as the "main" LINE
+  // group for a sport group/session (looked up by share_token). The code
+  // comes from the "เชื่อมกลุ่ม" button on the LIFF sport page.
+  if (cmd === "/linkgroup") {
+    const lineGroupId = event.source?.groupId ?? event.source?.roomId
+    if (!lineGroupId) {
+      await replyMsg(replyToken, [txt("⚠️ คำสั่งนี้ใช้ได้เฉพาะในแชทกลุ่ม/ห้องแชทครับ")])
+      return
+    }
+
+    const code = parts[1]?.toLowerCase()
+    if (!code) {
+      // No code — reply with a pick-list of the org's recent sport groups/sessions
+      if (!conn?.organization_id) {
+        await replyMsg(replyToken, [txt("⚠️ ยังไม่เชื่อมบัญชี LINE กับ Slippy ครับ — กรุณา /connect ก่อน")])
+        return
+      }
+      const result = await handleLinkGroupList(conn.organization_id)
+      if (result.card) await replyMsg(replyToken, [result.card])
+      else if (result.text) await replyMsg(replyToken, [txt(result.text)])
+      return
+    }
+
+    const result = await handleLinkGroupCommand(code, lineGroupId)
+    const msgs: object[] = []
+    if (result.text) msgs.push(txt(result.text))
+    if (result.card) msgs.push(result.card)
+    if (msgs.length) await replyMsg(replyToken, msgs)
+    return
+  }
+
+  // /sportinvite CODE — post the session's join/cancel invite card into this
+  // chat (looked up by share_token). Sent as plain text via shareTargetPicker
+  // from the "เลือกกลุ่ม LINE (ส่งการ์ดเชิญนัดถัดไป)" button on the LIFF page.
+  if (cmd === "/sportinvite") {
+    const code = parts[1]?.toLowerCase()
+    if (!code) {
+      await replyMsg(replyToken, [txt("⚠️ ใช้คำสั่งนี้จากปุ่ม \"เลือกกลุ่ม LINE\" ในหน้า Slippy ครับ")])
+      return
+    }
+    const result = await handleSportInviteCommand(code)
+    const msgs: object[] = []
+    if (result.text) msgs.push(txt(result.text))
+    if (result.card) msgs.push(result.card)
+    if (msgs.length) await replyMsg(replyToken, msgs)
+    return
+  }
 
   // /connect CODE — link LINE to organization
   if (cmd === "/connect") {
@@ -739,7 +870,8 @@ async function handleEvent(event: any) {
   // ── Trip-group bill splitting (à la KhunThong, themed for travel) ─────────
   // /tripgroup [ธีมทริป] [ค่าใช้จ่ายรวม] [จุดหมาย] — ตั้งกลุ่ม + แชร์ลิงก์ชวนเพื่อน
   if (cmd === "/tripgroup" || cmd === "/trip" || cmd === "ทริป") {
-    const result = await handleCreateTripGroup(parts.slice(1), conn.organization_id, lineUserId, displayName)
+    const lineGroupId = (event.source?.groupId ?? event.source?.roomId ?? null) as string | null
+    const result = await handleCreateTripGroup(parts.slice(1), conn.organization_id, lineUserId, displayName, lineGroupId)
     if (result.card) await replyMsg(replyToken, [result.card])
     else if (result.text) await replyMsg(replyToken, [txt(result.text)])
     return
@@ -772,7 +904,8 @@ async function handleEvent(event: any) {
   // ── Sport-group bill splitting (à la KhunThong) ──────────────────────────
   // /sportgroup [กีฬา] [ค่าใช้จ่ายรวม] [สถานที่] — ตั้งกลุ่ม + แชร์ลิงก์ชวนเพื่อน
   if (cmd === "/sportgroup" || cmd === "/sport") {
-    const result = await handleCreateSportGroup(parts.slice(1), conn.organization_id, lineUserId, displayName)
+    const lineGroupId = (event.source?.groupId ?? event.source?.roomId ?? null) as string | null
+    const result = await handleCreateSportGroup(parts.slice(1), conn.organization_id, lineUserId, displayName, lineGroupId)
     if (result.card) await replyMsg(replyToken, [result.card])
     else if (result.text) await replyMsg(replyToken, [txt(result.text)])
     return

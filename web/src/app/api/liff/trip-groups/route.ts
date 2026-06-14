@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient()
   const conn  = await resolveConnection(admin, lineUserId)
-  if (!conn) return NextResponse.json({ needsConnect: true, error: "กรุณาเชื่อมบัญชี LINE ก่อน (พิมพ์ /connect ในแชท)" }, { status: 403 })
+  if (!conn) return NextResponse.json({ needsConnect: true, error: "กรุณาเชื่อมบัญชี LINE ก่อน — เข้าสู่ระบบด้วย LINE ที่หน้า Slippy login (เชื่อมอัตโนมัติ) หรือพิมพ์ /connect CODE ในแชท" }, { status: 403 })
 
   const title = destination ? `${tripType} @ ${destination}` : tripType
 

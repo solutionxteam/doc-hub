@@ -10,6 +10,8 @@ import { taxRoutes }          from "./routes/tax"
 import { lineRoutes }         from "./routes/line"
 import { emailRoutes }        from "./routes/email"
 import { lifeRoutes }         from "./routes/life"
+import { sportNotifyRoutes }  from "./routes/sport-notify"
+import { tripNotifyRoutes }   from "./routes/trip-notify"
 
 const app = Fastify({ logger: true })
 
@@ -80,6 +82,8 @@ await app.register(async (authed) => {
   await authed.register(integrationsRoutes, { prefix: "/integrations" })
   await authed.register(taxRoutes,          { prefix: "/tax"          })
   await authed.register(lifeRoutes)   // Life Graph routes (no prefix — /life/*)
+  await authed.register(sportNotifyRoutes)  // /sport/notify
+  await authed.register(tripNotifyRoutes)   // /trip/notify
 })
 
 // ── Start ────────────────────────────────────────────────────────

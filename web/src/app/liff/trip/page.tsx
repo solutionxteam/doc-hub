@@ -11,10 +11,11 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
   Loader2, AlertCircle, Plus, MapPin, Users, ChevronLeft,
-  CheckCircle2, Circle, Share2, Lock, ArrowRight,
+  CheckCircle2, Circle, Share2, Lock, ArrowRight, Navigation, Pencil,
 } from "lucide-react"
 
 type View = "list" | "create" | "detail"
@@ -47,6 +48,9 @@ function fmtTHB(n: number) {
 type AuthStatus = "checking" | "needLogin" | "outsideLine" | "ready" | "authError"
 
 export default function LiffTripDashboard() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
   const [authStatus, setAuthStatus] = useState<AuthStatus>("checking")
   const [authError,  setAuthError]  = useState("")
   const [loggingIn,  setLoggingIn]  = useState(false)
@@ -64,7 +68,40 @@ export default function LiffTripDashboard() {
   const [fee, setFee]   = useState("")
   const [destination, setDestination] = useState("")
 
+  // "เลือกจุดหมาย" picker — null shows the 2-way chooser, otherwise the panel for that mode
+  const [destMode, setDestMode] = useState<"map" | "manual" | null>(null)
+
+  // Set right after a new group is created — shows the "เลือกกลุ่ม LINE เพื่อ
+  // โพสต์คำเชิญ" prompt on the detail page.
+  const [justCreated, setJustCreated] = useState(false)
+
   useEffect(() => { init() }, [])
+
+  // Returning from "/liff/places?picker=trip" with a chosen destination —
+  // restore the create form and fill it in.
+  useEffect(() => {
+    if (searchParams.get("restoreCreate") !== "1") return
+    const draftRaw = sessionStorage.getItem("slippy_trip_create_draft")
+    if (draftRaw) {
+      try {
+        const draft = JSON.parse(draftRaw) as { tripType: string; fee: string }
+        setTripType(draft.tripType)
+        setFee(draft.fee)
+      } catch {}
+      sessionStorage.removeItem("slippy_trip_create_draft")
+    }
+    const raw = sessionStorage.getItem("slippy_place_picker_result")
+    if (raw) {
+      try {
+        const place = JSON.parse(raw) as { name: string; address: string; mapsUrl: string }
+        setDestination(place.name)
+      } catch {}
+      sessionStorage.removeItem("slippy_place_picker_result")
+    }
+    setView("create")
+    setDestMode(null)
+    router.replace("/liff/trip")
+  }, [searchParams, router])
 
   // LIFF auth — done step-by-step (same explicit flow as /liff/sport) so we can
   // show our OWN branded "เข้าสู่ระบบด้วย LINE" screen and surface real errors
@@ -141,7 +178,7 @@ export default function LiffTripDashboard() {
     } catch { setError("โหลดรายการกลุ่มไม่สำเร็จ") }
   }
 
-  async function openDetail(id: string) {
+  async function openDetail(id: string, opts?: { justCreated?: boolean }) {
     if (!profile) return
     setBusy(true)
     try {
@@ -150,6 +187,7 @@ export default function LiffTripDashboard() {
       if (!res.ok) { setError(data.error ?? "ไม่พบกลุ่ม"); return }
       setDetail(data.group)
       setView("detail")
+      setJustCreated(!!opts?.justCreated)
     } finally { setBusy(false) }
   }
 
@@ -193,29 +231,74 @@ export default function LiffTripDashboard() {
         return
       }
       setTripType(""); setFee(""); setDestination("")
+      setDestMode(null)
       await loadGroups(profile.userId)
-      await openDetail(data.id)
+      await openDetail(data.id, { justCreated: true })
     } finally { setBusy(false) }
   }
 
-  async function shareLink() {
-    if (!detail) return
+  // Builds the "การ์ดเชิญ" Flex Message — ทริป · จุดหมาย · ค่าใช้จ่าย/หัว ·
+  // ปุ่มเข้าร่วม — posted into whichever LINE chat the user picks below.
+  function buildInviteFlex(d: GroupDetail) {
     const liffId = process.env.NEXT_PUBLIC_LIFF_ID
-    const url = liffId
-      ? `https://liff.line.me/${liffId}/liff/join/${detail.shareToken}?type=split`
-      : `${process.env.NEXT_PUBLIC_APP_URL ?? "https://slippy.ai"}/split/join/${detail.shareToken}`
+    const joinUrl = liffId
+      ? `https://liff.line.me/${liffId}/liff/join/${d.shareToken}?type=split`
+      : `${process.env.NEXT_PUBLIC_APP_URL ?? "https://slippy.ai"}/split/join/${d.shareToken}`
+    const perPerson = d.participants.find(p => p.isMe)?.amount ?? d.participants[0]?.amount ?? d.fee
+
+    const rows: any[] = []
+    if (d.destination) {
+      rows.push({ type: "box", layout: "baseline", spacing: "sm", contents: [
+        { type: "text", text: "📍", flex: 0, size: "sm" },
+        { type: "text", text: d.destination, size: "sm", color: "#555555", margin: "md", wrap: true },
+      ]})
+    }
+    rows.push({ type: "box", layout: "baseline", spacing: "sm", contents: [
+      { type: "text", text: "💰", flex: 0, size: "sm" },
+      { type: "text", text: `${fmtTHB(perPerson)} / คน  (รวม ${fmtTHB(d.fee)})`, size: "sm", color: "#555555", margin: "md", wrap: true },
+    ]})
+
+    return {
+      type: "flex",
+      altText: `${d.emoji} ชวนไปทริป ${d.title} — ${fmtTHB(perPerson)}/คน`,
+      contents: {
+        type: "bubble",
+        body: {
+          type: "box", layout: "vertical", spacing: "md",
+          contents: [
+            { type: "text", text: `${d.emoji} ${d.title}`, weight: "bold", size: "lg", wrap: true },
+            { type: "box", layout: "vertical", spacing: "sm", margin: "md", contents: rows },
+          ],
+        },
+        footer: {
+          type: "box", layout: "vertical", spacing: "sm",
+          contents: [
+            { type: "button", style: "primary", color: "#0284c7", height: "sm",
+              action: { type: "uri", label: "🙋 เข้าร่วม / ดูรายละเอียด", uri: joinUrl } },
+          ],
+        },
+      },
+    }
+  }
+
+  // เลือกกลุ่ม LINE ที่จะโพสต์คำเชิญ → bot โพสการ์ดเชิญลงในกลุ่มที่เลือก
+  async function shareInviteCard() {
+    if (!detail) return
     try {
       const mod = await import("@line/liff")
       const liff = mod.default
       if (liff.isApiAvailable?.("shareTargetPicker")) {
-        await liff.shareTargetPicker([{
-          type: "text",
-          text: `${detail.emoji} ชวนหารค่าทริป "${detail.title}"\n💰 ${fmtTHB(detail.fee)} หาร ${detail.participants.length} คน\n👉 ${url}`,
-        }])
+        await liff.shareTargetPicker([buildInviteFlex(detail) as any])
+        setJustCreated(false)
         return
       }
     } catch { /* fall through to clipboard */ }
-    try { await navigator.clipboard.writeText(url); setError("") } catch {}
+    const liffId = process.env.NEXT_PUBLIC_LIFF_ID
+    const url = liffId
+      ? `https://liff.line.me/${liffId}/liff/join/${detail.shareToken}?type=split`
+      : `${process.env.NEXT_PUBLIC_APP_URL ?? "https://slippy.ai"}/split/join/${detail.shareToken}`
+    try { await navigator.clipboard.writeText(url) } catch {}
+    setJustCreated(false)
   }
 
   // ───────────────────────────────────────────────────────── render helpers
@@ -327,7 +410,7 @@ export default function LiffTripDashboard() {
             <div className="flex items-center justify-between mb-3">
               <h1 className="text-lg font-bold flex items-center gap-1.5">✈️ กลุ่มทริปของฉัน</h1>
               <button
-                onClick={() => { setView("create"); setError("") }}
+                onClick={() => { setView("create"); setError(""); setDestMode(null) }}
                 className="h-9 px-3.5 rounded-full bg-gradient-to-r from-sky-500 to-blue-600 text-white text-sm font-semibold flex items-center gap-1.5 shadow-md active:scale-95 transition-transform"
               >
                 <Plus className="w-4 h-4" /> สร้างกลุ่ม
@@ -335,8 +418,15 @@ export default function LiffTripDashboard() {
             </div>
 
             {needsConnect && (
-              <div className="mb-3 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300">
-                💡 ยังไม่ได้เชื่อมบัญชี — พิมพ์ <b>/connect CODE</b> ในแชท Slippy ก่อน เพื่อสร้าง/จัดการกลุ่มได้เต็มรูปแบบ (ดูยังได้ตามปกติ)
+              <div className="mb-3 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300 space-y-2">
+                <p>💡 ยังไม่ได้เชื่อมบัญชี — เชื่อมก่อนเพื่อสร้าง/จัดการกลุ่มได้เต็มรูปแบบ (ดูยังได้ตามปกติ)</p>
+                <a
+                  href="/api/auth/line?next=/liff/trip"
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[#06C755] text-white text-xs font-semibold active:scale-95 transition-transform"
+                >
+                  เข้าสู่ระบบด้วย LINE (เชื่อมอัตโนมัติ)
+                </a>
+                <p className="text-amber-700/80 dark:text-amber-300/70">หรือพิมพ์ <b>/connect CODE</b> ในแชท Slippy</p>
               </div>
             )}
 
@@ -424,11 +514,48 @@ export default function LiffTripDashboard() {
 
               <div>
                 <p className="text-sm font-semibold mb-2">จุดหมาย (ไม่บังคับ)</p>
-                <input
-                  value={destination} onChange={e => setDestination(e.target.value)}
-                  placeholder="เช่น ภูเก็ต"
-                  className="w-full h-11 rounded-xl border px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/15"
-                />
+
+                {destination && (
+                  <div className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 dark:bg-sky-500/10 px-3 h-11">
+                    <MapPin className="w-4 h-4 text-sky-600 shrink-0" />
+                    <span className="flex-1 text-sm font-medium truncate">{destination}</span>
+                    <button onClick={() => { setDestination(""); setDestMode(null) }}
+                      className="text-xs text-sky-600 font-semibold shrink-0">เปลี่ยน</button>
+                  </div>
+                )}
+
+                {!destination && destMode === null && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => {
+                        sessionStorage.removeItem("slippy_place_picker_result")
+                        sessionStorage.setItem("slippy_trip_create_draft", JSON.stringify({ tripType, fee }))
+                        router.push(`/liff/places?picker=trip&lineUserId=${profile?.userId ?? ""}`)
+                      }}
+                      className="h-11 rounded-xl border-2 border-transparent bg-muted/50 flex flex-col items-center justify-center gap-0.5 text-xs font-medium"
+                    >
+                      <Navigation className="w-4 h-4" /> เลือกจากแผนที่
+                    </button>
+                    <button
+                      onClick={() => setDestMode("manual")}
+                      className="h-11 rounded-xl border-2 border-transparent bg-muted/50 flex flex-col items-center justify-center gap-0.5 text-xs font-medium"
+                    >
+                      <Pencil className="w-4 h-4" /> พิมพ์เอง
+                    </button>
+                  </div>
+                )}
+
+                {!destination && destMode === "manual" && (
+                  <div className="space-y-2">
+                    <input
+                      value={destination} onChange={e => setDestination(e.target.value)}
+                      placeholder="เช่น ภูเก็ต"
+                      autoFocus
+                      className="w-full h-11 rounded-xl border px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/15"
+                    />
+                    <button onClick={() => setDestMode(null)} className="text-xs text-muted-foreground">← เลือกวิธีอื่น</button>
+                  </div>
+                )}
               </div>
 
               <button
@@ -448,7 +575,23 @@ export default function LiffTripDashboard() {
         {/* ───────────── DETAIL VIEW ───────────── */}
         {view === "detail" && detail && (
           <>
-            <Header title={`${detail.emoji} ${detail.title}`} onBack={() => { setView("list"); setDetail(null) }} />
+            <Header title={`${detail.emoji} ${detail.title}`} onBack={() => { setView("list"); setDetail(null); setJustCreated(false) }} />
+
+            {/* เลือกกลุ่ม LINE ที่จะโพสต์คำเชิญ — shown once right after a new
+                group is created; the chosen chat receives the invite Flex card. */}
+            {justCreated && (
+              <div className="mb-3 p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-center gap-3">
+                <span className="text-2xl shrink-0">🎉</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-amber-800">สร้างกลุ่มสำเร็จ!</p>
+                  <p className="text-xs text-amber-700 mt-0.5">เลือกกลุ่ม LINE เพื่อโพสต์การ์ดเชิญให้เพื่อน</p>
+                </div>
+                <button onClick={shareInviteCard} disabled={busy}
+                  className="h-9 px-3.5 rounded-xl bg-amber-500 text-white text-xs font-semibold shrink-0 active:scale-95 transition-transform disabled:opacity-50">
+                  เลือกกลุ่ม
+                </button>
+              </div>
+            )}
 
             <div className="bg-gradient-to-r from-sky-500 to-blue-600 rounded-2xl p-4 text-white shadow-lg mb-3">
               {detail.destination && <p className="text-sm text-white/80 flex items-center gap-1 mb-1"><MapPin className="w-3.5 h-3.5" />{detail.destination}</p>}
@@ -511,8 +654,8 @@ export default function LiffTripDashboard() {
                   )}
 
                   <div className="grid grid-cols-2 gap-2">
-                    <button onClick={shareLink} className="h-10 rounded-xl border font-medium text-sm flex items-center justify-center gap-1.5 active:scale-95 transition-transform">
-                      <Share2 className="w-4 h-4" /> แชร์ลิงก์ชวนเพื่อน
+                    <button onClick={shareInviteCard} className="h-10 rounded-xl border font-medium text-sm flex items-center justify-center gap-1.5 active:scale-95 transition-transform">
+                      <Share2 className="w-4 h-4" /> ส่งการ์ดเชิญ
                     </button>
                     <button
                       onClick={() => doAction("finalize")}
@@ -525,7 +668,7 @@ export default function LiffTripDashboard() {
                 </>
               )}
               {detail.status === "finalized" && (
-                <button onClick={shareLink} className="w-full h-10 rounded-xl border font-medium text-sm flex items-center justify-center gap-1.5">
+                <button onClick={shareInviteCard} className="w-full h-10 rounded-xl border font-medium text-sm flex items-center justify-center gap-1.5">
                   <Share2 className="w-4 h-4" /> แชร์สรุปยอด
                 </button>
               )}

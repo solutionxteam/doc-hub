@@ -1,21 +1,20 @@
 /**
- * setup-rich-menu.ts — Slippy Rich Menu v5 "Slippy Universe" (literal mockup artwork)
+ * setup-rich-menu.ts — Slippy Rich Menu v7 "Slippy Universe v3" (literal mockup artwork)
  *
- * v5 — uses the ACTUAL illustrated mockup image (anime-style character art,
- * AI-generated) as the Rich Menu graphic directly, instead of a programmatic
- * SVG recreation. Source file lives at:
- *   api/src/assets/richmenu-slippy-universe-mockup.png  (1536×1024, 4×2 card
- *   grid + bottom branding bar — matches the official "Slippy Universe" mockup)
+ * v7 — swaps in a polished, numbered mockup (1. ส่งสลิป … 8. Dashboard) whose
+ * 8 cards point at the group-creation features (นัดกีฬา / หารบิล / สร้างทริป /
+ * สร้างกลุ่มอื่นๆ) instead of the old pillar-navigation layout. Source file
+ * lives at:
+ *   api/src/assets/richmenu-slippy-universe-v3-mockup.png  (1536×1024, 4×2 card
+ *   grid + bottom branding bar)
  *
  * The image is resized to LINE's required 2500×1686 canvas and uploaded as-is;
  * tap-area `bounds` below are mapped proportionally onto the same 4-col × 2-row
  * grid + footer bar visible in the artwork:
  *
- *   Row 1:  🤖 AI Coach ★ | 📸 ส่งสลิป ★ | ❤️ Health    | 🪙 Wealth
- *   Row 2:  🛍️ Lifestyle  | 📊 Dashboard | 👥 Community | ⋯  More
+ *   Row 1:  📸 ส่งสลิป | 🏸 นัดกีฬา   | 🤝 หารบิล      | ✈️ สร้างทริป
+ *   Row 2:  💊 สุขภาพ/ยา | 📊 Dashboard | ⋯  เมนูอื่นๆ   | 🆕 สร้างกลุ่ม (อื่นๆ)
  *   Footer: branding bar (Slippy · "Every Slip Tells Your Life Story") → opens app
- *
- * (★ = highlighted card — the two most-used flagship actions)
  *
  * วิธีรัน:  cd api && npm run setup:richmenu
  */
@@ -29,7 +28,7 @@ import fs    from "node:fs"
 import os    from "node:os"
 
 // Source artwork — the literal AI-generated mockup image (not a recreation)
-const SOURCE_IMAGE = new URL("../assets/richmenu-slippy-universe-mockup.png", import.meta.url).pathname
+const SOURCE_IMAGE = new URL("../assets/richmenu-slippy-universe-v3-mockup.png", import.meta.url).pathname
 
 const LINE_API      = "https://api.line.me/v2/bot"
 const LINE_DATA_API = "https://api-data.line.me/v2/bot"
@@ -58,6 +57,13 @@ function liffGate(destPath: string): string {
   return `${APP_URL}${destPath}`   // fallback if LIFF isn't configured
 }
 
+// Group-creation LIFF pages (sport/split/trip/places) handle their own LINE
+// login (liff.login()) — open them directly instead of via liffGate.
+function liffUrl(destPath: string): string {
+  if (LIFF_ID) return `https://liff.line.me/${LIFF_ID}${destPath}`
+  return `${APP_URL}${destPath}`   // fallback if LIFF isn't configured
+}
+
 // ─── Dimensions ────────────────────────────────────────────────────────────────
 // v5 — canvas matches LINE's required full-menu size; tap areas are mapped onto
 // the 4×2 card grid + bottom branding bar that are VISIBLE in the source artwork
@@ -70,34 +76,33 @@ const CW     = Math.floor(W / 4)                 // 625 — card column width  (
 const CH     = Math.floor(GRID_H / 2)            // ≈ 729 — card row height  (2 rows)
 
 // ─── Rich Menu hit areas ───────────────────────────────────────────────────────
-// 8-card grid (matches the artwork: AI Coach · ส่งสลิป · Health · Wealth /
-// Lifestyle · Dashboard · Community · More) + a footer brand-bar tap area
+// 8-card grid (matches the artwork: ส่งสลิป · นัดกีฬา · หารบิล · สร้างทริป /
+// สุขภาพ/ยา · Dashboard · เมนูอื่นๆ · สร้างกลุ่ม (อื่นๆ)) + a footer brand-bar tap area
 const RICH_MENU_BODY = {
   size:        { width: W, height: H },
   selected:    true,
-  name:        "Slippy Universe Menu v5 (mockup artwork)",
+  name:        "Slippy Universe Menu v7 (mockup artwork v3)",
   chatBarText: "📱 เมนู Slippy",
   areas: [
     // ── Row 1 ──────────────────────────────────────────────────────────────
-    // 🤖 AI Coach (Nova) → starts a chat with Nova in the bot
-    { bounds: { x: 0,          y: 0,           width: CW, height: CH }, action: { type: "message", text: "คุยกับ Nova 🤖" } },
     // 📸 ส่งสลิป → triggers the upload flow
-    { bounds: { x: CW,         y: 0,           width: CW, height: CH }, action: { type: "message", text: "📸 ส่งสลิป" } },
-    // ❤️ Health → LINE-only login gate → Health pillar (mobile-optimized, no password form)
-    { bounds: { x: CW * 2,     y: 0,           width: CW, height: CH }, action: { type: "uri", uri: liffGate("/personal/health") } },
-    // 🪙 Wealth → LINE-only login gate → Wealth pillar (budget/expense insight)
-    { bounds: { x: CW * 3,     y: 0,           width: W - CW * 3, height: CH }, action: { type: "uri", uri: liffGate("/personal/wealth") } },
+    { bounds: { x: 0,          y: 0,           width: CW, height: CH }, action: { type: "message", text: "📸 ส่งสลิป" } },
+    // 🏸 นัดกีฬา → open/create sport-meetup groups (LIFF handles its own login)
+    { bounds: { x: CW,         y: 0,           width: CW, height: CH }, action: { type: "uri", uri: liffUrl("/liff/sport") } },
+    // 🤝 หารบิล → create a generic split-bill group
+    { bounds: { x: CW * 2,     y: 0,           width: CW, height: CH }, action: { type: "uri", uri: liffUrl("/liff/split") } },
+    // ✈️ สร้างทริป → open/create trip groups
+    { bounds: { x: CW * 3,     y: 0,           width: W - CW * 3, height: CH }, action: { type: "uri", uri: liffUrl("/liff/trip") } },
 
     // ── Row 2 ──────────────────────────────────────────────────────────────
-    // 🛍️ Lifestyle → LINE-only login gate → travel/shopping/experiences pillar
-    { bounds: { x: 0,          y: CH,          width: CW, height: GRID_H - CH }, action: { type: "uri", uri: liffGate("/personal/vita") } },
+    // 💊 สุขภาพ/ยา → LINE-only login gate → Health pillar (mobile-optimized, no password form)
+    { bounds: { x: 0,          y: CH,          width: CW, height: GRID_H - CH }, action: { type: "uri", uri: liffGate("/personal/health") } },
     // 📊 Dashboard → LINE-only login gate → life overview / insight summary
     { bounds: { x: CW,         y: CH,          width: CW, height: GRID_H - CH }, action: { type: "uri", uri: liffGate("/dashboard") } },
-    // 👥 Community → LINE-only login gate → friends, clubs, challenges
-    { bounds: { x: CW * 2,     y: CH,          width: CW, height: GRID_H - CH }, action: { type: "uri", uri: liffGate("/social") } },
-    // ⋯ More → opens the full in-chat command menu carousel
-    //   (this is where กลุ่มกีฬา / กลุ่มทริป / หารบิล / ตั้งค่า all live now)
-    { bounds: { x: CW * 3,     y: CH,          width: W - CW * 3, height: GRID_H - CH }, action: { type: "message", text: "/menu" } },
+    // ⋯ เมนูอื่นๆ → opens the full in-chat command menu carousel
+    { bounds: { x: CW * 2,     y: CH,          width: CW, height: GRID_H - CH }, action: { type: "message", text: "/menu" } },
+    // 🆕 สร้างกลุ่ม (อื่นๆ) → places/activity picker → start a general group from a place
+    { bounds: { x: CW * 3,     y: CH,          width: W - CW * 3, height: GRID_H - CH }, action: { type: "uri", uri: liffUrl("/liff/places") } },
 
     // ── Footer branding bar → LINE-only login gate → dashboard ────────────
     { bounds: { x: 0,          y: GRID_H,      width: W, height: FOOTER }, action: { type: "uri", uri: liffGate("/dashboard") } },

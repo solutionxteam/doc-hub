@@ -19,7 +19,9 @@ const cspDirectives: Record<string, string[]> = {
   "font-src":        ["'self'", "https://fonts.gstatic.com", "data:"],
   "img-src":         ["'self'", "data:", "blob:",
                       supabaseHost,
-                      "https://lh3.googleusercontent.com"],
+                      "https://lh3.googleusercontent.com",
+                      // DiceBear avatar presets (profile picture picker)
+                      "https://api.dicebear.com"],
   "media-src":       ["'self'", "blob:", supabaseHost],
   "connect-src":     ["'self'",
                       supabaseHost,
@@ -37,6 +39,24 @@ const cspDirectives: Record<string, string[]> = {
 }
 
 const cspHeader = Object.entries(cspDirectives)
+  .map(([key, values]) => `${key} ${values.join(" ")}`.trim())
+  .join("; ")
+
+// ── Relaxed CSP for /liff/* (LINE Front-end Framework) routes ─────────────────
+// `liff.init()` loads additional "client features" (scripts + iframes) from
+// LINE's CDN/auth domains. The default CSP above (frame-src: 'none', no LINE
+// domains in script-src/connect-src) blocks this with the generic SDK error
+// "Unable to load client features." — these routes need LINE's domains added.
+const liffCspDirectives: Record<string, string[]> = {
+  ...cspDirectives,
+  "script-src":  [...cspDirectives["script-src"], "https://*.line-scdn.net", "https://*.line.me"],
+  "connect-src": [...cspDirectives["connect-src"], "https://*.line-scdn.net", "https://*.line.me", "https://*.line.naver.jp"],
+  "img-src":     [...cspDirectives["img-src"], "https://*.line-scdn.net", "https://*.line.me"],
+  "frame-src":   ["https://*.line.me", "https://*.line-scdn.net"],
+  "frame-ancestors": ["'self'", "https://*.line.me"],
+}
+
+const liffCspHeader = Object.entries(liffCspDirectives)
   .map(([key, values]) => `${key} ${values.join(" ")}`.trim())
   .join("; ")
 
@@ -81,8 +101,18 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        // Apply security headers to all routes
-        source:  "/(.*)",
+        // LIFF routes need a relaxed CSP that allows LINE's domains —
+        // must be listed before the catch-all so it takes precedence.
+        source:  "/liff/:path*",
+        headers: securityHeaders.map(h =>
+          h.key === "Content-Security-Policy" ? { ...h, value: liffCspHeader } : h
+        ),
+      },
+      {
+        // Apply security headers to all other routes. Next.js applies ALL
+        // matching header rules (merging/intersecting CSPs), so /liff/* is
+        // excluded here to avoid conflicting with the relaxed CSP above.
+        source:  "/((?!liff/).*)",
         headers: securityHeaders,
       },
     ]

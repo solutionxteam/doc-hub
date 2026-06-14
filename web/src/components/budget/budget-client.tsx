@@ -160,6 +160,16 @@ export function BudgetClient({ orgId, initialData }: { orgId: string; initialDat
   const isOver   = spent.total > budget.total && budget.total > 0
   const isWarn   = totalPct >= 80 && !isOver
 
+  // Time-of-month stats
+  const [yearStr, monthStr] = month.split("-")
+  const daysInMonth = new Date(Number(yearStr), Number(monthStr), 0).getDate()
+  const now = new Date()
+  const isCurrentMonth = now.getFullYear() === Number(yearStr) && (now.getMonth() + 1) === Number(monthStr)
+  const daysPassed = isCurrentMonth ? now.getDate() : daysInMonth
+  const dailyAvg   = daysPassed > 0 ? spent.total / daysPassed : 0
+  const projected  = dailyAvg * daysInMonth
+  const remaining  = budget.total - spent.total
+
   // All categories that have any spending or budget
   const allCats = Array.from(new Set([
     ...Object.keys(spent.byCategory),
@@ -167,7 +177,7 @@ export function BudgetClient({ orgId, initialData }: { orgId: string; initialDat
   ]))
 
   return (
-    <div className="p-6 lg:p-7 max-w-[800px] animate-fade-in">
+    <div className="p-6 lg:p-7 max-w-[1100px] animate-fade-in">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -185,59 +195,88 @@ export function BudgetClient({ orgId, initialData }: { orgId: string; initialDat
         </button>
       </div>
 
-      {/* Total budget card */}
-      <div className={cn(
-        "rounded-xl border bg-card p-6 mb-6",
-        isOver ? "border-rose-300 dark:border-rose-800" : isWarn ? "border-amber-300 dark:border-amber-800" : ""
-      )}>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">ค่าใช้จ่ายรวมเดือนนี้</p>
-            <p className={cn("text-3xl font-black mt-1", isOver ? "text-rose-600" : "text-foreground")}>
-              {fmtTHB(spent.total)}
-            </p>
-            {budget.total > 0 && (
-              <p className="text-sm text-muted-foreground mt-0.5">จาก {fmtTHB(budget.total)} ที่ตั้งไว้</p>
-            )}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
+        {/* Total budget card */}
+        <div className={cn(
+          "lg:col-span-2 rounded-xl border bg-card p-6",
+          isOver ? "border-rose-300 dark:border-rose-800" : isWarn ? "border-amber-300 dark:border-amber-800" : ""
+        )}>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">ค่าใช้จ่ายรวมเดือนนี้</p>
+              <p className={cn("text-3xl font-black mt-1", isOver ? "text-rose-600" : "text-foreground")}>
+                {fmtTHB(spent.total)}
+              </p>
+              {budget.total > 0 && (
+                <p className="text-sm text-muted-foreground mt-0.5">จาก {fmtTHB(budget.total)} ที่ตั้งไว้</p>
+              )}
+            </div>
+            <div className={cn(
+              "w-16 h-16 rounded-full flex items-center justify-center text-2xl font-black",
+              budget.total === 0 ? "bg-muted text-muted-foreground" :
+              isOver ? "bg-rose-100 text-rose-600 dark:bg-rose-500/10" :
+              isWarn ? "bg-amber-100 text-amber-600 dark:bg-amber-500/10" :
+              "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10"
+            )}>
+              {budget.total > 0 ? `${Math.round(totalPct)}%` : <Target className="w-6 h-6" />}
+            </div>
           </div>
-          <div className={cn(
-            "w-16 h-16 rounded-full flex items-center justify-center text-2xl font-black",
-            isOver ? "bg-rose-100 text-rose-600 dark:bg-rose-500/10" :
-            isWarn ? "bg-amber-100 text-amber-600 dark:bg-amber-500/10" :
-            "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10"
-          )}>
-            {budget.total > 0 ? `${Math.round(totalPct)}%` : "—"}
-          </div>
+
+          {budget.total > 0 && (
+            <>
+              <div className="h-3 rounded-full bg-muted overflow-hidden">
+                <div className={cn("h-full rounded-full transition-all duration-700",
+                  isOver ? "bg-rose-500" : isWarn ? "bg-amber-400" : "bg-emerald-500")}
+                  style={{ width: `${totalPct}%` }} />
+              </div>
+              {isOver && (
+                <p className="mt-2 text-xs text-rose-600 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  เกินงบ {fmtTHB(spent.total - budget.total)} บาท
+                </p>
+              )}
+              {isWarn && !isOver && (
+                <p className="mt-2 text-xs text-amber-600 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  ใกล้ถึงงบ — เหลืออีก {fmtTHB(budget.total - spent.total)} บาท
+                </p>
+              )}
+              {!isOver && !isWarn && (
+                <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1.5">
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+                  เหลืออีก {fmtTHB(remaining)} บาท
+                </p>
+              )}
+            </>
+          )}
+
+          {budget.total === 0 && (
+            <button onClick={() => setShowEdit(true)}
+              className="mt-2 flex items-center gap-1.5 text-sm text-brand-500 hover:text-brand-600 transition-colors">
+              <Plus className="w-3.5 h-3.5" /> กดเพื่อตั้งงบประมาณ
+            </button>
+          )}
         </div>
 
-        {budget.total > 0 && (
-          <>
-            <div className="h-3 rounded-full bg-muted overflow-hidden">
-              <div className={cn("h-full rounded-full transition-all duration-700",
-                isOver ? "bg-rose-500" : isWarn ? "bg-amber-400" : "bg-emerald-500")}
-                style={{ width: `${totalPct}%` }} />
-            </div>
-            {isOver && (
-              <p className="mt-2 text-xs text-rose-600 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                เกินงบ {fmtTHB(spent.total - budget.total)} บาท
-              </p>
-            )}
-            {isWarn && !isOver && (
-              <p className="mt-2 text-xs text-amber-600 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                ใกล้ถึงงบ — เหลืออีก {fmtTHB(budget.total - spent.total)} บาท
-              </p>
-            )}
-          </>
-        )}
-
-        {budget.total === 0 && (
-          <button onClick={() => setShowEdit(true)}
-            className="mt-2 flex items-center gap-1.5 text-sm text-brand-500 hover:text-brand-600 transition-colors">
-            <Plus className="w-3.5 h-3.5" /> กดเพื่อตั้งงบประมาณ
-          </button>
-        )}
+        {/* Quick stats */}
+        <div className="grid grid-cols-2 lg:grid-cols-1 gap-4">
+          <div className="rounded-xl border bg-card p-4 flex flex-col justify-center">
+            <p className="text-xs text-muted-foreground font-medium">เฉลี่ยต่อวัน</p>
+            <p className="text-xl font-bold mt-1">{fmtTHB(Math.round(dailyAvg))}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">จาก {daysPassed} วันที่ผ่านมา</p>
+          </div>
+          <div className="rounded-xl border bg-card p-4 flex flex-col justify-center">
+            <p className="text-xs text-muted-foreground font-medium">คาดการณ์สิ้นเดือน</p>
+            <p className={cn("text-xl font-bold mt-1", budget.total > 0 && projected > budget.total ? "text-rose-600" : "")}>
+              {fmtTHB(Math.round(projected))}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {budget.total > 0
+                ? (projected > budget.total ? "มีแนวโน้มเกินงบ" : "อยู่ในงบที่ตั้งไว้")
+                : `ทั้งเดือน ${daysInMonth} วัน`}
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Category breakdown */}

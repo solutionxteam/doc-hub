@@ -21,6 +21,7 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Loader2 } from "lucide-react"
+import { LogoMark } from "@/components/ui/logo"
 
 type Status = "checking" | "needLogin" | "outsideLine" | "bridging" | "authError"
 
@@ -115,8 +116,8 @@ export default function LiffHomeGate() {
   if (status === "checking" || status === "bridging") {
     return (
       <Shell>
-        <Loader2 className="w-7 h-7 animate-spin text-violet-600" />
-        <p className="text-xs text-muted-foreground mt-3">
+        <Loader2 className="w-7 h-7 animate-spin text-violet-400" />
+        <p className="text-xs text-white/60 mt-3">
           {status === "bridging" ? "กำลังเข้าสู่ระบบด้วยบัญชี LINE..." : "กำลังเชื่อมต่อกับ LINE..."}
         </p>
       </Shell>
@@ -129,8 +130,8 @@ export default function LiffHomeGate() {
       <Shell>
         <div className="text-center max-w-xs">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center text-2xl mx-auto mb-3 shadow-lg">📱</div>
-          <p className="font-semibold mb-1">เปิดจากแอป LINE เท่านั้น</p>
-          <p className="text-sm text-muted-foreground">แตะเมนูจากแชท Slippy ในแอป LINE เพื่อเข้าสู่ระบบและใช้งานหน้านี้</p>
+          <p className="font-semibold mb-1 text-white">เปิดจากแอป LINE เท่านั้น</p>
+          <p className="text-sm text-white/60">แตะเมนูจากแชท Slippy ในแอป LINE เพื่อเข้าสู่ระบบและใช้งานหน้านี้</p>
         </div>
       </Shell>
     )
@@ -141,9 +142,9 @@ export default function LiffHomeGate() {
     return (
       <Shell>
         <div className="text-center max-w-xs">
-          <div className="w-14 h-14 rounded-2xl bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center text-2xl mx-auto mb-3">⚠️</div>
-          <p className="font-semibold mb-1">เข้าสู่ระบบไม่สำเร็จ</p>
-          <p className="text-sm text-muted-foreground mb-4">{error}</p>
+          <div className="w-14 h-14 rounded-2xl bg-rose-500/10 flex items-center justify-center text-2xl mx-auto mb-3">⚠️</div>
+          <p className="font-semibold mb-1 text-white">เข้าสู่ระบบไม่สำเร็จ</p>
+          <p className="text-sm text-white/60 mb-4">{error}</p>
           <button
             onClick={() => void init()}
             className="h-10 px-5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors"
@@ -159,11 +160,11 @@ export default function LiffHomeGate() {
   return (
     <Shell>
       <div className="text-center max-w-xs w-full">
-        <div className="w-16 h-16 rounded-2xl bg-[#06C755] flex items-center justify-center text-3xl mx-auto mb-4 shadow-lg">
+        <div className="w-16 h-16 rounded-2xl bg-[#06C755] flex items-center justify-center text-3xl mx-auto mb-4 shadow-lg shadow-[#06C755]/20">
           💬
         </div>
-        <p className="font-bold text-lg mb-1">เข้าสู่ระบบด้วยบัญชี LINE</p>
-        <p className="text-sm text-muted-foreground mb-6">
+        <p className="font-bold text-lg mb-1 text-white">เข้าสู่ระบบด้วยบัญชี LINE</p>
+        <p className="text-sm text-white/60 mb-6">
           Slippy ใช้บัญชี LINE ของคุณเพื่อเข้าสู่ระบบโดยตรง — ไม่ต้องสมัครสมาชิก
           ไม่ต้องตั้งรหัสผ่าน ปลอดภัยและรวดเร็วกว่าเดิม
         </p>
@@ -175,17 +176,28 @@ export default function LiffHomeGate() {
           {loggingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <span className="text-base">💬</span>}
           เข้าสู่ระบบด้วย LINE
         </button>
-        <p className="text-xs text-muted-foreground mt-4">Powered by Slippy · AI Life Assistant</p>
+        <p className="text-xs text-white/40 mt-4">Powered by Slippy · AI Life Assistant</p>
       </div>
     </Shell>
   )
 }
 
-// Shared full-screen, mobile-centered shell — LINE-green-tinted brand gradient
+// Shared full-screen, mobile-centered shell — matches Slippy's dark brand theme
+// (same #070a18 + violet glow as /auth/line-callback and the landing page)
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-br from-[#06C755]/10 via-white to-violet-50 dark:from-[#06C755]/5 dark:via-slate-900 dark:to-slate-900">
-      {children}
+    <div className="relative min-h-screen flex flex-col items-center justify-center p-6 gap-6 bg-[#070a18] overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none"
+        style={{ background: "radial-gradient(ellipse at 50% 40%, rgba(139,92,246,0.18), transparent 65%)" }} />
+
+      <div className="relative flex flex-col items-center gap-2 mb-2">
+        <LogoMark size={48} glow />
+        <span className="text-white font-bold text-lg tracking-tight">Slippy</span>
+      </div>
+
+      <div className="relative flex flex-col items-center w-full">
+        {children}
+      </div>
     </div>
   )
 }

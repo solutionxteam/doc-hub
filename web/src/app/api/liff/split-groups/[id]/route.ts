@@ -1,20 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 
-const SPORT_EMOJI: Record<string, string> = {
-  "แบด": "🏸", "แบดมินตัน": "🏸", "badminton": "🏸",
-  "ฟุตบอล": "⚽", "football": "⚽", "soccer": "⚽", "ฟุตซอล": "⚽",
-  "บาส": "🏀", "บาสเกตบอล": "🏀", "basketball": "🏀",
-  "เทนนิส": "🎾", "tennis": "🎾",
-  "วอลเลย์บอล": "🏐", "วอลเลย์": "🏐", "volleyball": "🏐",
-  "ปิงปอง": "🏓", "table tennis": "🏓",
-  "ว่ายน้ำ": "🏊", "swimming": "🏊",
-  "วิ่ง": "🏃", "running": "🏃",
-  "ปั่นจักรยาน": "🚴", "จักรยาน": "🚴", "cycling": "🚴",
-  "กอล์ฟ": "⛳", "golf": "⛳",
-}
-function sportEmoji(t: string) { return SPORT_EMOJI[(t ?? "").toLowerCase()] ?? "🏃" }
-
 async function rebalance(admin: ReturnType<typeof createAdminClient>, billId: string, totalAmount: number) {
   const { data: parts } = await admin.from("split_participants")
     .select("id").eq("split_bill_id", billId)
@@ -30,9 +16,9 @@ async function rebalance(admin: ReturnType<typeof createAdminClient>, billId: st
 
 async function loadDetail(admin: ReturnType<typeof createAdminClient>, id: string, lineUserId?: string | null) {
   const { data: bill } = await admin.from("split_bills")
-    .select("id, title, sport_type, venue, total_amount, status, share_token, organization_id, creator_id, split_participants(id, name, amount, paid_at, line_user_id)")
+    .select("id, title, note, total_amount, status, share_token, organization_id, creator_id, split_participants(id, name, amount, paid_at, line_user_id)")
     .eq("id", id)
-    .eq("category", "sport")
+    .eq("category", "general")
     .maybeSingle()
 
   if (!bill) return null
@@ -44,9 +30,7 @@ async function loadDetail(admin: ReturnType<typeof createAdminClient>, id: strin
   return {
     id:         bill.id,
     title:      bill.title,
-    emoji:      sportEmoji(bill.sport_type ?? ""),
-    sportType:  bill.sport_type,
-    venue:      bill.venue,
+    note:       bill.note,
     fee:        Number(bill.total_amount),
     status:     bill.status,
     shareToken: bill.share_token,
@@ -55,19 +39,19 @@ async function loadDetail(admin: ReturnType<typeof createAdminClient>, id: strin
   }
 }
 
-// GET /api/liff/sport-groups/[id]?lineUserId=Uxxx — group detail + participants
+// GET /api/liff/split-groups/[id]?lineUserId=Uxxx — bill detail + participants
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const lineUserId = req.nextUrl.searchParams.get("lineUserId")
   const admin = createAdminClient()
 
   const detail = await loadDetail(admin, id, lineUserId)
-  if (!detail) return NextResponse.json({ error: "ไม่พบกลุ่ม" }, { status: 404 })
+  if (!detail) return NextResponse.json({ error: "ไม่พบบิล" }, { status: 404 })
 
   return NextResponse.json({ group: detail })
 }
 
-// POST /api/liff/sport-groups/[id] — actions: join | pay | unpay | finalize
+// POST /api/liff/split-groups/[id] — actions: join | pay | unpay | finalize
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const { action, lineUserId, displayName } = await req.json() as {
@@ -80,12 +64,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const admin = createAdminClient()
   const { data: bill } = await admin.from("split_bills")
     .select("id, status, total_amount, category")
-    .eq("id", id).eq("category", "sport").maybeSingle()
+    .eq("id", id).eq("category", "general").maybeSingle()
 
-  if (!bill) return NextResponse.json({ error: "ไม่พบกลุ่ม" }, { status: 404 })
+  if (!bill) return NextResponse.json({ error: "ไม่พบบิล" }, { status: 404 })
 
   if (action === "join") {
-    if (bill.status === "finalized") return NextResponse.json({ error: "กลุ่มนี้ปิดแล้วครับ" }, { status: 400 })
+    if (bill.status === "finalized") return NextResponse.json({ error: "บิลนี้ปิดแล้วครับ" }, { status: 400 })
     const { data: existing } = await admin.from("split_participants")
       .select("id").eq("split_bill_id", id).eq("line_user_id", lineUserId).maybeSingle()
     if (!existing) {
@@ -100,14 +84,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (action === "pay" || action === "unpay") {
     const { data: me } = await admin.from("split_participants")
       .select("id").eq("split_bill_id", id).eq("line_user_id", lineUserId).maybeSingle()
-    if (!me) return NextResponse.json({ error: "คุณยังไม่ได้เข้าร่วมกลุ่มนี้" }, { status: 400 })
+    if (!me) return NextResponse.json({ error: "คุณยังไม่ได้เข้าร่วมบิลนี้" }, { status: 400 })
     await admin.from("split_participants")
       .update({ paid_at: action === "pay" ? new Date().toISOString() : null })
       .eq("id", me.id)
   }
 
   if (action === "finalize") {
-    if (bill.status === "finalized") return NextResponse.json({ error: "กลุ่มนี้ปิดไปแล้วครับ" }, { status: 400 })
+    if (bill.status === "finalized") return NextResponse.json({ error: "บิลนี้ปิดไปแล้วครับ" }, { status: 400 })
     await rebalance(admin, id, Number(bill.total_amount))
     await admin.from("split_bills").update({ status: "finalized" }).eq("id", id)
   }

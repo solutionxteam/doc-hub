@@ -186,6 +186,7 @@ export function LineSection({ orgId, isAdmin }: Props) {
         token_failed:    "รับ token จาก LINE ไม่ได้",
         profile_failed:  "ดึงข้อมูล profile ไม่ได้",
         upsert_failed:   "บันทึกการเชื่อมต่อไม่สำเร็จ",
+        line_already_linked: "บัญชี LINE นี้เชื่อมต่อกับบัญชี Slippy อื่นอยู่แล้ว กรุณาออกจากระบบบัญชีนั้นก่อน หรือใช้บัญชี LINE อื่น",
         not_configured:  "LINE Login ยังไม่ได้ตั้งค่า",
         unexpected:      "เกิดข้อผิดพลาด กรุณาลองใหม่",
       }

@@ -20,6 +20,8 @@ android/local.properties
 .env*.local
 .env.production
 .env.staging
+google-credentials.json
+**/google-credentials.json
 
 ## Logs
 *.log
