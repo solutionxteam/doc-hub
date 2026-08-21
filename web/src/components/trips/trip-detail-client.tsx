@@ -1166,7 +1166,7 @@ export function TripDetailClient({ trip, expenses, payments, settlement, orgId }
       </div>
 
       {/* Tabs — scrolls horizontally instead of wrapping, so it stays a single
-          clean row even with 6 tabs on a small screen. */}
+          clean row even with 7 tabs on a small screen. */}
       <div className="flex gap-0.5 border-b mb-4 overflow-x-auto">
         {[
           { id: "expenses",   label: `รายจ่าย (${expenses.length})` },

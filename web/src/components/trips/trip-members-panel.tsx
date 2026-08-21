@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { cn } from "@/lib/utils"
 import { UserPlus, LogOut, MessageCircle, Crown } from "lucide-react"
 import { InviteFriendModal } from "./invite-friend-modal"
 
@@ -40,11 +39,13 @@ export function TripMembersPanel({ tripId }: { tripId: string }) {
     if (!confirm(`เอา ${member.display_name} ออกจากทริปนี้?\nประวัติค่าใช้จ่ายของเขาจะยังอยู่ แต่จะไม่เห็นทริปนี้อีกต่อไป`)) return
     setRemovingId(member.id)
     try {
-      const res = await fetch(`/api/trips/${tripId}/members?userId=${member.user_id}`, { method: "DELETE" })
+      const res = await fetch(`/api/trips/${tripId}/members?userId=${encodeURIComponent(member.user_id)}`, { method: "DELETE" })
       const data = await res.json()
       if (!res.ok) { toast.error(data.error ?? "ลบสมาชิกไม่สำเร็จ"); return }
-      toast.success(`เอา ${member.display_name} ออกจากทริปแล้ว`)
+      if (!data.alreadyRemoved) toast.success(`เอา ${member.display_name} ออกจากทริปแล้ว`)
       load()
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้ง")
     } finally {
       setRemovingId(null)
     }
@@ -57,6 +58,8 @@ export function TripMembersPanel({ tripId }: { tripId: string }) {
       const data = await res.json()
       if (!res.ok || !data.conversationId) { toast.error(data.error ?? "เปิดแชทไม่สำเร็จ"); return }
       router.push(`/messages/${data.conversationId}`)
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้ง")
     } finally {
       setOpeningChat(false)
     }

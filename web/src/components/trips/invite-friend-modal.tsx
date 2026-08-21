@@ -5,7 +5,20 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { X, Check, Search } from "lucide-react"
 
-type Friend = { id: string; full_name: string; avatar_url: string | null }
+type Friend = { id: string; full_name: string | null; avatar_url: string | null }
+
+function FriendAvatar({ friend }: { friend: Friend }) {
+  const [broken, setBroken] = useState(false)
+  const initials = (friend.full_name ?? "?").trim().slice(0, 2).toUpperCase()
+  return (
+    <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 flex items-center justify-center font-semibold text-xs shrink-0 overflow-hidden">
+      {friend.avatar_url && !broken
+        // eslint-disable-next-line @next/next/no-img-element
+        ? <img src={friend.avatar_url} alt={friend.full_name ?? ""} className="w-full h-full object-cover" onError={() => setBroken(true)} />
+        : initials}
+    </div>
+  )
+}
 
 export function InviteFriendModal({
   tripId,
@@ -43,7 +56,7 @@ export function InviteFriendModal({
   const toggle = (id: string) => {
     setSelected(prev => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) { next.delete(id) } else { next.add(id) }
       return next
     })
   }
@@ -58,16 +71,19 @@ export function InviteFriendModal({
       })
       const data = await res.json()
       if (!res.ok) { toast.error(data.error ?? "เชิญเพื่อนไม่สำเร็จ"); return }
+      const notFriendsSuffix = data.notFriends?.length > 0 ? ` (${data.notFriends.length} คนไม่ใช่เพื่อน)` : ""
       toast.success(
-        data.invited.length > 0 ? `เชิญ ${data.invited.length} คนเข้าทริปแล้ว` : "ทุกคนอยู่ในทริปนี้อยู่แล้ว",
+        (data.invited.length > 0 ? `เชิญ ${data.invited.length} คนเข้าทริปแล้ว` : "ทุกคนอยู่ในทริปนี้อยู่แล้ว") + notFriendsSuffix,
       )
       onDone()
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้ง")
     } finally {
       setSaving(false)
     }
   }
 
-  const shown = (friends ?? []).filter(f => f.full_name.toLowerCase().includes(query.trim().toLowerCase()))
+  const shown = (friends ?? []).filter(f => (f.full_name ?? "").toLowerCase().includes(query.trim().toLowerCase()))
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
@@ -103,13 +119,8 @@ export function InviteFriendModal({
               <button key={f.id} onClick={() => toggle(f.id)}
                 className={cn("w-full flex items-center gap-3 px-2 py-2 rounded-[8px] text-left transition-colors",
                   isSelected ? "bg-brand-50 dark:bg-brand-900/30" : "hover:bg-muted/50")}>
-                <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 flex items-center justify-center font-semibold text-xs shrink-0 overflow-hidden">
-                  {f.avatar_url
-                    // eslint-disable-next-line @next/next/no-img-element
-                    ? <img src={f.avatar_url} alt={f.full_name} className="w-full h-full object-cover" />
-                    : f.full_name.trim().slice(0, 2).toUpperCase()}
-                </div>
-                <span className="flex-1 text-sm font-medium truncate">{f.full_name}</span>
+                <FriendAvatar friend={f} />
+                <span className="flex-1 text-sm font-medium truncate">{f.full_name ?? ""}</span>
                 <div className={cn("w-5 h-5 rounded-full border flex items-center justify-center shrink-0",
                   isSelected ? "bg-brand-500 border-brand-500" : "border-muted-foreground/30")}>
                   {isSelected && <Check className="w-3 h-3 text-white" />}
