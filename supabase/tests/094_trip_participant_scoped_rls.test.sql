@@ -3,15 +3,39 @@
 -- Verifies the participant-scoped RLS added by
 -- 094_trip_participant_scoped_rls.sql actually restricts visibility on the 8
 -- hardened trip tables. Creates a trip owner, an active participant, an
--- org-outsider (same organization, never added to the trip), and a departed
--- participant (was on the trip, left) — then simulates each one via
--- request.jwt.claims and asserts who can see what.
+-- org-outsider (same organization, never added to the trip), a departed
+-- participant (was on the trip, left), and an outside-org participant (on
+-- the trip, but not a member of its organization) — then simulates each one
+-- via request.jwt.claims and asserts who can see (and write) what.
 --
--- LOCAL SUPABASE ONLY. Never run against the real dev/prod project.
+-- Not a pgTAP suite (this repo has no pgTAP convention to extend) — run
+-- directly via psql, per the invocation below. Every PASS/FAIL is a
+-- RAISE NOTICE/EXCEPTION, not TAP output.
+--
+-- LOCAL SUPABASE ONLY. Refuses to run against anything but 127.0.0.1/::1
+-- (see the guard immediately below) — this script seeds fake auth.users,
+-- an org, and trip data, and GRANTs SELECT/INSERT on 9 tables to
+-- `authenticated`. Never point it at a real project.
+--
 -- Run: supabase start && supabase db reset (applies 094), then:
 --   psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/tests/094_trip_participant_scoped_rls.test.sql
 
 \set ON_ERROR_STOP on
+
+-- IP-based checks (inet_server_addr()/inet_client_addr()) don't work here —
+-- through Docker's port-forwarding both report container-internal addresses
+-- (e.g. 172.19.0.x), not 127.0.0.1, even for a genuinely local connection.
+-- Instead, check for the JWT secret Supabase CLI hard-codes into every local
+-- instance by default (public, documented, identical across all local
+-- stacks) — a real project would never have this as its actual signing
+-- secret without a much bigger problem than this script.
+DO $$
+BEGIN
+  IF current_setting('app.settings.jwt_secret', true)
+       IS DISTINCT FROM 'super-secret-jwt-token-with-at-least-32-characters-long' THEN
+    RAISE EXCEPTION 'Refusing to run: this does not look like a local Supabase CLI instance (unexpected JWT secret). This script seeds fake auth.users/org/trip data and GRANTs SELECT/INSERT on 9 tables to authenticated — never point it at anything but a local stack.';
+  END IF;
+END $$;
 
 -- ── Setup (as postgres superuser — bypasses RLS entirely) ──────────────────
 INSERT INTO auth.users (id, instance_id, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, aud, role)
@@ -19,13 +43,16 @@ VALUES
   ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-000000000000', 'rls-owner@test.local',       'x', now(), now(), now(), '{}', '{}', 'authenticated', 'authenticated'),
   ('00000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-000000000000', 'rls-participant@test.local', 'x', now(), now(), now(), '{}', '{}', 'authenticated', 'authenticated'),
   ('00000000-0000-0000-0000-00000000000c', '00000000-0000-0000-0000-000000000000', 'rls-outsider@test.local',    'x', now(), now(), now(), '{}', '{}', 'authenticated', 'authenticated'),
-  ('00000000-0000-0000-0000-00000000000d', '00000000-0000-0000-0000-000000000000', 'rls-departed@test.local',    'x', now(), now(), now(), '{}', '{}', 'authenticated', 'authenticated')
+  ('00000000-0000-0000-0000-00000000000d', '00000000-0000-0000-0000-000000000000', 'rls-departed@test.local',    'x', now(), now(), now(), '{}', '{}', 'authenticated', 'authenticated'),
+  ('00000000-0000-0000-0000-00000000000e', '00000000-0000-0000-0000-000000000000', 'rls-outside-org@test.local', 'x', now(), now(), now(), '{}', '{}', 'authenticated', 'authenticated')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO organizations (id, name, slug)
 VALUES ('00000000-0000-0000-0000-0000000000f1', 'RLS Test Org', 'rls-test-org-094')
 ON CONFLICT (id) DO NOTHING;
 
+-- Deliberately NOT adding user 'e' (outside-org) as an organization_member —
+-- that's the point of that fixture.
 INSERT INTO organization_members (organization_id, user_id, role)
 VALUES
   ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-00000000000a', 'owner'),
@@ -48,6 +75,14 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO trip_participants (id, journey_id, user_id, display_name, left_at)
 VALUES ('00000000-0000-0000-0000-0000000000f5', '00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-00000000000d', 'Departed', now())
+ON CONFLICT (id) DO NOTHING;
+
+-- Invited as a Slippy friend (web/src/app/api/trips/[id]/members/route.ts
+-- has no org-membership requirement) but not in organization_members for
+-- this trip's org — proves participant status alone is sufficient, per the
+-- header comment in 094_trip_participant_scoped_rls.sql.
+INSERT INTO trip_participants (id, journey_id, user_id, display_name)
+VALUES ('00000000-0000-0000-0000-0000000000f0', '00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-00000000000e', 'Outside-Org Participant')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO trip_expenses (id, journey_id, paid_by_id, title, amount, amount_base_currency)
@@ -86,17 +121,21 @@ ON CONFLICT (id) DO NOTHING;
 -- RLS-bound client, this almost certainly means the real project has these
 -- grants applied out-of-band (e.g. dashboard SQL editor), consistent with
 -- this repo's documented history of untracked remote-only migrations — not
--- something to "fix" here. These GRANTs exist ONLY so this local test can
--- exercise RLS at all (grants gate table access before RLS ever evaluates
--- rows); they are not part of, and do not belong in, migration 094 itself.
+-- something to "fix" here; flagged separately as a follow-up. These GRANTs
+-- exist ONLY so this local test can exercise RLS at all (grants gate table
+-- access before RLS ever evaluates rows); they are not part of, and do not
+-- belong in, migration 094 itself.
 GRANT SELECT ON life_journeys, trip_participants, trip_expenses, expense_splits,
   trip_payments, trip_itinerary_days, trip_itinerary_items, preorder_sessions,
   preorder_items TO authenticated;
+-- INSERT on trip_expenses only, so the write-path checks below prove RLS's
+-- WITH CHECK is what blocks the outsider — not a missing table grant.
+GRANT INSERT ON trip_expenses TO authenticated;
 
--- ── Assertion helper ─────────────────────────────────────────────────────────
--- Plain SECURITY INVOKER function: runs under whatever role/JWT the calling
--- session has active via SET LOCAL, so it sees exactly what that
--- impersonated user would see through RLS.
+-- ── Assertion helpers ────────────────────────────────────────────────────────
+-- Plain SECURITY INVOKER functions: run under whatever role/JWT the calling
+-- session has active via SET LOCAL, so they see/do exactly what that
+-- impersonated user would through RLS.
 CREATE OR REPLACE FUNCTION pg_temp.assert_visible(p_label text, p_sql text, p_expect_visible boolean)
 RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
@@ -110,6 +149,31 @@ BEGIN
   ELSE
     RAISE NOTICE 'PASS: %', p_label;
   END IF;
+END;
+$$;
+
+-- p_expect_allowed = true: the write must succeed (re-raises on failure).
+-- p_expect_allowed = false: the write must be rejected by RLS specifically
+-- (insufficient_privilege, i.e. "new row violates row-level security
+-- policy") — the implicit subtransaction PL/pgSQL creates around a block
+-- with an EXCEPTION clause absorbs the error without aborting the caller's
+-- outer BEGIN/COMMIT.
+CREATE OR REPLACE FUNCTION pg_temp.assert_write(p_label text, p_sql text, p_expect_allowed boolean)
+RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  EXECUTE p_sql;
+  IF p_expect_allowed THEN
+    RAISE NOTICE 'PASS: %', p_label;
+  ELSE
+    RAISE EXCEPTION 'FAIL: % — expected the write to be rejected, but it succeeded', p_label;
+  END IF;
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    IF p_expect_allowed THEN
+      RAISE EXCEPTION 'FAIL: % — expected the write to succeed, got: %', p_label, SQLERRM;
+    ELSE
+      RAISE NOTICE 'PASS: % (rejected: %)', p_label, SQLERRM;
+    END IF;
 END;
 $$;
 
@@ -133,7 +197,7 @@ SELECT pg_temp.assert_visible('owner sees preorder_sessions',    'SELECT count(*
 SELECT pg_temp.assert_visible('owner sees preorder_items',       'SELECT count(*) FROM preorder_items WHERE id = ''00000000-0000-0000-0000-0000000000fc''', true);
 COMMIT;
 
--- Active participant: must see everything too.
+-- Active participant: must see everything too, and can write a trip expense.
 BEGIN;
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claims = '{"sub":"00000000-0000-0000-0000-00000000000b","role":"authenticated"}';
@@ -145,11 +209,16 @@ SELECT pg_temp.assert_visible('participant sees trip_itinerary_days',  'SELECT c
 SELECT pg_temp.assert_visible('participant sees trip_itinerary_items', 'SELECT count(*) FROM trip_itinerary_items WHERE id = ''00000000-0000-0000-0000-0000000000fa''', true);
 SELECT pg_temp.assert_visible('participant sees preorder_sessions',    'SELECT count(*) FROM preorder_sessions WHERE journey_id = ''00000000-0000-0000-0000-0000000000f2''', true);
 SELECT pg_temp.assert_visible('participant sees preorder_items',       'SELECT count(*) FROM preorder_items WHERE id = ''00000000-0000-0000-0000-0000000000fc''', true);
+SELECT pg_temp.assert_write('participant can insert a trip_expenses row',
+  'INSERT INTO trip_expenses (id, journey_id, paid_by_id, title, amount, amount_base_currency) VALUES (''00000000-0000-0000-0000-0000000000fd'', ''00000000-0000-0000-0000-0000000000f2'', ''00000000-0000-0000-0000-0000000000f4'', ''Participant Write Test'', 10, 10)',
+  true);
 COMMIT;
 
--- Org-outsider: same org, never added to the trip — must see nothing. This
--- is the case that was BROKEN before this migration (org-scoped RLS let
--- them see everything); it's the core regression this whole plan exists to fix.
+-- Org-outsider: same org, never added to the trip — must see nothing, and
+-- must not be able to write a trip expense either (WITH CHECK, not just
+-- USING — FOR ALL policies reuse the USING expression for both). This is
+-- the case that was BROKEN before this migration (org-scoped RLS let them
+-- see everything); it's the core regression this whole plan exists to fix.
 BEGIN;
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claims = '{"sub":"00000000-0000-0000-0000-00000000000c","role":"authenticated"}';
@@ -161,6 +230,9 @@ SELECT pg_temp.assert_visible('outsider does NOT see trip_itinerary_days',  'SEL
 SELECT pg_temp.assert_visible('outsider does NOT see trip_itinerary_items', 'SELECT count(*) FROM trip_itinerary_items WHERE id = ''00000000-0000-0000-0000-0000000000fa''', false);
 SELECT pg_temp.assert_visible('outsider does NOT see preorder_sessions',    'SELECT count(*) FROM preorder_sessions WHERE journey_id = ''00000000-0000-0000-0000-0000000000f2''', false);
 SELECT pg_temp.assert_visible('outsider does NOT see preorder_items',       'SELECT count(*) FROM preorder_items WHERE id = ''00000000-0000-0000-0000-0000000000fc''', false);
+SELECT pg_temp.assert_write('outsider cannot insert a trip_expenses row',
+  'INSERT INTO trip_expenses (id, journey_id, paid_by_id, title, amount, amount_base_currency) VALUES (''00000000-0000-0000-0000-0000000000fe'', ''00000000-0000-0000-0000-0000000000f2'', ''00000000-0000-0000-0000-0000000000f4'', ''Outsider Write Test'', 10, 10)',
+  false);
 COMMIT;
 
 -- Departed participant: left_at is set — must see nothing (mirrors the
@@ -174,6 +246,27 @@ BEGIN;
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claims = '{"sub":"00000000-0000-0000-0000-00000000000d","role":"authenticated"}';
 SELECT pg_temp.assert_visible('departed participant does NOT see trip_participants', 'SELECT count(*) FROM trip_participants WHERE journey_id = ''00000000-0000-0000-0000-0000000000f2''', false);
+COMMIT;
+
+-- Outside-org participant: on the trip, but not a member of its
+-- organization — must see everything anyway. Proves participant status
+-- alone grants access, matching getTripAccess() and confirmed as intended
+-- (see the header comment in 094_trip_participant_scoped_rls.sql). This is
+-- the one place this migration is deliberately MORE permissive than the
+-- org-scoped policies it replaces, not just narrower — worth its own
+-- explicit, positive test rather than leaving it as an unexamined side
+-- effect of the other cases passing.
+BEGIN;
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims = '{"sub":"00000000-0000-0000-0000-00000000000e","role":"authenticated"}';
+SELECT pg_temp.assert_visible('outside-org participant sees trip_participants',    'SELECT count(*) FROM trip_participants WHERE journey_id = ''00000000-0000-0000-0000-0000000000f2''', true);
+SELECT pg_temp.assert_visible('outside-org participant sees trip_expenses',        'SELECT count(*) FROM trip_expenses WHERE journey_id = ''00000000-0000-0000-0000-0000000000f2''', true);
+SELECT pg_temp.assert_visible('outside-org participant sees expense_splits',       'SELECT count(*) FROM expense_splits WHERE id = ''00000000-0000-0000-0000-0000000000f7''', true);
+SELECT pg_temp.assert_visible('outside-org participant sees trip_payments',        'SELECT count(*) FROM trip_payments WHERE journey_id = ''00000000-0000-0000-0000-0000000000f2''', true);
+SELECT pg_temp.assert_visible('outside-org participant sees trip_itinerary_days',  'SELECT count(*) FROM trip_itinerary_days WHERE journey_id = ''00000000-0000-0000-0000-0000000000f2''', true);
+SELECT pg_temp.assert_visible('outside-org participant sees trip_itinerary_items', 'SELECT count(*) FROM trip_itinerary_items WHERE id = ''00000000-0000-0000-0000-0000000000fa''', true);
+SELECT pg_temp.assert_visible('outside-org participant sees preorder_sessions',    'SELECT count(*) FROM preorder_sessions WHERE journey_id = ''00000000-0000-0000-0000-0000000000f2''', true);
+SELECT pg_temp.assert_visible('outside-org participant sees preorder_items',       'SELECT count(*) FROM preorder_items WHERE id = ''00000000-0000-0000-0000-0000000000fc''', true);
 COMMIT;
 
 -- If every line above printed PASS with no FAIL/ERROR, and psql was invoked

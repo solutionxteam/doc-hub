@@ -13,6 +13,15 @@
 -- RLS-bound client instead: web/src/app/(app)/trips/page.tsx and
 -- web/src/app/(app)/trips/[id]/page.tsx. No application code changes.
 --
+-- This is intentionally NOT a strict narrowing of the old org-scoped
+-- policies: a trip participant who was invited as a Slippy friend (see
+-- web/src/app/api/trips/[id]/members/route.ts) but is not a member of the
+-- trip's owning organization now gains RLS-level access to that trip's data,
+-- matching what getTripAccess() already granted them at the API layer. A
+-- trip is meant to be visible to whoever is actually on it, not gated by
+-- organization membership — verified in
+-- supabase/tests/094_trip_participant_scoped_rls.test.sql.
+--
 -- life_journeys itself is deliberately NOT touched here — it's shared with
 -- the unrelated Life Graph feature (web/src/app/(app)/life/journey/page.tsx),
 -- which intentionally lists every org journey regardless of trip
@@ -26,6 +35,12 @@
 
 -- ── Helper function ──────────────────────────────────────────────────────────
 -- Mirrors the is_conversation_member() pattern from 055_recent_features_security.sql.
+-- SECURITY DEFINER is load-bearing, not just a hardening default: the
+-- tp_participant policy below (on trip_participants) calls this function,
+-- which itself reads trip_participants. Without SECURITY DEFINER, that read
+-- would re-trigger the calling policy and recurse. It only doesn't because
+-- the function runs as its owner, who bypasses RLS as the table owner — this
+-- breaks if trip_participants is ever put under FORCE ROW LEVEL SECURITY.
 CREATE OR REPLACE FUNCTION public.is_trip_participant(p_journey_id uuid)
 RETURNS boolean
 LANGUAGE sql
@@ -47,25 +62,25 @@ GRANT EXECUTE ON FUNCTION public.is_trip_participant(uuid) TO authenticated;
 
 -- ── Direct journey_id tables (1 hop) ─────────────────────────────────────────
 DROP POLICY IF EXISTS "tp_org_member" ON trip_participants;
-CREATE POLICY "tp_participant" ON trip_participants FOR ALL USING (is_trip_participant(journey_id));
+CREATE POLICY "tp_participant" ON trip_participants FOR ALL TO authenticated USING (is_trip_participant(journey_id));
 
 DROP POLICY IF EXISTS "te_org_member" ON trip_expenses;
-CREATE POLICY "te_participant" ON trip_expenses FOR ALL USING (is_trip_participant(journey_id));
+CREATE POLICY "te_participant" ON trip_expenses FOR ALL TO authenticated USING (is_trip_participant(journey_id));
 
 DROP POLICY IF EXISTS "tpay_org_member" ON trip_payments;
-CREATE POLICY "tpay_participant" ON trip_payments FOR ALL USING (is_trip_participant(journey_id));
+CREATE POLICY "tpay_participant" ON trip_payments FOR ALL TO authenticated USING (is_trip_participant(journey_id));
 
 DROP POLICY IF EXISTS "preorder_sessions_org_member" ON preorder_sessions;
-CREATE POLICY "preorder_sessions_participant" ON preorder_sessions FOR ALL USING (is_trip_participant(journey_id));
+CREATE POLICY "preorder_sessions_participant" ON preorder_sessions FOR ALL TO authenticated USING (is_trip_participant(journey_id));
 
 -- ── 2-hop tables ──────────────────────────────────────────────────────────────
 DROP POLICY IF EXISTS "es_org_member" ON expense_splits;
-CREATE POLICY "es_participant" ON expense_splits FOR ALL USING (
+CREATE POLICY "es_participant" ON expense_splits FOR ALL TO authenticated USING (
   is_trip_participant((SELECT journey_id FROM trip_expenses WHERE id = expense_splits.expense_id))
 );
 
 DROP POLICY IF EXISTS "preorder_items_org_member" ON preorder_items;
-CREATE POLICY "preorder_items_participant" ON preorder_items FOR ALL USING (
+CREATE POLICY "preorder_items_participant" ON preorder_items FOR ALL TO authenticated USING (
   is_trip_participant((SELECT journey_id FROM preorder_sessions WHERE id = preorder_items.session_id))
 );
 
@@ -81,6 +96,14 @@ CREATE POLICY "preorder_items_participant" ON preorder_items FOR ALL USING (
 -- do, their access is preserved via an OR-branch in the new single policy
 -- rather than silently orphaning that data. Either way, the result is one
 -- policy per table instead of two overlapping ones.
+--
+-- Both branches are exercised in this repo's own history, not just the
+-- IF branch: verified locally by seeding a trip_itinerary_days row with
+-- split_bill_id set and journey_id NULL before running this migration,
+-- confirming the ELSE branch's CREATE POLICY statements parse and that a
+-- same-org, non-participant user retains access to that legacy row while a
+-- different-org user does not (see the local verification note in this
+-- migration's commit message).
 DO $$
 DECLARE
   legacy_days_count  int;
@@ -105,26 +128,26 @@ BEGIN
   IF legacy_days_count = 0 AND legacy_items_count = 0 THEN
     RAISE NOTICE 'No rows depend on the legacy split_bill_id path — dropping it cleanly.';
 
-    EXECUTE 'CREATE POLICY "tid_participant" ON trip_itinerary_days FOR ALL USING (
+    CREATE POLICY "tid_participant" ON trip_itinerary_days FOR ALL TO authenticated USING (
       journey_id IS NOT NULL AND is_trip_participant(journey_id)
-    )';
+    );
 
-    EXECUTE 'CREATE POLICY "tii_participant" ON trip_itinerary_items FOR ALL USING (
+    CREATE POLICY "tii_participant" ON trip_itinerary_items FOR ALL TO authenticated USING (
       is_trip_participant((SELECT journey_id FROM trip_itinerary_days WHERE id = trip_itinerary_items.day_id))
-    )';
+    );
   ELSE
     RAISE NOTICE 'Found % legacy day row(s) and % legacy item row(s) still on split_bill_id — preserving their access.', legacy_days_count, legacy_items_count;
 
-    EXECUTE 'CREATE POLICY "tid_participant" ON trip_itinerary_days FOR ALL USING (
+    CREATE POLICY "tid_participant" ON trip_itinerary_days FOR ALL TO authenticated USING (
       (journey_id IS NOT NULL AND is_trip_participant(journey_id))
       OR (split_bill_id IS NOT NULL AND split_bill_id IN (
         SELECT b.id FROM split_bills b
         JOIN organization_members om ON om.organization_id = b.organization_id
         WHERE om.user_id = auth.uid()
       ))
-    )';
+    );
 
-    EXECUTE 'CREATE POLICY "tii_participant" ON trip_itinerary_items FOR ALL USING (
+    CREATE POLICY "tii_participant" ON trip_itinerary_items FOR ALL TO authenticated USING (
       day_id IN (
         SELECT id FROM trip_itinerary_days d WHERE
           (d.journey_id IS NOT NULL AND is_trip_participant(d.journey_id))
@@ -134,6 +157,6 @@ BEGIN
             WHERE om.user_id = auth.uid()
           ))
       )
-    )';
+    );
   END IF;
 END $$;
