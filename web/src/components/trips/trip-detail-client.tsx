@@ -1,13 +1,16 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { COMMON_CURRENCIES } from "@/lib/exchange-rates"
+import { TripMembersPanel } from "./trip-members-panel"
 import {
   ArrowLeft, Plus, Check, X, Copy, ExternalLink,
   Receipt, Users, ChevronDown, ChevronUp, Loader2,
   QrCode, AlertCircle, DollarSign, Clock, CheckCircle2,
+  MapPin, Utensils, Car, Hotel, Ticket, Pin, Calendar, ShoppingBag, Lock,
 } from "lucide-react"
 
 type Participant = {
@@ -18,9 +21,14 @@ type Participant = {
 }
 type Expense = {
   id: string; title: string; amount: number; category: string | null
-  split_mode: string; note: string | null; expense_date: string; paid_by_id: string
+  split_mode: string; split_values?: Record<string, number>
+  note: string | null; expense_date: string; paid_by_id: string
   trip_participants: { id: string; display_name: string }
   expense_splits: Array<{ participant_id: string; amount: number; is_paid: boolean }>
+  currency?: string; exchange_rate?: number; amount_base_currency?: number; rate_is_manual?: boolean
+}
+const SPLIT_MODE_DISPLAY: Record<string, string> = {
+  equal: "เท่ากัน", individual: "ตามจำนวนที่ระบุ", percent: "ตามเปอร์เซ็นต์", shares: "ตามจำนวนหุ้น", exclude: "เท่ากัน (บางคน)",
 }
 type Payment = {
   id: string; from_participant: string; to_participant: string
@@ -32,10 +40,35 @@ type Settlement = { from_name: string; to_name: string; amount: number; from_id:
 const fmtTHB  = (n: number) => "฿" + Number(n).toLocaleString("th-TH", { maximumFractionDigits: 0 })
 const fmtDate = (d: string) => new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short" })
 const CAT_EMOJI: Record<string, string> = { food: "🍽️", transport: "🚗", accommodation: "🏨", activity: "🎯", other: "💰" }
+/** Formats an amount in an arbitrary currency (not just THB) — used for a
+ * trip expense's original entered amount before conversion. */
+const fmtCcy = (n: number, ccy: string) =>
+  `${Number(n).toLocaleString("th-TH", { maximumFractionDigits: 2 })} ${ccy}`
 
 /* ─── Add Expense Modal ─────────────────────────────────────────────────────── */
-function AddExpenseModal({ tripId, participants, onClose, onAdd }: {
-  tripId: string; participants: Participant[]
+type SplitMode = "equal" | "individual" | "percent" | "shares"
+const SPLIT_MODE_LABEL: Record<SplitMode, string> = {
+  equal: "หารเท่ากัน", individual: "ระบุจำนวนเอง", percent: "ระบุเปอร์เซ็นต์", shares: "ตามจำนวนหุ้น",
+}
+type IntervalUnit = "weekly" | "monthly" | "yearly"
+const INTERVAL_LABEL: Record<IntervalUnit, string> = {
+  weekly: "ทุกสัปดาห์", monthly: "ทุกเดือน", yearly: "ทุกปี",
+}
+
+/** +1 interval on a YYYY-MM-DD string — used so "recurring starting today"
+ * schedules the NEXT auto-generated occurrence one period out, since the
+ * first occurrence is created immediately below (same as a normal expense),
+ * not left for the cron to pick up. */
+function addIntervalClient(dateStr: string, unit: IntervalUnit): string {
+  const d = new Date(dateStr + "T00:00:00")
+  if (unit === "weekly")  d.setDate(d.getDate() + 7)
+  if (unit === "monthly") d.setMonth(d.getMonth() + 1)
+  if (unit === "yearly")  d.setFullYear(d.getFullYear() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+function AddExpenseModal({ tripId, baseCurrency, participants, onClose, onAdd }: {
+  tripId: string; baseCurrency: string; participants: Participant[]
   onClose: () => void; onAdd: (e: Expense) => void
 }) {
   const [title,    setTitle]    = useState("")
@@ -43,27 +76,121 @@ function AddExpenseModal({ tripId, participants, onClose, onAdd }: {
   const [paidBy,   setPaidBy]   = useState(participants.find(p => p.is_host)?.id ?? participants[0]?.id ?? "")
   const [category, setCategory] = useState("food")
   const [note,     setNote]     = useState("")
-  const [splitMode,setSplitMode]= useState<"equal"|"individual">("equal")
+  const [splitMode, setSplitMode] = useState<SplitMode>("equal")
+  const [included,  setIncluded] = useState<Set<string>>(new Set(participants.map(p => p.id)))
+  // Raw per-person input for individual/percent/shares — keyed by participant id
+  const [values,    setValues]   = useState<Record<string, string>>({})
   const [saving,   setSaving]   = useState(false)
+  const [isRecurring, setIsRecurring] = useState(false)
+  const [intervalUnit, setIntervalUnit] = useState<IntervalUnit>("monthly")
+  const [endDate,      setEndDate]      = useState("")
+  const [expenseDate,  setExpenseDate]  = useState(() => new Date().toISOString().slice(0, 10))
+  const [currency,     setCurrency]     = useState(baseCurrency)
+  const [autoRate,     setAutoRate]     = useState<number | null>(null)
+  const [rateLoading,  setRateLoading]  = useState(false)
+  const [manualRate,   setManualRate]   = useState("")
+
+  const isForeign = currency !== baseCurrency
+  const effectiveRate = isForeign ? (manualRate ? Number(manualRate) : autoRate) : 1
+
+  // Fetch the historical rate whenever currency/date changes, for preview —
+  // the actual save still resolves it server-side (this is just so the user
+  // sees what will be used before submitting, and can override it).
+  useEffect(() => {
+    if (!isForeign) { setAutoRate(null); return }
+    let cancelled = false
+    setRateLoading(true)
+    fetch(`https://api.frankfurter.dev/v1/${expenseDate}?base=${currency}&symbols=${baseCurrency}`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setAutoRate(d?.rates?.[baseCurrency] ?? null) })
+      .catch(() => { if (!cancelled) setAutoRate(null) })
+      .finally(() => { if (!cancelled) setRateLoading(false) })
+    return () => { cancelled = true }
+  }, [currency, expenseDate, isForeign, baseCurrency])
+
+  const includedList = participants.filter(p => included.has(p.id))
+  const amountNum = Number(amount) || 0
+  const amountInBase = effectiveRate ? Math.round(amountNum * effectiveRate * 100) / 100 : amountNum
+
+  const toggleIncluded = (pid: string) => {
+    setIncluded(prev => {
+      const next = new Set(prev)
+      if (next.has(pid)) next.delete(pid); else next.add(pid)
+      return next
+    })
+  }
+
+  // Live total for individual/percent/shares — lets the user see if they're
+  // off before submitting, instead of only finding out from a server error.
+  const valuesSum = includedList.reduce((s, p) => s + (Number(values[p.id]) || 0), 0)
+  const valuesHint =
+    splitMode === "individual" ? `รวม ${valuesSum.toFixed(2)} / ${amountNum.toFixed(2)} ${currency}`
+  : splitMode === "percent"    ? `รวม ${valuesSum}% / 100%`
+  : splitMode === "shares"     ? `รวม ${valuesSum} หุ้น`
+  : null
 
   const handleAdd = async () => {
     if (!title.trim() || !amount) { toast.error("กรอกชื่อรายการและจำนวนเงิน"); return }
+    if (includedList.length === 0) { toast.error("เลือกคนที่ร่วมจ่ายอย่างน้อย 1 คน"); return }
+    if (isForeign && !effectiveRate) { toast.error("ยังไม่มีอัตราแลกเปลี่ยน — รอสักครู่หรือระบุอัตราเอง"); return }
+
+    // "individual" amounts are entered in the same currency the user is
+    // thinking in (`currency`), but resolveExpenseSplits validates against
+    // the base-currency total server-side — convert here so a JPY receipt
+    // split by exact amounts still adds up correctly after conversion.
+    const split_values = splitMode === "equal"
+      ? {}
+      : Object.fromEntries(includedList.map(p => {
+          const raw = Number(values[p.id]) || 0
+          const converted = splitMode === "individual" && isForeign ? raw * (effectiveRate ?? 1) : raw
+          return [p.id, converted]
+        }))
+
     setSaving(true)
     try {
       const res = await fetch(`/api/trips/${tripId}/expenses`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, amount: Number(amount), paid_by_id: paidBy, category, note: note || null, split_mode: splitMode }),
+        body: JSON.stringify({
+          title, amount: amountNum, paid_by_id: paidBy, category, note: note || null,
+          split_mode: splitMode, split_with: includedList.map(p => p.id), split_values,
+          expense_date: expenseDate, currency,
+          exchange_rate: manualRate ? Number(manualRate) : undefined,
+        }),
       })
-      if (!res.ok) throw new Error()
-      toast.success("เพิ่มรายจ่ายแล้ว")
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error) }
+
+      // Recurring: this call created the FIRST occurrence above (so the
+      // user sees it immediately, same as a one-off expense) — the
+      // template's next_run_date starts one interval later, since the cron
+      // only needs to generate the second occurrence onward.
+      if (isRecurring) {
+        const today = new Date().toISOString().slice(0, 10)
+        const recRes = await fetch("/api/trips/recurring", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            journeyId: tripId, paidById: paidBy, title, amount: amountNum, category,
+            splitMode, splitValues: split_values,
+            intervalUnit, startDate: addIntervalClient(today, intervalUnit),
+            endDate: endDate || null,
+          }),
+        })
+        if (!recRes.ok) {
+          const d = await recRes.json().catch(() => ({}))
+          toast.error(`เพิ่มรายจ่ายแล้ว แต่ตั้งเป็นรายจ่ายประจำไม่สำเร็จ: ${d.error ?? "unknown"}`)
+        }
+      }
+
+      toast.success(isRecurring ? "เพิ่มรายจ่ายประจำแล้ว" : "เพิ่มรายจ่ายแล้ว")
       window.location.reload()
-    } catch { toast.error("เกิดข้อผิดพลาด") } finally { setSaving(false) }
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "เกิดข้อผิดพลาด")
+    } finally { setSaving(false) }
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-card border rounded-[16px] shadow-2xl w-full max-w-md">
+      <div className="relative bg-card border rounded-[16px] shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-[17px] font-semibold">เพิ่มค่าใช้จ่าย</h3>
@@ -76,9 +203,15 @@ function AddExpenseModal({ tripId, participants, onClose, onAdd }: {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">จำนวน (บาท) *</label>
-              <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0"
-                className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+              <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">จำนวน *</label>
+              <div className="flex gap-1.5">
+                <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0"
+                  className="flex-1 h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500 min-w-0" />
+                <select value={currency} onChange={e => setCurrency(e.target.value)}
+                  className="w-[76px] h-9 rounded-[8px] border bg-background px-1.5 text-[12.5px] outline-none focus:border-brand-500">
+                  {COMMON_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
             </div>
             <div>
               <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">หมวด</label>
@@ -88,22 +221,125 @@ function AddExpenseModal({ tripId, participants, onClose, onAdd }: {
               </select>
             </div>
           </div>
+
           <div>
-            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">ใครจ่ายก่อน</label>
+            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">วันที่เกิดค่าใช้จ่าย</label>
+            <input type="date" value={expenseDate} onChange={e => setExpenseDate(e.target.value)}
+              className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+
+          {isForeign && (
+            <div className="rounded-[10px] border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between text-[12.5px]">
+                <span className="text-muted-foreground">อัตราแลกเปลี่ยน (1 {currency} =)</span>
+                {rateLoading
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+                  : <span className="font-semibold">{autoRate ? `${autoRate.toFixed(4)} ${baseCurrency}` : "ไม่พบ — ระบุเอง"}</span>}
+              </div>
+              <div>
+                <label className="text-[11px] text-muted-foreground block mb-1">ระบุอัตราเอง (ไม่บังคับ — เช่น เรทที่บัตรคิดจริง)</label>
+                <input type="number" step="0.0001" value={manualRate} onChange={e => setManualRate(e.target.value)}
+                  placeholder={autoRate ? String(autoRate) : "เช่น 0.245"}
+                  className="w-full h-8 rounded-[8px] border bg-background px-2 text-[12.5px] outline-none focus:border-brand-500" />
+              </div>
+              {!!amountNum && !!effectiveRate && (
+                <p className="text-[12px] text-muted-foreground">
+                  ≈ {fmtCcy(amountInBase, baseCurrency)} {manualRate ? "(อัตราที่ระบุเอง)" : "(อัตราวันที่เกิดค่าใช้จ่าย)"}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div>
+            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">บิลนี้ใครออกก่อน</label>
             <select value={paidBy} onChange={e => setPaidBy(e.target.value)}
               className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500">
               {participants.map(p => <option key={p.id} value={p.id}>{p.display_name}{p.is_host ? " (เจ้าภาพ)" : ""}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            {[{ id: "equal", label: "หารเท่า" }, { id: "individual", label: "ตามจริง" }].map(m => (
-              <button key={m.id} onClick={() => setSplitMode(m.id as any)}
-                className={cn("h-9 rounded-[8px] border text-sm font-medium transition-colors",
-                  splitMode === m.id ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-600" : "hover:bg-muted/50")}>
-                {m.label}
-              </button>
-            ))}
+
+          <div>
+            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1.5">หารกันแบบไหน</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(Object.keys(SPLIT_MODE_LABEL) as SplitMode[]).map(m => (
+                <button key={m} onClick={() => setSplitMode(m)}
+                  className={cn("h-9 rounded-[8px] border text-sm font-medium transition-colors",
+                    splitMode === m ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-600" : "hover:bg-muted/50")}>
+                  {SPLIT_MODE_LABEL[m]}
+                </button>
+              ))}
+            </div>
           </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[11.5px] font-medium text-muted-foreground">ใครร่วมจ่ายบิลนี้</label>
+              {valuesHint && <span className="text-[11px] text-muted-foreground">{valuesHint}</span>}
+            </div>
+            <div className="space-y-1.5 max-h-[220px] overflow-y-auto rounded-[10px] border p-2">
+              {participants.map(p => {
+                const isIn = included.has(p.id)
+                return (
+                  <div key={p.id} className="flex items-center gap-2">
+                    <button onClick={() => toggleIncluded(p.id)}
+                      className={cn("h-7 w-7 rounded-md border flex items-center justify-center shrink-0 transition-colors",
+                        isIn ? "bg-brand-500 border-brand-500 text-white" : "hover:bg-muted/50")}>
+                      {isIn && <Check className="w-3.5 h-3.5" />}
+                    </button>
+                    <span className={cn("flex-1 text-sm", !isIn && "text-muted-foreground")}>{p.display_name}</span>
+                    {isIn && splitMode !== "equal" && (
+                      <input
+                        type="number"
+                        value={values[p.id] ?? ""}
+                        onChange={e => setValues(v => ({ ...v, [p.id]: e.target.value }))}
+                        placeholder={splitMode === "individual" ? "บาท" : splitMode === "percent" ? "%" : "หุ้น"}
+                        className="w-20 h-8 rounded-[6px] border bg-background px-2 text-sm text-right outline-none focus:border-brand-500"
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">หมายเหตุ (ไม่บังคับ)</label>
+            <input value={note} onChange={e => setNote(e.target.value)} placeholder="..."
+              className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+
+          <div className="rounded-[10px] border p-3">
+            <button onClick={() => setIsRecurring(v => !v)} className="flex items-center gap-2 w-full">
+              <div className={cn("h-5 w-5 rounded-md border flex items-center justify-center shrink-0 transition-colors",
+                isRecurring ? "bg-brand-500 border-brand-500 text-white" : "hover:bg-muted/50")}>
+                {isRecurring && <Check className="w-3.5 h-3.5" />}
+              </div>
+              <span className="text-sm font-medium flex-1 text-left">ทำเป็นรายจ่ายประจำ</span>
+              <Clock className="w-4 h-4 text-muted-foreground" />
+            </button>
+            {isRecurring && (
+              <div className="mt-3 space-y-2.5 pl-7">
+                <div className="grid grid-cols-3 gap-2">
+                  {(Object.keys(INTERVAL_LABEL) as IntervalUnit[]).map(u => (
+                    <button key={u} onClick={() => setIntervalUnit(u)}
+                      className={cn("h-8 rounded-[8px] border text-[12.5px] font-medium transition-colors",
+                        intervalUnit === u ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-600" : "hover:bg-muted/50")}>
+                      {INTERVAL_LABEL[u]}
+                    </button>
+                  ))}
+                </div>
+                <div>
+                  <label className="text-[11px] text-muted-foreground block mb-1">สิ้นสุด (ไม่บังคับ — ไม่ใส่ = ทำซ้ำไปเรื่อยๆ)</label>
+                  <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+                    className="w-full h-8 rounded-[8px] border bg-background px-2 text-[12.5px] outline-none focus:border-brand-500" />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  ระบบจะสร้างรายจ่ายนี้ให้อัตโนมัติ{INTERVAL_LABEL[intervalUnit]} เริ่มรอบถัดไป
+                </p>
+              </div>
+            )}
+          </div>
+
           <div className="flex gap-2">
             <button onClick={onClose} className="flex-1 h-10 rounded-[10px] border text-sm font-medium hover:bg-muted">ยกเลิก</button>
             <button onClick={handleAdd} disabled={saving}
@@ -187,6 +423,660 @@ function PaymentModal({ tripId, from, to, amount, onClose, onPaid }: {
   )
 }
 
+/* ─── Itinerary panel ────────────────────────────────────────────────────────── */
+type ItineraryItem = {
+  id: string; sort_order: number; type: string; title: string
+  location: string | null; notes: string | null; amount: number | null
+  time_from: string | null; time_to: string | null
+}
+type ItineraryDay = { id: string; dayNumber: number; date: string | null; title: string | null; items: ItineraryItem[] }
+
+const ITEM_TYPE_META: Record<string, { label: string; icon: typeof MapPin; color: string }> = {
+  activity:  { label: "กิจกรรม",   icon: Pin,         color: "text-violet-600 bg-violet-50 dark:bg-violet-500/10" },
+  meal:      { label: "มื้ออาหาร", icon: Utensils,    color: "text-orange-600 bg-orange-50 dark:bg-orange-500/10" },
+  transport: { label: "เดินทาง",   icon: Car,         color: "text-blue-600 bg-blue-50 dark:bg-blue-500/10" },
+  hotel:     { label: "ที่พัก",    icon: Hotel,       color: "text-indigo-600 bg-indigo-50 dark:bg-indigo-500/10" },
+  booking:   { label: "การจอง",    icon: Ticket,      color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10" },
+  other:     { label: "อื่นๆ",     icon: MapPin,      color: "text-muted-foreground bg-muted" },
+}
+
+function ItineraryPanel({ tripId }: { tripId: string }) {
+  const [days, setDays] = useState<ItineraryDay[] | null>(null)
+  const [showAddDay, setShowAddDay] = useState(false)
+  const [addItemDayId, setAddItemDayId] = useState<string | null>(null)
+
+  const load = () => {
+    fetch(`/api/trips/${tripId}/itinerary`)
+      .then(r => r.json())
+      .then(d => setDays(d.days ?? []))
+      .catch(() => setDays([]))
+  }
+  useEffect(load, [tripId])
+
+  const removeDay = async (dayId: string) => {
+    if (!confirm("ลบวันนี้ทั้งวัน พร้อมกิจกรรมทั้งหมดในนั้น?")) return
+    await fetch(`/api/trips/${tripId}/itinerary`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "remove_day", dayId }),
+    })
+    load()
+  }
+
+  const removeItem = async (itemId: string) => {
+    await fetch(`/api/trips/${tripId}/itinerary`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "remove_item", itemId }),
+    })
+    load()
+  }
+
+  if (days === null) return <div className="text-center py-10 text-sm text-muted-foreground">กำลังโหลด...</div>
+
+  return (
+    <div className="space-y-4">
+      {days.length === 0 && (
+        <div className="rounded-xl border bg-card py-12 text-center">
+          <Calendar className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+          <p className="font-medium">ยังไม่มีแผนการเดินทาง</p>
+          <p className="text-[12.5px] text-muted-foreground mt-1">เพิ่มวันแล้วใส่กิจกรรม ร้านอาหาร ที่พัก ทีละวันได้เลย</p>
+        </div>
+      )}
+
+      {days.map(day => (
+        <div key={day.id} className="rounded-xl border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 bg-muted/30 border-b">
+            <div>
+              <p className="font-semibold text-sm">{day.title || `วันที่ ${day.dayNumber}`}</p>
+              {day.date && <p className="text-[11.5px] text-muted-foreground">{fmtDate(day.date)}</p>}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setAddItemDayId(day.id)}
+                className="h-7 px-2.5 rounded-[7px] bg-brand-500 hover:bg-brand-600 text-white text-[11.5px] font-medium flex items-center gap-1">
+                <Plus className="w-3 h-3" /> กิจกรรม
+              </button>
+              <button onClick={() => removeDay(day.id)} className="h-7 w-7 rounded-[7px] hover:bg-muted flex items-center justify-center text-muted-foreground">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {day.items.length === 0 ? (
+            <p className="text-[12.5px] text-muted-foreground px-4 py-4 text-center">ยังไม่มีกิจกรรมในวันนี้</p>
+          ) : (
+            <div className="divide-y">
+              {day.items.map(item => {
+                const meta = ITEM_TYPE_META[item.type] ?? ITEM_TYPE_META.other
+                const Icon = meta.icon
+                return (
+                  <div key={item.id} className="flex items-start gap-3 px-4 py-3 group">
+                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", meta.color)}>
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm">{item.title}</p>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11.5px] text-muted-foreground mt-0.5">
+                        {(item.time_from || item.time_to) && (
+                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{item.time_from?.slice(0, 5)}{item.time_to ? `–${item.time_to.slice(0, 5)}` : ""}</span>
+                        )}
+                        {item.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{item.location}</span>}
+                        {item.amount != null && <span>{fmtTHB(item.amount)}</span>}
+                      </div>
+                      {item.notes && <p className="text-[11.5px] text-muted-foreground mt-1">{item.notes}</p>}
+                    </div>
+                    <button onClick={() => removeItem(item.id)}
+                      className="h-6 w-6 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      ))}
+
+      <button onClick={() => setShowAddDay(true)}
+        className="w-full h-11 rounded-xl border border-dashed text-sm font-medium text-muted-foreground hover:text-foreground hover:border-brand-500 transition-colors flex items-center justify-center gap-1.5">
+        <Plus className="w-4 h-4" /> เพิ่มวัน
+      </button>
+
+      {showAddDay && (
+        <AddDayModal tripId={tripId} onClose={() => setShowAddDay(false)} onDone={() => { setShowAddDay(false); load() }} />
+      )}
+      {addItemDayId && (
+        <AddItineraryItemModal tripId={tripId} dayId={addItemDayId}
+          onClose={() => setAddItemDayId(null)} onDone={() => { setAddItemDayId(null); load() }} />
+      )}
+    </div>
+  )
+}
+
+function AddDayModal({ tripId, onClose, onDone }: { tripId: string; onClose: () => void; onDone: () => void }) {
+  const [title, setTitle] = useState("")
+  const [date,  setDate]  = useState("")
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/trips/${tripId}/itinerary`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add_day", title: title || undefined, date: date || undefined }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error)
+      onDone()
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "เพิ่มวันไม่สำเร็จ")
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-card border rounded-[16px] shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[16px] font-semibold">เพิ่มวัน</h3>
+          <button onClick={onClose} className="h-7 w-7 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground"><X className="w-4 h-4" /></button>
+        </div>
+        <div>
+          <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">ชื่อวัน (ไม่บังคับ)</label>
+          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="เช่น วันแรก, ไปเกียวโต"
+            className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+        </div>
+        <div>
+          <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">วันที่ (ไม่บังคับ)</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
+            className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 h-10 rounded-[10px] border text-sm font-medium hover:bg-muted">ยกเลิก</button>
+          <button onClick={submit} disabled={saving}
+            className="flex-1 h-10 rounded-[10px] bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold disabled:opacity-60 inline-flex items-center justify-center gap-2">
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} เพิ่ม
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AddItineraryItemModal({ tripId, dayId, onClose, onDone }: {
+  tripId: string; dayId: string; onClose: () => void; onDone: () => void
+}) {
+  const [type, setType] = useState("activity")
+  const [title, setTitle] = useState("")
+  const [location, setLocation] = useState("")
+  const [timeFrom, setTimeFrom] = useState("")
+  const [timeTo, setTimeTo] = useState("")
+  const [amount, setAmount] = useState("")
+  const [notes, setNotes] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    if (!title.trim()) { toast.error("กรอกชื่อกิจกรรม"); return }
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/trips/${tripId}/itinerary`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_item", dayId, type, title,
+          location: location || undefined, notes: notes || undefined,
+          amount: amount ? Number(amount) : undefined,
+          timeFrom: timeFrom || undefined, timeTo: timeTo || undefined,
+        }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error)
+      onDone()
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "เพิ่มกิจกรรมไม่สำเร็จ")
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-card border rounded-[16px] shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[17px] font-semibold">เพิ่มกิจกรรม</h3>
+            <button onClick={onClose} className="h-8 w-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground"><X className="w-4 h-4" /></button>
+          </div>
+
+          <div>
+            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1.5">ประเภท</label>
+            <div className="grid grid-cols-3 gap-2">
+              {Object.entries(ITEM_TYPE_META).map(([k, meta]) => {
+                const Icon = meta.icon
+                return (
+                  <button key={k} onClick={() => setType(k)}
+                    className={cn("h-16 rounded-[10px] border flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors",
+                      type === k ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-600" : "hover:bg-muted/50")}>
+                    <Icon className="w-4 h-4" /> {meta.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">ชื่อ *</label>
+            <input value={title} onChange={e => setTitle(e.target.value)} placeholder="เช่น วัดอาซากุสะ, ร้านราเมงอิจิรัน"
+              className="w-full h-10 rounded-[10px] border bg-background px-3 text-sm outline-none focus:border-brand-500" />
+          </div>
+
+          <div>
+            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">สถานที่ (ไม่บังคับ)</label>
+            <input value={location} onChange={e => setLocation(e.target.value)} placeholder="ที่อยู่หรือชื่อสถานที่"
+              className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">เวลาเริ่ม</label>
+              <input type="time" value={timeFrom} onChange={e => setTimeFrom(e.target.value)}
+                className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+            </div>
+            <div>
+              <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">เวลาสิ้นสุด</label>
+              <input type="time" value={timeTo} onChange={e => setTimeTo(e.target.value)}
+                className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">ค่าใช้จ่ายโดยประมาณ (ไม่บังคับ)</label>
+            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0"
+              className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+            <p className="text-[11px] text-muted-foreground mt-1">แค่บันทึกไว้ดู ไม่ได้เข้าไปในยอดหารบิลอัตโนมัติ — เพิ่มเป็นรายจ่ายจริงได้ที่แท็บ &quot;รายจ่าย&quot;</p>
+          </div>
+
+          <div>
+            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">โน้ต (ไม่บังคับ)</label>
+            <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="..."
+              className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={onClose} className="flex-1 h-10 rounded-[10px] border text-sm font-medium hover:bg-muted">ยกเลิก</button>
+            <button onClick={submit} disabled={saving}
+              className="flex-1 h-10 rounded-[10px] bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold disabled:opacity-60 inline-flex items-center justify-center gap-2">
+              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} เพิ่ม
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Pre-order panel ────────────────────────────────────────────────────────── */
+type PreorderItemRow = { id: string; participant_id: string; name: string; price: number; qty: number; note: string | null }
+type PreorderSession = {
+  id: string; title: string; kind: "food" | "shopping"; status: "open" | "closed" | "cancelled"
+  created_at: string; closed_at: string | null
+  paid_by: { id: string; display_name: string } | null
+  preorder_items: PreorderItemRow[]
+}
+
+function PreorderPanel({ tripId, participants }: { tripId: string; participants: Participant[] }) {
+  const [sessions, setSessions] = useState<PreorderSession[] | null>(null)
+  const [showNew, setShowNew] = useState(false)
+  const [openSessionId, setOpenSessionId] = useState<string | null>(null)
+
+  const load = () => {
+    fetch(`/api/trips/${tripId}/preorder`)
+      .then(r => r.json())
+      .then(d => setSessions(d.sessions ?? []))
+      .catch(() => setSessions([]))
+  }
+  useEffect(load, [tripId])
+
+  if (sessions === null) return <div className="text-center py-10 text-sm text-muted-foreground">กำลังโหลด...</div>
+
+  const openSession = sessions.find(s => s.id === openSessionId)
+  if (openSession) {
+    return (
+      <PreorderSessionDetail
+        tripId={tripId} sessionId={openSession.id} participants={participants}
+        onBack={() => { setOpenSessionId(null); load() }}
+      />
+    )
+  }
+
+  const KIND_LABEL = { food: "🍽️ สั่งอาหาร", shopping: "🛍️ ซื้อของ/Pre-order" }
+  const STATUS_BADGE: Record<PreorderSession["status"], string> = {
+    open: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10",
+    closed: "bg-muted text-muted-foreground",
+    cancelled: "bg-red-50 text-red-600 dark:bg-red-500/10",
+  }
+  const STATUS_LABEL: Record<PreorderSession["status"], string> = { open: "เปิดรับออเดอร์", closed: "ปิดแล้ว", cancelled: "ยกเลิก" }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-500/5 dark:to-orange-500/5 p-4">
+        <p className="text-sm font-medium mb-1">สั่งอาหารหรือซื้อของเป็นกลุ่ม</p>
+        <p className="text-[12.5px] text-muted-foreground mb-3">แต่ละคนเพิ่มรายการของตัวเอง ระบบรวมยอดให้อัตโนมัติเมื่อปิดรับออเดอร์ — ไม่ต้องนั่งคิดเองว่าใครสั่งอะไร</p>
+        <button onClick={() => setShowNew(true)}
+          className="h-9 px-4 rounded-[9px] bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium flex items-center gap-1.5">
+          <Plus className="w-4 h-4" /> เปิดรับออเดอร์ใหม่
+        </button>
+      </div>
+
+      {sessions.length === 0 ? (
+        <div className="rounded-xl border bg-card py-10 text-center text-sm text-muted-foreground">ยังไม่มีรอบสั่งของ</div>
+      ) : sessions.map(s => {
+        const total = s.preorder_items.reduce((sum, it) => sum + Number(it.price) * it.qty, 0)
+        const orderersCount = new Set(s.preorder_items.map(it => it.participant_id)).size
+        return (
+          <button key={s.id} onClick={() => setOpenSessionId(s.id)}
+            className="w-full rounded-xl border bg-card p-4 flex items-center gap-3 text-left hover:bg-muted/20 transition-colors">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="font-medium text-sm truncate">{s.title}</p>
+                <span className={cn("text-[10.5px] font-medium px-2 py-0.5 rounded-full shrink-0", STATUS_BADGE[s.status])}>{STATUS_LABEL[s.status]}</span>
+              </div>
+              <p className="text-[11.5px] text-muted-foreground mt-0.5">
+                {KIND_LABEL[s.kind]} · {orderersCount} คนสั่ง · {fmtTHB(total)}
+              </p>
+            </div>
+            <ChevronDown className="w-4 h-4 text-muted-foreground -rotate-90 shrink-0" />
+          </button>
+        )
+      })}
+
+      {showNew && (
+        <NewPreorderSessionModal tripId={tripId} onClose={() => setShowNew(false)}
+          onDone={(id) => { setShowNew(false); load(); setOpenSessionId(id) }} />
+      )}
+    </div>
+  )
+}
+
+function NewPreorderSessionModal({ tripId, onClose, onDone }: {
+  tripId: string; onClose: () => void; onDone: (sessionId: string) => void
+}) {
+  const [title, setTitle] = useState("")
+  const [kind,  setKind]  = useState<"food" | "shopping">("food")
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    if (!title.trim()) { toast.error("ตั้งชื่อรอบสั่งของก่อน"); return }
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/trips/${tripId}/preorder`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, kind }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error)
+      onDone(d.sessionId)
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "เปิดรับออเดอร์ไม่สำเร็จ")
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-card border rounded-[16px] shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[16px] font-semibold">เปิดรับออเดอร์ใหม่</h3>
+          <button onClick={onClose} className="h-7 w-7 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground"><X className="w-4 h-4" /></button>
+        </div>
+        <div>
+          <label className="text-[11.5px] font-medium text-muted-foreground block mb-1.5">ประเภท</label>
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => setKind("food")}
+              className={cn("h-10 rounded-[8px] border text-sm font-medium flex items-center justify-center gap-1.5",
+                kind === "food" ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-600" : "hover:bg-muted/50")}>
+              <Utensils className="w-4 h-4" /> สั่งอาหาร
+            </button>
+            <button onClick={() => setKind("shopping")}
+              className={cn("h-10 rounded-[8px] border text-sm font-medium flex items-center justify-center gap-1.5",
+                kind === "shopping" ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-600" : "hover:bg-muted/50")}>
+              <ShoppingBag className="w-4 h-4" /> ซื้อของ
+            </button>
+          </div>
+        </div>
+        <div>
+          <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">ชื่อรอบ *</label>
+          <input value={title} onChange={e => setTitle(e.target.value)}
+            placeholder={kind === "food" ? "เช่น สั่งข้าวเที่ยง" : "เช่น สั่งของออนไลน์รอบนี้"}
+            className="w-full h-10 rounded-[10px] border bg-background px-3 text-sm outline-none focus:border-brand-500" />
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 h-10 rounded-[10px] border text-sm font-medium hover:bg-muted">ยกเลิก</button>
+          <button onClick={submit} disabled={saving}
+            className="flex-1 h-10 rounded-[10px] bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold disabled:opacity-60 inline-flex items-center justify-center gap-2">
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} เปิดรับออเดอร์
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PreorderSessionDetail({ tripId, sessionId, participants, onBack }: {
+  tripId: string; sessionId: string; participants: Participant[]; onBack: () => void
+}) {
+  const [data, setData] = useState<{
+    session: { id: string; status: string; kind: string }
+    items: (PreorderItemRow & { trip_participants: { id: string; display_name: string } })[]
+    participants: { id: string; display_name: string }[]
+  } | null>(null)
+  const [addingFor, setAddingFor] = useState<string | null>(null)
+  const [itemName, setItemName] = useState("")
+  const [itemPrice, setItemPrice] = useState("")
+  const [itemQty, setItemQty] = useState("1")
+  const [closing, setClosing] = useState(false)
+  const [paidById, setPaidById] = useState(participants.find(p => p.is_host)?.id ?? participants[0]?.id ?? "")
+
+  const load = () => {
+    fetch(`/api/trips/preorder/${sessionId}`)
+      .then(r => r.json())
+      .then(setData)
+      .catch(() => {})
+  }
+  useEffect(load, [sessionId])
+
+  if (!data) return <div className="text-center py-10 text-sm text-muted-foreground">กำลังโหลด...</div>
+
+  const isOpen = data.session.status === "open"
+  const byParticipant = new Map<string, typeof data.items>()
+  for (const it of data.items) {
+    const arr = byParticipant.get(it.participant_id) ?? []
+    arr.push(it); byParticipant.set(it.participant_id, arr)
+  }
+  const grandTotal = data.items.reduce((s, it) => s + Number(it.price) * it.qty, 0)
+
+  const addItem = async () => {
+    if (!addingFor || !itemName.trim() || !itemPrice) { toast.error("กรอกชื่อของและราคา"); return }
+    await fetch(`/api/trips/preorder/${sessionId}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add_item", participantId: addingFor, name: itemName, price: Number(itemPrice), qty: Number(itemQty) || 1 }),
+    })
+    setItemName(""); setItemPrice(""); setItemQty("1")
+    load()
+  }
+
+  const removeItem = async (itemId: string) => {
+    await fetch(`/api/trips/preorder/${sessionId}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "remove_item", itemId }),
+    })
+    load()
+  }
+
+  const closeSession = async () => {
+    if (!confirm(`ปิดรับออเดอร์และสร้างรายจ่าย ${fmtTHB(grandTotal)}?`)) return
+    setClosing(true)
+    try {
+      const res = await fetch(`/api/trips/preorder/${sessionId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "close", paidById }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error)
+      toast.success("ปิดรับออเดอร์แล้ว — สร้างรายจ่ายเรียบร้อย ดูได้ที่แท็บ \"รายจ่าย\"")
+      onBack()
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "ปิดรับออเดอร์ไม่สำเร็จ")
+    } finally { setClosing(false) }
+  }
+
+  return (
+    <div className="space-y-3">
+      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="w-3.5 h-3.5" /> กลับไปดูรายการรอบสั่งของ
+      </button>
+
+      {!isOpen && (
+        <div className="rounded-xl border bg-muted/30 p-3 flex items-center gap-2 text-[12.5px] text-muted-foreground">
+          <Lock className="w-3.5 h-3.5" /> รอบนี้{data.session.status === "closed" ? "ปิดแล้ว — กลายเป็นรายจ่ายในระบบแล้ว" : "ถูกยกเลิก"}
+        </div>
+      )}
+
+      <div className="rounded-xl border bg-card overflow-hidden">
+        {data.participants.map(p => {
+          const items = byParticipant.get(p.id) ?? []
+          const subtotal = items.reduce((s, it) => s + Number(it.price) * it.qty, 0)
+          return (
+            <div key={p.id} className="border-b last:border-b-0">
+              <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
+                <span className="text-[13px] font-medium">{p.display_name}</span>
+                <span className="text-[12.5px] font-semibold text-muted-foreground">{items.length > 0 ? fmtTHB(subtotal) : "—"}</span>
+              </div>
+              {items.map(it => (
+                <div key={it.id} className="flex items-center gap-2 px-4 py-2 text-[13px] group">
+                  <span className="flex-1 min-w-0 truncate">{it.name}{it.qty > 1 ? ` ×${it.qty}` : ""}</span>
+                  <span className="text-muted-foreground shrink-0">{fmtTHB(Number(it.price) * it.qty)}</span>
+                  {isOpen && (
+                    <button onClick={() => removeItem(it.id)}
+                      className="h-5 w-5 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {isOpen && (
+                addingFor === p.id ? (
+                  <div className="px-4 pb-3 pt-1 flex gap-1.5">
+                    <input autoFocus value={itemName} onChange={e => setItemName(e.target.value)} placeholder="ชื่อของ"
+                      className="flex-1 h-8 rounded-[7px] border bg-background px-2 text-[12.5px] outline-none focus:border-brand-500 min-w-0" />
+                    <input type="number" value={itemPrice} onChange={e => setItemPrice(e.target.value)} placeholder="ราคา"
+                      className="w-16 h-8 rounded-[7px] border bg-background px-1.5 text-[12.5px] outline-none focus:border-brand-500" />
+                    <input type="number" value={itemQty} onChange={e => setItemQty(e.target.value)} placeholder="จำนวน"
+                      className="w-12 h-8 rounded-[7px] border bg-background px-1.5 text-[12.5px] outline-none focus:border-brand-500" />
+                    <button onClick={addItem} className="h-8 w-8 rounded-[7px] bg-brand-500 hover:bg-brand-600 text-white flex items-center justify-center shrink-0"><Check className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setAddingFor(null)} className="h-8 w-8 rounded-[7px] hover:bg-muted flex items-center justify-center text-muted-foreground shrink-0"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                ) : (
+                  <button onClick={() => setAddingFor(p.id)} className="w-full px-4 py-2 text-left text-[12.5px] text-brand-500 hover:bg-muted/30 flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> เพิ่มของที่ {p.display_name} สั่ง
+                  </button>
+                )
+              )}
+            </div>
+          )
+        })}
+        <div className="flex items-center justify-between px-4 py-3 bg-brand-50 dark:bg-brand-500/10">
+          <span className="text-sm font-semibold">ยอดรวมทั้งหมด</span>
+          <span className="text-[17px] font-black text-brand-600">{fmtTHB(grandTotal)}</span>
+        </div>
+      </div>
+
+      {isOpen && data.items.length > 0 && (
+        <div className="rounded-xl border bg-card p-4 space-y-3">
+          <div>
+            <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">ใครออกเงินจ่ายไปก่อน</label>
+            <select value={paidById} onChange={e => setPaidById(e.target.value)}
+              className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500">
+              {participants.map(p => <option key={p.id} value={p.id}>{p.display_name}{p.is_host ? " (เจ้าภาพ)" : ""}</option>)}
+            </select>
+          </div>
+          <button onClick={closeSession} disabled={closing}
+            className="w-full h-10 rounded-[10px] bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-60 inline-flex items-center justify-center gap-2">
+            {closing && <Loader2 className="w-3.5 h-3.5 animate-spin" />} ปิดรับออเดอร์ · สร้างรายจ่าย {fmtTHB(grandTotal)}
+          </button>
+          <p className="text-[11px] text-muted-foreground text-center">แต่ละคนจะต้องจ่ายเท่ากับยอดที่ตัวเองสั่งพอดี</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Recurring expenses panel ──────────────────────────────────────────────── */
+type RecurringTemplate = {
+  id: string; title: string; amount: number; category: string | null
+  interval_unit: IntervalUnit; next_run_date: string; end_date: string | null
+  is_active: boolean; last_generated_at: string | null
+  trip_participants: { id: string; display_name: string } | null
+}
+
+function RecurringPanel({ tripId }: { tripId: string }) {
+  const [templates, setTemplates] = useState<RecurringTemplate[] | null>(null)
+
+  const load = () => {
+    fetch(`/api/trips/recurring?journeyId=${tripId}`)
+      .then(r => r.json())
+      .then(d => setTemplates(d.templates ?? []))
+      .catch(() => setTemplates([]))
+  }
+  useEffect(load, [tripId])
+
+  const toggleActive = async (t: RecurringTemplate) => {
+    await fetch(`/api/trips/recurring/${t.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive: !t.is_active }),
+    })
+    load()
+  }
+
+  const remove = async (t: RecurringTemplate) => {
+    if (!confirm(`ลบ "${t.title}" ออกจากรายจ่ายประจำ? (รายจ่ายที่สร้างไปแล้วจะไม่หายไป)`)) return
+    await fetch(`/api/trips/recurring/${t.id}`, { method: "DELETE" })
+    load()
+  }
+
+  if (templates === null) return <div className="text-center py-10 text-sm text-muted-foreground">กำลังโหลด...</div>
+
+  if (templates.length === 0) {
+    return (
+      <div className="rounded-xl border bg-card py-12 text-center">
+        <Clock className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+        <p className="font-medium">ยังไม่มีรายจ่ายประจำ</p>
+        <p className="text-[12.5px] text-muted-foreground mt-1">เปิด &quot;ทำเป็นรายจ่ายประจำ&quot; ตอนเพิ่มรายจ่ายเพื่อตั้งค่าใช้จ่ายที่เกิดซ้ำ เช่น ค่าเช่า ค่าเน็ต</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {templates.map(t => (
+        <div key={t.id} className={cn("rounded-xl border bg-card p-4 flex items-center gap-3", !t.is_active && "opacity-50")}>
+          <span className="text-lg">{CAT_EMOJI[t.category ?? "other"] ?? "💰"}</span>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm truncate">{t.title}</p>
+            <p className="text-[11.5px] text-muted-foreground">
+              {fmtTHB(t.amount)} · {INTERVAL_LABEL[t.interval_unit]} · จ่ายก่อนโดย {t.trip_participants?.display_name ?? "—"}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {t.is_active ? `รอบถัดไป ${fmtDate(t.next_run_date)}` : "หยุดชั่วคราว"}
+              {t.end_date ? ` · สิ้นสุด ${fmtDate(t.end_date)}` : ""}
+            </p>
+          </div>
+          <button onClick={() => toggleActive(t)}
+            className="h-8 px-3 rounded-[8px] border text-xs font-medium hover:bg-muted/50 whitespace-nowrap">
+            {t.is_active ? "หยุดชั่วคราว" : "เปิดใช้อีกครั้ง"}
+          </button>
+          <button onClick={() => remove(t)} className="h-8 w-8 rounded-[8px] hover:bg-muted/50 flex items-center justify-center text-muted-foreground">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /* ─── Main ────────────────────────────────────────────────────────────────────── */
 export function TripDetailClient({ trip, expenses, payments, settlement, orgId }: {
   trip: any; expenses: Expense[]; payments: Payment[]; settlement: Settlement[]; orgId: string
@@ -195,18 +1085,24 @@ export function TripDetailClient({ trip, expenses, payments, settlement, orgId }
   const [showAdd,    setShowAdd]    = useState(false)
   const [payModal,   setPayModal]   = useState<{ from: Participant; to: Participant; amount: number } | null>(null)
   const [expandedExp, setExpandedExp] = useState<string | null>(null)
-  const [tab,        setTab]        = useState<"expenses"|"settlement"|"payments">("expenses")
+  const [tab,        setTab]        = useState<"expenses"|"settlement"|"payments"|"recurring"|"itinerary"|"preorder"|"members">("expenses")
 
   const participants: Participant[] = trip.trip_participants ?? []
-  const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount), 0)
+  const baseCurrency = trip.base_currency ?? "THB"
+  // amount_base_currency (post-conversion) — summing raw `amount` would mix
+  // currencies together on a trip with e.g. both JPY and THB expenses.
+  const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount_base_currency ?? e.amount), 0)
   const totalPaid     = participants.reduce((s, p) => s + Number(p.amount_paid), 0)
   const totalOwed     = participants.reduce((s, p) => s + Number(p.amount_owed), 0)
   const isSettled     = settlement.length === 0 && totalExpenses > 0
 
+  // Points at the multi-expense LIFF trip page (liff/trips/[token]), not the
+  // older single-bill liff/join/[token] flow — that one resolves tokens
+  // against split_bills, which this trip (a life_journeys row) isn't in.
   const shareUrl = trip.share_token
     ? (process.env.NEXT_PUBLIC_LIFF_ID
-        ? `https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID}/liff/join/${trip.share_token}?type=trip`
-        : `${typeof window !== "undefined" ? window.location.origin : ""}/liff/join/${trip.share_token}?type=trip`)
+        ? `https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID}/liff/trips/${trip.share_token}`
+        : `${typeof window !== "undefined" ? window.location.origin : ""}/liff/trips/${trip.share_token}`)
     : null
 
   const pMap = Object.fromEntries(participants.map(p => [p.id, p]))
@@ -269,20 +1165,30 @@ export function TripDetailClient({ trip, expenses, payments, settlement, orgId }
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-0.5 border-b mb-4">
+      {/* Tabs — scrolls horizontally instead of wrapping, so it stays a single
+          clean row even with 6 tabs on a small screen. */}
+      <div className="flex gap-0.5 border-b mb-4 overflow-x-auto">
         {[
           { id: "expenses",   label: `รายจ่าย (${expenses.length})` },
+          { id: "itinerary",  label: "แผนการเดินทาง" },
+          { id: "members",    label: "สมาชิก" },
+          { id: "preorder",   label: "สั่งของ" },
           { id: "settlement", label: `สรุปการจ่าย ${isSettled ? "✅" : `(${settlement.length})`}` },
           { id: "payments",   label: `ประวัติโอน (${payments.length})` },
+          { id: "recurring",  label: "รายจ่ายประจำ" },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id as any)}
-            className={cn("px-4 h-10 text-[13px] font-medium border-b-2 -mb-px transition whitespace-nowrap",
+            className={cn("px-4 h-10 text-[13px] font-medium border-b-2 -mb-px transition whitespace-nowrap shrink-0",
               tab === t.id ? "border-brand-500 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
             {t.label}
           </button>
         ))}
       </div>
+
+      {tab === "itinerary" && <ItineraryPanel tripId={trip.id} />}
+      {tab === "members"   && <TripMembersPanel tripId={trip.id} />}
+      {tab === "preorder"  && <PreorderPanel tripId={trip.id} participants={participants} />}
+      {tab === "recurring" && <RecurringPanel tripId={trip.id} />}
 
       {/* Expenses tab */}
       {tab === "expenses" && (
@@ -302,12 +1208,23 @@ export function TripDetailClient({ trip, expenses, payments, settlement, orgId }
                   <p className="font-medium text-sm">{e.title}</p>
                   <p className="text-xs text-muted-foreground">{(e.trip_participants as any)?.display_name} จ่าย · {fmtDate(e.expense_date)}</p>
                 </div>
-                <p className="font-bold shrink-0">{fmtTHB(e.amount)}</p>
+                <div className="text-right shrink-0">
+                  {e.currency && e.currency !== baseCurrency ? (
+                    <>
+                      <p className="font-bold">{fmtCcy(e.amount, e.currency)}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        ≈ {fmtTHB(e.amount_base_currency ?? e.amount)}{e.rate_is_manual ? " · เรทเอง" : ""}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="font-bold">{fmtTHB(e.amount)}</p>
+                  )}
+                </div>
                 {expandedExp === e.id ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
               </button>
               {expandedExp === e.id && (
                 <div className="border-t px-4 py-3 bg-muted/10">
-                  <p className="text-xs text-muted-foreground mb-2">แบ่งกัน {e.split_mode === "equal" ? "เท่ากัน" : "ตามจริง"}</p>
+                  <p className="text-xs text-muted-foreground mb-2">แบ่งกัน {SPLIT_MODE_DISPLAY[e.split_mode] ?? e.split_mode}</p>
                   <div className="space-y-1">
                     {(e.expense_splits ?? []).map(s => {
                       const p = pMap[s.participant_id]
@@ -415,7 +1332,7 @@ export function TripDetailClient({ trip, expenses, payments, settlement, orgId }
       )}
 
       {/* Modals */}
-      {showAdd && <AddExpenseModal tripId={trip.id} participants={participants} onClose={() => setShowAdd(false)} onAdd={() => {}} />}
+      {showAdd && <AddExpenseModal tripId={trip.id} baseCurrency={trip.base_currency ?? "THB"} participants={participants} onClose={() => setShowAdd(false)} onAdd={() => {}} />}
       {payModal && (
         <PaymentModal tripId={trip.id} from={payModal.from} to={payModal.to} amount={payModal.amount}
           onClose={() => setPayModal(null)} onPaid={() => setPayModal(null)} />
