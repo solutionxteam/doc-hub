@@ -3,6 +3,9 @@ node_modules/
 .pnp
 .pnp.js
 
+## Superpowers scratch workspace (plan ledgers, briefs, review packages)
+.superpowers/
+
 ## Next.js
 .next/
 out/
