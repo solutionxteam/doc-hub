@@ -13,6 +13,11 @@ struct AddMedicationView: View {
     var scanned: ScannedMedication? = nil
     var scanIssues: [String] = []
 
+    /// Set to edit an existing medication in place, instead of creating one.
+    /// Mutually exclusive with `scanned` — editing an existing row is never
+    /// also a fresh scan review.
+    var editing: Medication? = nil
+
     @State private var name: String
     @State private var brandName: String
     @State private var dosageForm: String
@@ -34,20 +39,28 @@ struct AddMedicationView: View {
     @State private var hasExpiry: Bool
     @State private var expiryDate: Date
 
-    init(vm: HealthViewModel, scanned: ScannedMedication? = nil, scanIssues: [String] = []) {
+    init(vm: HealthViewModel, scanned: ScannedMedication? = nil, scanIssues: [String] = [], editing: Medication? = nil) {
         self.vm = vm
         self.scanned = scanned
         self.scanIssues = scanIssues
-        _name        = State(initialValue: scanned?.name ?? "")
-        _brandName   = State(initialValue: scanned?.brandName ?? "")
-        _dosageForm  = State(initialValue: scanned?.dosageForm ?? "tablet")
-        _strength    = State(initialValue: scanned?.strength ?? "")
-        _purpose     = State(initialValue: scanned?.purpose ?? "")
-        _times       = State(initialValue: (scanned?.times.isEmpty == false ? scanned?.times : nil) ?? ["08:00"])
-        _doseQty     = State(initialValue: String(scanned?.doseQty ?? 1))
-        _mealRelation = State(initialValue: scanned?.mealRelation ?? "after")
-        _qtyTotal    = State(initialValue: scanned?.qtyTotal.map { String(Int($0)) } ?? "")
-        let expiry = scanned?.expiryDate.flatMap(Self.date(fromISODate:))
+        self.editing = editing
+        let sched = editing?.primarySchedule
+        let inv = editing?.inventory
+        _name        = State(initialValue: editing?.name ?? scanned?.name ?? "")
+        _brandName   = State(initialValue: editing?.brandName ?? scanned?.brandName ?? "")
+        _dosageForm  = State(initialValue: editing?.dosageForm ?? scanned?.dosageForm ?? "tablet")
+        _strength    = State(initialValue: editing?.strength ?? scanned?.strength ?? "")
+        _purpose     = State(initialValue: editing?.purpose ?? scanned?.purpose ?? "")
+        _notes       = State(initialValue: editing?.notes ?? "")
+        _times       = State(initialValue: (sched?.times.isEmpty == false ? sched?.times
+                              : (scanned?.times.isEmpty == false ? scanned?.times : nil)) ?? ["08:00"])
+        _doseQty     = State(initialValue: String(sched?.doseQty ?? scanned?.doseQty ?? 1))
+        _mealRelation = State(initialValue: sched?.mealRelation ?? scanned?.mealRelation ?? "after")
+        _reminderEnabled = State(initialValue: sched?.reminderEnabled ?? true)
+        _qtyTotal    = State(initialValue: inv?.qtyRemaining.map { String(Int($0)) }
+                              ?? scanned?.qtyTotal.map { String(Int($0)) } ?? "")
+        _lowStockAlert = State(initialValue: inv.map { String(Int($0.lowStockAlert)) } ?? "7")
+        let expiry = (inv?.expiryDate ?? scanned?.expiryDate).flatMap(Self.date(fromISODate:))
         _hasExpiry   = State(initialValue: expiry != nil)
         _expiryDate  = State(initialValue: expiry ?? Date())
     }
@@ -255,7 +268,7 @@ struct AddMedicationView: View {
                             if isSaving {
                                 ProgressView().tint(.white)
                             } else {
-                                Text("บันทึกยา")
+                                Text(editing != nil ? "บันทึกการแก้ไข" : "บันทึกยา")
                                     .font(.system(size: 15, weight: .semibold))
                                     .foregroundColor(.white)
                             }
@@ -271,7 +284,7 @@ struct AddMedicationView: View {
                 .padding(20)
             }
             .background(Color.surface.ignoresSafeArea())
-            .navigationTitle(scanned != nil ? "ตรวจสอบก่อนบันทึก" : "เพิ่มยา")
+            .navigationTitle(editing != nil ? "แก้ไขยา" : (scanned != nil ? "ตรวจสอบก่อนบันทึก" : "เพิ่มยา"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -302,23 +315,45 @@ struct AddMedicationView: View {
         defer { isSaving = false }
 
         do {
-            try await vm.addMedication(
-                userId: userId,
-                name: trimmedName,
-                brandName: brandName.trimmingCharacters(in: .whitespaces),
-                dosageForm: dosageForm,
-                notes: notes.trimmingCharacters(in: .whitespaces),
-                strength: strength.trimmingCharacters(in: .whitespaces),
-                purpose: purpose.trimmingCharacters(in: .whitespaces),
-                times: times,
-                doseQty: Double(doseQty) ?? 1,
-                mealRelation: mealRelation,
-                reminderEnabled: reminderEnabled,
-                qtyTotal: Double(qtyTotal) ?? 0,
-                qtyUnit: "เม็ด",
-                lowStockAlert: Double(lowStockAlert) ?? 7,
-                expiryDate: hasExpiry ? Self.isoDateString(from: expiryDate) : nil
-            )
+            if let editing {
+                try await vm.updateMedication(
+                    id: editing.id,
+                    scheduleId: editing.primarySchedule?.id,
+                    inventoryId: editing.inventory?.id,
+                    name: trimmedName,
+                    brandName: brandName.trimmingCharacters(in: .whitespaces),
+                    dosageForm: dosageForm,
+                    notes: notes.trimmingCharacters(in: .whitespaces),
+                    strength: strength.trimmingCharacters(in: .whitespaces),
+                    purpose: purpose.trimmingCharacters(in: .whitespaces),
+                    times: times,
+                    doseQty: Double(doseQty) ?? 1,
+                    mealRelation: mealRelation,
+                    reminderEnabled: reminderEnabled,
+                    qtyRemaining: Double(qtyTotal) ?? 0,
+                    qtyUnit: "เม็ด",
+                    lowStockAlert: Double(lowStockAlert) ?? 7,
+                    expiryDate: hasExpiry ? Self.isoDateString(from: expiryDate) : nil
+                )
+            } else {
+                try await vm.addMedication(
+                    userId: userId,
+                    name: trimmedName,
+                    brandName: brandName.trimmingCharacters(in: .whitespaces),
+                    dosageForm: dosageForm,
+                    notes: notes.trimmingCharacters(in: .whitespaces),
+                    strength: strength.trimmingCharacters(in: .whitespaces),
+                    purpose: purpose.trimmingCharacters(in: .whitespaces),
+                    times: times,
+                    doseQty: Double(doseQty) ?? 1,
+                    mealRelation: mealRelation,
+                    reminderEnabled: reminderEnabled,
+                    qtyTotal: Double(qtyTotal) ?? 0,
+                    qtyUnit: "เม็ด",
+                    lowStockAlert: Double(lowStockAlert) ?? 7,
+                    expiryDate: hasExpiry ? Self.isoDateString(from: expiryDate) : nil
+                )
+            }
             if reminderEnabled {
                 await vm.requestNotificationPermission()
             }

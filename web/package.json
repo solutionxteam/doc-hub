@@ -12,7 +12,8 @@
     "verify:pdf": "tsx --tsconfig scripts/tsconfig.json scripts/verify-pdf.ts",
     "test:vat": "node --experimental-strip-types --test src/lib/vat.test.mjs",
     "test:security": "node --experimental-strip-types --test src/lib/liff-auth.test.mjs",
-    "test:trips": "node --experimental-strip-types --test src/lib/trips/trip-conversation.test.mjs"
+    "test:trips": "node --experimental-strip-types --test src/lib/trips/trip-conversation.test.mjs",
+    "test:medications": "node --experimental-strip-types --test src/lib/medications.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",

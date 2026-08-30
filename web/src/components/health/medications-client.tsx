@@ -5,11 +5,11 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
   Plus, Pill, Clock, Check, X, AlertTriangle, ChevronDown, ChevronUp, Loader2,
-  Bell, BellOff, Package, ScanLine, ShoppingCart, Send,
+  Bell, BellOff, Package, ScanLine, ShoppingCart, Send, Pencil, Trash2,
 } from "lucide-react"
 
 type Schedule = { id: string; times: string[]; dose_qty: number; meal_relation: string; meal_note: string | null; reminder_enabled: boolean }
-type Inventory = { qty_remaining: number; qty_unit: string; low_stock_alert: number; expiry_date: string | null }
+type Inventory = { id: string; qty_remaining: number; qty_unit: string; low_stock_alert: number; expiry_date: string | null }
 type Medication = {
   id: string; name: string; brand_name: string | null; dosage_form: string; strength: string | null
   category: string; purpose: string | null; is_chronic: boolean; color: string | null
@@ -78,26 +78,31 @@ function runOutDate(days: number | null): string | null {
   return d.toLocaleDateString("th-TH", { day: "numeric", month: "short" })
 }
 
-/* ─── Add Medication Modal ───────────────────────────────────────────────────── */
-function AddMedicationModal({ onClose, onCreate, scanned, scanIssues }: {
+/* ─── Add / Edit Medication Modal ────────────────────────────────────────────── */
+function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }: {
   onClose: () => void; onCreate: () => void
   /** Pre-fill from a scanned label — still just a starting point, every field stays editable. */
   scanned?: ScannedMedication | null
   scanIssues?: string[]
+  /** Set to edit this medication in place instead of creating a new one. */
+  existing?: Medication | null
 }) {
-  const [name,        setName]        = useState(scanned?.name ?? "")
-  const [brand,       setBrand]       = useState(scanned?.brand_name ?? "")
-  const [form,        setForm]        = useState(scanned?.dosage_form ?? "tablet")
-  const [strength,    setStrength]    = useState(scanned?.strength ?? "")
-  const [purpose,     setPurpose]     = useState(scanned?.purpose ?? "")
-  const [isChronic,   setIsChronic]   = useState(false)
-  const [times,       setTimes]       = useState(scanned?.times.length ? scanned.times : ["08:00"])
-  const [doseQty,     setDoseQty]     = useState(String(scanned?.dose_qty ?? 1))
-  const [mealRelation,setMealRelation]= useState<"before" | "after" | "with" | "any">(scanned?.meal_relation ?? "after")
-  const [qty,         setQty]         = useState(scanned?.qty_total != null ? String(scanned.qty_total) : "")
-  const [lowAlert,    setLowAlert]    = useState("7")
-  const [expiry,      setExpiry]      = useState(scanned?.expiry_date ?? "")
-  const [reminder,    setReminder]    = useState(true)
+  const existingSched = existing?.medication_schedules[0]
+  const existingInv   = existing?.medication_inventory[0]
+  const [name,        setName]        = useState(existing?.name ?? scanned?.name ?? "")
+  const [brand,       setBrand]       = useState(existing?.brand_name ?? scanned?.brand_name ?? "")
+  const [form,        setForm]        = useState(existing?.dosage_form ?? scanned?.dosage_form ?? "tablet")
+  const [strength,    setStrength]    = useState(existing?.strength ?? scanned?.strength ?? "")
+  const [purpose,     setPurpose]     = useState(existing?.purpose ?? scanned?.purpose ?? "")
+  const [isChronic,   setIsChronic]   = useState(existing?.is_chronic ?? false)
+  const [times,       setTimes]       = useState(existingSched?.times.length ? existingSched.times : (scanned?.times.length ? scanned.times : ["08:00"]))
+  const [doseQty,     setDoseQty]     = useState(String(existingSched?.dose_qty ?? scanned?.dose_qty ?? 1))
+  const [mealRelation,setMealRelation]= useState<"before" | "after" | "with" | "any">(
+    (existingSched?.meal_relation as "before" | "after" | "with" | "any") ?? scanned?.meal_relation ?? "after")
+  const [qty,         setQty]         = useState(existingInv ? String(existingInv.qty_remaining) : (scanned?.qty_total != null ? String(scanned.qty_total) : ""))
+  const [lowAlert,    setLowAlert]    = useState(existingInv ? String(existingInv.low_stock_alert) : "7")
+  const [expiry,      setExpiry]      = useState(existingInv?.expiry_date ?? scanned?.expiry_date ?? "")
+  const [reminder,    setReminder]    = useState(existingSched?.reminder_enabled ?? true)
   const [saving,      setSaving]      = useState(false)
 
   const addTime = () => setTimes(t => [...t, "12:00"])
@@ -107,20 +112,32 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues }: {
     if (!name.trim()) { toast.error("กรอกชื่อยา"); return }
     setSaving(true)
     try {
-      const res = await fetch("/api/medications", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(), brand_name: brand || null,
-          dosage_form: form, strength: strength || null,
-          purpose: purpose || null, is_chronic: isChronic,
-          times, dose_qty: Number(doseQty) || 1,
-          meal_relation: mealRelation, reminder_enabled: reminder,
-          qty_total: Number(qty) || 0, low_stock_alert: Number(lowAlert) || 7,
-          expiry_date: expiry || null,
-        }),
-      })
+      const res = existing
+        ? await fetch(`/api/medications/${existing.id}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: name.trim(), brand_name: brand || null,
+              dosage_form: form, strength: strength || null, purpose: purpose || null,
+              scheduleId: existingSched?.id, times, dose_qty: Number(doseQty) || 1,
+              meal_relation: mealRelation, reminder_enabled: reminder,
+              inventoryId: existingInv?.id, qty_remaining: Number(qty) || 0,
+              low_stock_alert: Number(lowAlert) || 7, expiry_date: expiry || null,
+            }),
+          })
+        : await fetch("/api/medications", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: name.trim(), brand_name: brand || null,
+              dosage_form: form, strength: strength || null,
+              purpose: purpose || null, is_chronic: isChronic,
+              times, dose_qty: Number(doseQty) || 1,
+              meal_relation: mealRelation, reminder_enabled: reminder,
+              qty_total: Number(qty) || 0, low_stock_alert: Number(lowAlert) || 7,
+              expiry_date: expiry || null,
+            }),
+          })
       if (!res.ok) throw new Error()
-      toast.success("เพิ่มยาแล้ว 💊")
+      toast.success(existing ? "บันทึกการแก้ไขแล้ว ✏️" : "เพิ่มยาแล้ว 💊")
       onCreate()
       onClose()
     } catch { toast.error("เกิดข้อผิดพลาด") } finally { setSaving(false) }
@@ -132,7 +149,7 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues }: {
       <div className="relative bg-card border rounded-[16px] shadow-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto">
         <div className="p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-[17px] font-semibold">{scanned ? "ตรวจสอบก่อนบันทึก" : "เพิ่มยา"}</h3>
+            <h3 className="text-[17px] font-semibold">{existing ? "แก้ไขยา" : scanned ? "ตรวจสอบก่อนบันทึก" : "เพิ่มยา"}</h3>
             <button onClick={onClose} className="h-8 w-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground"><X className="w-4 h-4" /></button>
           </div>
 
@@ -252,7 +269,7 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues }: {
             <button onClick={onClose} className="flex-1 h-10 rounded-[10px] border text-sm font-medium hover:bg-muted">ยกเลิก</button>
             <button onClick={handleSave} disabled={saving}
               className="flex-1 h-10 rounded-[10px] bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold disabled:opacity-60 inline-flex items-center justify-center gap-2">
-              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} บันทึก
+              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {existing ? "บันทึกการแก้ไข" : "บันทึก"}
             </button>
           </div>
 
@@ -323,7 +340,12 @@ function TodayDoseCard({ log, medication, onUpdate }: {
 }
 
 /* ─── Medication Card ────────────────────────────────────────────────────────── */
-function MedicationCard({ med, adherence }: { med: Medication; adherence: Adherence | undefined }) {
+function MedicationCard({ med, adherence, onEdit, onRequestDelete }: {
+  med: Medication; adherence: Adherence | undefined
+  onEdit: () => void
+  /** Opens the confirmation — this never deletes directly. */
+  onRequestDelete: () => void
+}) {
   const [expanded, setExpanded] = useState(false)
   const inv     = med.medication_inventory[0] ?? null
   const sched   = med.medication_schedules[0]
@@ -503,6 +525,17 @@ function MedicationCard({ med, adherence }: { med: Medication; adherence: Adhere
             )}
           </div>
 
+          <div className="border-t pt-2.5 flex items-center gap-4">
+            <button onClick={onEdit}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground">
+              <Pencil className="w-3.5 h-3.5" />แก้ไขข้อมูลยา
+            </button>
+            <button onClick={onRequestDelete}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700">
+              <Trash2 className="w-3.5 h-3.5" />ลบยานี้
+            </button>
+          </div>
+
           <div className="border-t pt-2.5">
             {!priceResult && (
               <button onClick={lookupPrice} disabled={priceLoading}
@@ -546,6 +579,26 @@ export function MedicationsClient({ medications: initial, todayLogs: initialLogs
   const [medications, setMedications] = useState(initial)
   const [logs,        setLogs]        = useState(initialLogs)
   const [showAdd,     setShowAdd]     = useState(false)
+  const [editingMed,  setEditingMed]  = useState<Medication | null>(null)
+  /// Non-nil while the "ลบยานี้?" confirmation is up — never deletes on its own.
+  const [deleteTarget, setDeleteTarget] = useState<Medication | null>(null)
+  const [deleting,     setDeleting]     = useState(false)
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/medications/${deleteTarget.id}`, { method: "DELETE" })
+      if (!res.ok) throw new Error()
+      toast.success("ลบยาแล้ว")
+      setDeleteTarget(null)
+      window.location.reload()
+    } catch {
+      toast.error("ลบไม่สำเร็จ")
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   // Scan-a-label flow: upload → propose (read-only) → the SAME add-medication
   // form, pre-filled, so nothing is ever written until it goes through the
@@ -695,7 +748,12 @@ export function MedicationsClient({ medications: initial, todayLogs: initialLogs
       ) : (
         <div className="space-y-3">
           <p className="text-sm font-semibold text-muted-foreground">ยาทั้งหมด ({medications.length} รายการ)</p>
-          {medications.map(m => <MedicationCard key={m.id} med={m} adherence={adherenceMap[m.id]} />)}
+          {medications.map(m => (
+            <MedicationCard key={m.id} med={m} adherence={adherenceMap[m.id]}
+              onEdit={() => setEditingMed(m)}
+              onRequestDelete={() => setDeleteTarget(m)}
+            />
+          ))}
         </div>
       )}
 
@@ -705,6 +763,36 @@ export function MedicationsClient({ medications: initial, todayLogs: initialLogs
       </p>
 
       {showAdd && <AddMedicationModal onClose={() => setShowAdd(false)} onCreate={() => window.location.reload()} />}
+
+      {editingMed && (
+        <AddMedicationModal
+          existing={editingMed}
+          onClose={() => setEditingMed(null)}
+          onCreate={() => window.location.reload()}
+        />
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleting && setDeleteTarget(null)} />
+          <div className="relative bg-card border rounded-[16px] shadow-2xl w-full max-w-sm p-5 space-y-3">
+            <h3 className="text-[15px] font-semibold">ลบ {deleteTarget.name}?</h3>
+            <p className="text-xs text-muted-foreground">
+              จะซ่อนยานี้จากรายการ — ประวัติการทานยาที่ผ่านมายังเก็บไว้เหมือนเดิม
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setDeleteTarget(null)} disabled={deleting}
+                className="flex-1 h-10 rounded-[10px] border text-sm font-medium hover:bg-muted disabled:opacity-60">
+                ยกเลิก
+              </button>
+              <button onClick={confirmDelete} disabled={deleting}
+                className="flex-1 h-10 rounded-[10px] bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold disabled:opacity-60 inline-flex items-center justify-center gap-2">
+                {deleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />} ลบ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {reviewing && (
         <AddMedicationModal

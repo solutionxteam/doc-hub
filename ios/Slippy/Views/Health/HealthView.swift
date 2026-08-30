@@ -9,6 +9,10 @@ struct HealthView: View {
     @State private var showAddMed = false
     @State private var actionTarget: Medication? = nil
     @State private var showLogSheet = false
+    @State private var showEditMed = false
+    /// Non-nil while the "ลบยานี้?" confirmation is up — set on swipe, only
+    /// actually deleted once the alert's destructive button is tapped.
+    @State private var deleteTarget: Medication? = nil
 
     // MARK: – Scan-a-label flow: pick a photo → OCR (read-only) → the SAME
     // add-medication form, pre-filled — nothing is ever written until it goes
@@ -96,8 +100,28 @@ struct HealthView: View {
                     Button("ทานแล้ว ✅") { logMed(med, status: "taken") }
                     Button("ลืมทาน ❌") { logMed(med, status: "missed") }
                     Button("ข้าม ⏭️") { logMed(med, status: "skipped") }
+                    Button("แก้ไขข้อมูลยา ✏️") { showEditMed = true }
                     Button("ยกเลิก", role: .cancel) {}
                 }
+            }
+            .sheet(isPresented: $showEditMed) {
+                if let med = actionTarget {
+                    AddMedicationView(vm: vm, editing: med)
+                        .environmentObject(authVM)
+                }
+            }
+            .alert(
+                deleteTarget.map { "ลบ \($0.name)?" } ?? "",
+                isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })
+            ) {
+                Button("ลบ", role: .destructive) {
+                    guard let med = deleteTarget else { return }
+                    Task { try? await vm.deleteMedication(id: med.id) }
+                    deleteTarget = nil
+                }
+                Button("ยกเลิก", role: .cancel) { deleteTarget = nil }
+            } message: {
+                Text("จะซ่อนยานี้จากรายการ — ประวัติการทานยาที่ผ่านมายังเก็บไว้เหมือนเดิม")
             }
             // MARK: – Scan-a-label
             .confirmationDialog("สแกนฉลากยา", isPresented: $showScanSource, titleVisibility: .visible) {
@@ -296,7 +320,8 @@ struct HealthView: View {
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                Task { try? await vm.deleteMedication(id: med.id) }
+                                hapticLight()
+                                deleteTarget = med
                             } label: {
                                 Label("ลบ", systemImage: "trash")
                             }

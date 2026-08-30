@@ -22,12 +22,14 @@ struct MedicationSchedule: Codable {
 
 /// Stock on hand for a medication — matches `medication_inventory`.
 struct MedicationInventory: Codable {
+    let id: String
     let qtyRemaining: Double
     let qtyUnit: String
     let lowStockAlert: Double
     let expiryDate: String?
 
     enum CodingKeys: String, CodingKey {
+        case id
         case qtyRemaining = "qty_remaining"
         case qtyUnit = "qty_unit"
         case lowStockAlert = "low_stock_alert"
@@ -52,11 +54,18 @@ struct Medication: Codable, Identifiable {
     let brandName: String?
     let genericName: String?
     let dosageForm: String
+    let strength: String?
     /// What the drug is for — surfaced in the reminder notification body so
     /// it answers "what/why", not just "time to take something named X".
     let purpose: String?
     let color: String?
     let notes: String?
+    /// Soft-delete flag — mirrors web's `is_active` (medications-client.tsx,
+    /// api/liff/medications/[id]'s DELETE). `loadMedications` already filters
+    /// this server-side, so a decoded row is always true in practice; kept so
+    /// the model can round-trip the column without a decode failure if that
+    /// ever changes.
+    let isActive: Bool
     let createdAt: String
     let schedules: [MedicationSchedule]
     // PostgREST always returns a to-many embed as an ARRAY — there is no
@@ -70,11 +79,12 @@ struct Medication: Codable, Identifiable {
     let inventoryRows: [MedicationInventory]
 
     enum CodingKeys: String, CodingKey {
-        case id, name, notes, purpose, color
+        case id, name, notes, purpose, color, strength
         case userId = "user_id"
         case brandName = "brand_name"
         case genericName = "generic_name"
         case dosageForm = "dosage_form"
+        case isActive = "is_active"
         case createdAt = "created_at"
         case schedules = "medication_schedules"
         case inventoryRows = "medication_inventory"

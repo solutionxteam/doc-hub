@@ -36,6 +36,10 @@ final class HealthViewModel: ObservableObject {
                 .from("medications")
                 .select("*, medication_schedules(*), medication_inventory(*)")
                 .eq("user_id", value: userId)
+                // Matches web's GET /api/medications — a soft-deleted medication
+                // (deleteMedication below) must disappear from the list, not
+                // just from wherever deleted it.
+                .eq("is_active", value: true)
                 .order("created_at", ascending: false)
                 .execute()
                 .value
@@ -152,15 +156,112 @@ final class HealthViewModel: ObservableObject {
         await loadTodayLogs(userId: userId)
     }
 
+    /// Soft-delete — matches web's DELETE /api/liff/medications/[id] exactly
+    /// (sets `is_active = false`, never `.delete()`). A hard delete here used
+    /// to cascade through medication_schedules/medication_inventory/
+    /// medication_logs (all `ON DELETE CASCADE` in 031_medication_tracking.sql),
+    /// silently destroying someone's entire dose-taking history the moment
+    /// they removed one misspelled entry — the opposite of what web already
+    /// chose deliberately, and worse here since there was no confirmation
+    /// prompt in front of it either (see HealthView's delete alert).
     func deleteMedication(id: String) async throws {
+        struct Patch: Encodable { let is_active: Bool }
         try await db
             .from("medications")
-            .delete()
+            .update(Patch(is_active: false))
             .eq("id", value: id)
             .execute()
         medications.removeAll { $0.id == id }
         todayLogs.removeAll { $0.medicationId == id }
         syncReminderNotifications()
+    }
+
+    /// Edits an existing medication's own fields, and its primary schedule/
+    /// inventory rows by id — never re-inserts them, so dose history
+    /// (medication_logs, which points at schedule_id) keeps referring to the
+    /// same row instead of orphaning against one that no longer exists.
+    func updateMedication(
+        id: String, scheduleId: String?, inventoryId: String?,
+        name: String, brandName: String?, dosageForm: String, notes: String?,
+        strength: String?, purpose: String?,
+        times: [String], doseQty: Double, mealRelation: String, reminderEnabled: Bool,
+        qtyRemaining: Double, qtyUnit: String, lowStockAlert: Double, expiryDate: String?
+    ) async throws {
+        struct MedPatch: Encodable {
+            let name: String
+            let brand_name: String?
+            let dosage_form: String
+            let strength: String?
+            let purpose: String?
+            let notes: String?
+        }
+        struct ScheduleInsert: Encodable {
+            let medication_id: String
+            let user_id: String
+            let times: [String]
+            let dose_qty: Double
+            let meal_relation: String
+            let reminder_enabled: Bool
+            let is_active: Bool
+        }
+        struct SchedulePatch: Encodable {
+            let times: [String]
+            let dose_qty: Double
+            let meal_relation: String
+            let reminder_enabled: Bool
+        }
+        struct InventoryInsert: Encodable {
+            let medication_id: String
+            let user_id: String
+            let qty_remaining: Double
+            let qty_unit: String
+            let low_stock_alert: Double
+            let expiry_date: String?
+            let last_purchased_at: String
+            let last_purchased_qty: Double
+        }
+        struct InventoryPatch: Encodable {
+            let qty_remaining: Double
+            let qty_unit: String
+            let low_stock_alert: Double
+            let expiry_date: String?
+        }
+        let userId = try await db.auth.session.user.id.uuidString
+
+        try await db.from("medications").update(MedPatch(
+            name: name,
+            brand_name: brandName?.isEmpty == true ? nil : brandName,
+            dosage_form: dosageForm,
+            strength: strength?.isEmpty == true ? nil : strength,
+            purpose: purpose?.isEmpty == true ? nil : purpose,
+            notes: notes?.isEmpty == true ? nil : notes
+        )).eq("id", value: id).execute()
+
+        if let scheduleId {
+            try await db.from("medication_schedules").update(SchedulePatch(
+                times: times, dose_qty: doseQty, meal_relation: mealRelation, reminder_enabled: reminderEnabled
+            )).eq("id", value: scheduleId).execute()
+        } else if !times.isEmpty {
+            try await db.from("medication_schedules").insert(ScheduleInsert(
+                medication_id: id, user_id: userId, times: times, dose_qty: doseQty,
+                meal_relation: mealRelation, reminder_enabled: reminderEnabled, is_active: true
+            )).execute()
+        }
+
+        if let inventoryId {
+            try await db.from("medication_inventory").update(InventoryPatch(
+                qty_remaining: qtyRemaining, qty_unit: qtyUnit, low_stock_alert: lowStockAlert,
+                expiry_date: expiryDate?.isEmpty == true ? nil : expiryDate
+            )).eq("id", value: inventoryId).execute()
+        } else if qtyRemaining > 0 {
+            try await db.from("medication_inventory").insert(InventoryInsert(
+                medication_id: id, user_id: userId, qty_remaining: qtyRemaining, qty_unit: qtyUnit,
+                low_stock_alert: lowStockAlert, expiry_date: expiryDate?.isEmpty == true ? nil : expiryDate,
+                last_purchased_at: todayDateOnlyString(), last_purchased_qty: qtyRemaining
+            )).execute()
+        }
+
+        await load(userId: userId)
     }
 
     func todayStatus(for medicationId: String) -> String {
