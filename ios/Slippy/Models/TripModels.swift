@@ -1,4 +1,5 @@
 import Foundation
+import Supabase
 
 struct Trip: Codable, Identifiable {
     let id: String
@@ -154,8 +155,13 @@ struct TripItineraryItem: Codable, Identifiable {
     let checkedInAt: String?
     let checkedInBy: String?
 
+    /// Mode-specific fields — flight_number, seat, or (for a stop added from a
+    /// map place) phone/website/address. Read defensively: nothing enforces
+    /// its shape, see 20260822120000's own comment on this column.
+    let details: [String: AnyJSON]?
+
     enum CodingKeys: String, CodingKey {
-        case id, type, title, subtitle, location, notes, amount, currency, status, provider, lat, lng
+        case id, type, title, subtitle, location, notes, amount, currency, status, provider, lat, lng, details
         case dayId = "day_id"
         case sortOrder = "sort_order"
         case timeFrom = "time_from"
@@ -170,6 +176,15 @@ struct TripItineraryItem: Codable, Identifiable {
         case checkedInAt = "checked_in_at"
         case checkedInBy = "checked_in_by"
     }
+
+    /// A string field out of `details` — nil if absent or not a string.
+    private func detailString(_ key: String) -> String? {
+        if case .string(let s) = details?[key] { return s }
+        return nil
+    }
+    var placePhone: String? { detailString("phone") }
+    var placeWebsite: String? { detailString("website") }
+    var placeAddress: String? { detailString("address") }
 
     /// Trip-currency figure — the only one safe to show with a ฿ or to total.
     var baseAmount: Double { amountBaseCurrency ?? amount ?? 0 }

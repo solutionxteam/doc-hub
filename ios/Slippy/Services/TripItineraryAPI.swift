@@ -25,7 +25,7 @@ enum TripItineraryAPI {
         time_from, time_to, status, provider, confirmation_code,
         lat, lng, end_location, end_lat, end_lng,
         amount, currency, exchange_rate, amount_base_currency, expense_id,
-        checked_in_at, checked_in_by
+        checked_in_at, checked_in_by, details
         """
 
     // MARK: – Move a pin
@@ -56,7 +56,8 @@ enum TripItineraryAPI {
         lng: Double?,
         location: String?,
         timeFrom: String?,
-        baseCurrency: String
+        baseCurrency: String,
+        details: [String: AnyJSON] = [:]
     ) async throws -> TripItineraryItem {
         // Append after whatever is already there.
         struct OrderRow: Decodable { let sort_order: Int }
@@ -82,6 +83,10 @@ enum TripItineraryAPI {
             let currency: String
             let exchange_rate: Double
             let amount_base_currency: Double
+            // flight_number, seat, phone, website… — same free-form column the
+            // travel-doc importer writes. Omitted entirely (not even `{}`) when
+            // empty so a plain map-tap stop looks exactly as it always has.
+            let details: [String: AnyJSON]?
         }
 
         return try await db.from("trip_itinerary_items")
@@ -95,7 +100,8 @@ enum TripItineraryAPI {
                 time_from: timeFrom,
                 status: "planned",
                 amount: 0, currency: baseCurrency,
-                exchange_rate: 1, amount_base_currency: 0
+                exchange_rate: 1, amount_base_currency: 0,
+                details: details.isEmpty ? nil : details
             ))
             .select(itemColumns)
             .single()
@@ -129,14 +135,23 @@ enum TripItineraryAPI {
 
     // MARK: – Rename / retime
 
-    static func update(itemId: String, title: String?, timeFrom: String?, notes: String?) async throws -> TripItineraryItem {
+    static func update(
+        itemId: String,
+        title: String?,
+        timeFrom: String?,
+        notes: String?,
+        location: String? = nil,
+        details: [String: AnyJSON]? = nil
+    ) async throws -> TripItineraryItem {
         struct Patch: Encodable {
             let title: String?
             let time_from: String?
             let notes: String?
+            let location: String?
+            let details: [String: AnyJSON]?
         }
         return try await db.from("trip_itinerary_items")
-            .update(Patch(title: title, time_from: timeFrom, notes: notes))
+            .update(Patch(title: title, time_from: timeFrom, notes: notes, location: location, details: details))
             .eq("id", value: itemId)
             .select(itemColumns)
             .single()
