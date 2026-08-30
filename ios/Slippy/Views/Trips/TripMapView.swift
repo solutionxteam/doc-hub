@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import Supabase
 
 /// The trip map — real Apple Maps, and the itinerary is edited on it.
 ///
@@ -669,15 +670,17 @@ struct TripMapView: View {
     /// there to correct it, so a wrong guess costs one tap, never a bad write.
     fileprivate static func appType(for category: MKPointOfInterestCategory?) -> String {
         guard let category else { return "activity" }
+        if #available(iOS 18.0, *) {
+            if category == .spa { return "onsen" }
+            if category == .rvPark { return "hotel" }
+        }
         switch category {
         case .restaurant, .cafe, .bakery, .foodMarket, .brewery, .winery, .nightlife:
             return "restaurant"
-        case .hotel, .campground, .rvPark, .marina:
+        case .hotel, .campground, .marina:
             return "hotel"
         case .store, .pharmacy, .laundry:
             return "shopping"
-        case .spa:
-            return "onsen"
         default:
             return "activity"
         }

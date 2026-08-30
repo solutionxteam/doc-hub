@@ -512,7 +512,7 @@ export function ProfileClient({
   ] as const
 
   return (
-    <div className="p-6 lg:p-7 max-w-[680px] animate-fade-in space-y-6">
+    <div className="page-narrow animate-fade-in space-y-6">
 
       {/* ── Hero card ── */}
       <div className="rounded-2xl border bg-card overflow-hidden">

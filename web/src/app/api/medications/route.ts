@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     supabase.from("medications")
       .select(`
         id, name, brand_name, generic_name, dosage_form, strength,
-        category, purpose, is_chronic, is_active, color, notes, created_at,
+        category, purpose, is_chronic, is_active, color, notes, image_url, created_at,
         medication_schedules(id, times, days_of_week, dose_qty, meal_relation, meal_note, reminder_enabled, is_active),
         medication_inventory(qty_remaining, qty_unit, low_stock_alert, expiry_date, price_per_unit)
       `)

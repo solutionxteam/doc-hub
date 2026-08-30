@@ -11,12 +11,17 @@
 
 "use client"
 
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import QRCode from "qrcode"
+import { getAppUrl } from "@/lib/app-url"
 import { cn } from "@/lib/utils"
+import { buildPromptPayPayload } from "@/lib/promptpay"
+import { useAppLoading } from "@/lib/loading"
 import {
   Loader2, AlertCircle, Plus, Users, ChevronLeft,
-  CheckCircle2, Circle, Share2, Lock, ArrowRight,
+  CheckCircle2, Circle, Share2, Lock, ArrowRight, QrCode, Pencil, Check, X,
+  Receipt, ImagePlus, UserPlus, Trash2, Search, Send, MessageCircle,
 } from "lucide-react"
 
 type View = "list" | "create" | "detail"
@@ -26,12 +31,18 @@ interface GroupSummary {
   fee: number; status: string; shareToken: string
   createdAt: string; paidCount: number; headCount: number
 }
-interface Participant { id: string; name: string; amount: number; paid: boolean; isMe: boolean }
+interface NamedGuest { id: string; name: string }
+interface Participant {
+  id: string; name: string; amount: number; paid: boolean; isMe: boolean; userId: string | null
+  guests: NamedGuest[]
+}
 interface GroupDetail {
   id: string; title: string; note: string | null
   fee: number; status: string; shareToken: string
+  promptpayId: string | null; receiptUrl: string | null; isCreator: boolean
   participants: Participant[]; paidTotal: number
 }
+interface FriendOption { friendshipId: string; friend: { id: string; full_name: string; avatar_url: string | null } }
 
 function fmtTHB(n: number) {
   return "฿" + n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -54,17 +65,63 @@ export default function LiffSplitDashboard() {
   const [groups, setGroups] = useState<GroupSummary[] | null>(null)
   const [detail, setDetail] = useState<GroupDetail | null>(null)
   const [busy, setBusy]     = useState(false)
+  const { setLoading } = useAppLoading()
+  useEffect(() => {
+    setLoading(busy, "Slippy กำลังดำเนินการ...")
+    return () => { if (busy) setLoading(false) }
+  }, [busy, setLoading])
 
   // create-form state
   const [title, setTitle] = useState("")
   const [fee, setFee]     = useState("")
   const [note, setNote]   = useState("")
+  const [receiptFile, setReceiptFile]   = useState<File | null>(null)
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null)
+  const [members, setMembers] = useState<{ name: string; amount: string }[]>([])
+
+  // เพิ่มสมาชิกใหม่ในหน้ารายละเอียดบิล (เฉพาะผู้สร้างบิล)
+  const [addingMember, setAddingMember] = useState(false)
+  const [addMemberTab, setAddMemberTab] = useState<"manual" | "friend">("manual")
+  const [newMemberName, setNewMemberName]     = useState("")
+  const [newMemberAmount, setNewMemberAmount] = useState("")
+  const [friendOptions, setFriendOptions]   = useState<FriendOption[] | null>(null)
+  const [friendQuery, setFriendQuery]       = useState("")
+  const [friendSearching, setFriendSearching] = useState(false)
+
+  // ส่ง QR เตือนจ่ายเงินให้ผู้เข้าร่วมคนใดคนหนึ่ง (เฉพาะผู้สร้างบิล)
+  const [qrShareFor, setQrShareFor] = useState<Participant | null>(null)
+  const [sendingQr, setSendingQr]   = useState<"line" | "inapp" | null>(null)
+
+  // ปรับยอดที่ต้องชำระของผู้ร่วมบิล (เฉพาะผู้สร้างบิล)
+  const [editingAmountId, setEditingAmountId] = useState<string | null>(null)
+  const [amountDraft, setAmountDraft] = useState("")
+
+  function handleReceiptChange(file: File | null) {
+    setReceiptFile(file)
+    if (receiptPreview) URL.revokeObjectURL(receiptPreview)
+    setReceiptPreview(file ? URL.createObjectURL(file) : null)
+  }
 
   // Set right after a new bill is created — shows the "เลือกกลุ่ม LINE เพื่อ
   // โพสต์คำเชิญ" prompt on the detail page.
   const [justCreated, setJustCreated] = useState(false)
 
+  // PromptPay QR for the payment section
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [editingPromptpay, setEditingPromptpay] = useState(false)
+  const [promptpayDraft, setPromptpayDraft] = useState("")
+
   useEffect(() => { init() }, [])
+
+  // Generate the PromptPay QR (with this user's amount embedded) whenever the
+  // bill's PromptPay ID or my outstanding amount changes.
+  useEffect(() => {
+    const me = detail?.participants.find(p => p.isMe)
+    if (!detail?.promptpayId || !me || me.amount <= 0) { setQrDataUrl(null); return }
+    QRCode.toDataURL(buildPromptPayPayload(detail.promptpayId, me.amount), { margin: 1, width: 240 })
+      .then(setQrDataUrl)
+      .catch(() => setQrDataUrl(null))
+  }, [detail?.promptpayId, detail?.participants])
 
   // Arriving from "/liff/places" via "🆕 สร้างกลุ่ม" on a place card — seed the
   // create form's title/note from the chosen place.
@@ -193,17 +250,37 @@ export default function LiffSplitDashboard() {
     } finally { setBusy(false) }
   }
 
+  async function savePromptPay(value: string) {
+    if (!profile || !detail) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/liff/split-groups/${detail.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "setPromptPay", lineUserId: profile.userId, promptpayId: value }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? "บันทึกไม่สำเร็จ"); return }
+      setDetail(data.group)
+      setEditingPromptpay(false)
+    } finally { setBusy(false) }
+  }
+
   async function createGroup() {
     if (!profile || !title.trim() || !fee) return
     setBusy(true); setError("")
     try {
-      const res = await fetch("/api/liff/split-groups", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lineUserId: profile.userId, displayName: profile.displayName,
-          title: title.trim(), fee: Number(fee), note: note.trim() || undefined,
-        }),
-      })
+      const form = new FormData()
+      form.set("lineUserId", profile.userId)
+      form.set("displayName", profile.displayName)
+      form.set("title", title.trim())
+      form.set("fee", fee)
+      if (note.trim()) form.set("note", note.trim())
+      form.set("members", JSON.stringify(
+        members.filter(m => m.name.trim()).map(m => ({ name: m.name.trim(), amount: m.amount ? Number(m.amount) : undefined }))
+      ))
+      if (receiptFile) form.set("receipt", receiptFile)
+
+      const res = await fetch("/api/liff/split-groups", { method: "POST", body: form })
       const data = await res.json()
       if (!res.ok) {
         if (data.needsConnect) setNeedsConnect(true)
@@ -211,8 +288,122 @@ export default function LiffSplitDashboard() {
         return
       }
       setTitle(""); setFee(""); setNote("")
+      handleReceiptChange(null); setMembers([])
       await loadGroups(profile.userId)
       await openDetail(data.id, { justCreated: true })
+    } catch {
+      setError("สร้างบิลไม่สำเร็จ — กรุณาลองใหม่")
+    } finally { setBusy(false) }
+  }
+
+  // เพิ่มรายชื่อผู้ร่วมบิล (ในหน้ารายละเอียด, เฉพาะผู้สร้างบิล)
+  async function addParticipant() {
+    if (!profile || !detail || !newMemberName.trim()) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/liff/split-groups/${detail.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "addParticipant", lineUserId: profile.userId,
+          name: newMemberName.trim(),
+          amount: newMemberAmount ? Number(newMemberAmount) : 0,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? "เพิ่มรายชื่อไม่สำเร็จ"); return }
+      setDetail(data.group)
+      setNewMemberName(""); setNewMemberAmount(""); setAddingMember(false)
+    } finally { setBusy(false) }
+  }
+
+  // โหลดรายชื่อเพื่อนในระบบ (friendships ที่ accepted แล้ว) — แท็บ "เพื่อนในระบบ"
+  async function loadFriendOptions() {
+    if (!profile) return
+    setFriendSearching(true)
+    try {
+      const res = await fetch(`/api/liff/friends?lineUserId=${profile.userId}`)
+      const data = await res.json()
+      setFriendOptions(data.friends ?? [])
+    } catch {
+      setFriendOptions([])
+    } finally { setFriendSearching(false) }
+  }
+
+  // เพิ่มผู้ร่วมบิลจากเพื่อนในระบบ
+  async function addParticipantFromFriend(friendUserId: string) {
+    if (!profile || !detail) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/liff/split-groups/${detail.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "addParticipant", lineUserId: profile.userId,
+          friendUserId, amount: newMemberAmount ? Number(newMemberAmount) : 0,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? "เพิ่มรายชื่อไม่สำเร็จ"); return }
+      setDetail(data.group)
+      setNewMemberAmount(""); setAddingMember(false); setFriendQuery("")
+    } finally { setBusy(false) }
+  }
+
+  // ส่ง QR เตือนจ่ายเงินทาง LINE (shareTargetPicker) — ใช้ได้กับทุกคน ไม่ต้องเชื่อมระบบ
+  async function shareQrViaLine(p: Participant) {
+    if (!detail) return
+    setSendingQr("line")
+    try {
+      const mod = await import("@line/liff")
+      const liff = mod.default
+      if (liff.isApiAvailable?.("shareTargetPicker")) {
+        await liff.shareTargetPicker([buildQrFlex(detail, p) as any])
+      }
+    } catch { /* ผู้ใช้ปิด picker หรือไม่รองรับ — เงียบไว้ */ }
+    finally { setSendingQr(null); setQrShareFor(null) }
+  }
+
+  // ส่ง QR เตือนจ่ายเงินในแอป (เฉพาะผู้เข้าร่วมที่เชื่อมต่อระบบแล้ว) — โพสต์เป็นข้อความขอเงินในแชท
+  async function sendQrInApp(p: Participant) {
+    if (!profile || !detail) return
+    setSendingQr("inapp")
+    try {
+      const res = await fetch(`/api/liff/split-groups/${detail.id}/send-qr`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lineUserId: profile.userId, participantId: p.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? "ส่ง QR ไม่สำเร็จ"); return }
+    } finally { setSendingQr(null); setQrShareFor(null) }
+  }
+
+  // ปรับยอดที่ต้องชำระของผู้ร่วมบิล (ในหน้ารายละเอียด, เฉพาะผู้สร้างบิล)
+  async function saveAmount(participantId: string) {
+    if (!profile || !detail || amountDraft === "") return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/liff/split-groups/${detail.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "setAmount", lineUserId: profile.userId, participantId, amount: Number(amountDraft) }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? "ปรับยอดไม่สำเร็จ"); return }
+      setDetail(data.group)
+      setEditingAmountId(null)
+    } finally { setBusy(false) }
+  }
+
+  // ลบเพื่อนที่ลงชื่อไว้ — ทำได้โดยคนที่เพิ่ม หรือผู้สร้างบิล
+  async function removeGuest(participantId: string) {
+    if (!profile || !detail) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/liff/split-groups/${detail.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "removeGuest", lineUserId: profile.userId, participantId }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? "ลบไม่สำเร็จ"); return }
+      setDetail(data.group)
     } finally { setBusy(false) }
   }
 
@@ -222,7 +413,7 @@ export default function LiffSplitDashboard() {
     const liffId = process.env.NEXT_PUBLIC_LIFF_ID
     const joinUrl = liffId
       ? `https://liff.line.me/${liffId}/liff/join/${d.shareToken}?type=split`
-      : `${process.env.NEXT_PUBLIC_APP_URL ?? "https://slippy.ai"}/split/join/${d.shareToken}`
+      : `${getAppUrl()}/split/join/${d.shareToken}`
     const perPerson = d.participants.find(p => p.isMe)?.amount ?? d.participants[0]?.amount ?? d.fee
 
     const rows: any[] = []
@@ -275,9 +466,33 @@ export default function LiffSplitDashboard() {
     const liffId = process.env.NEXT_PUBLIC_LIFF_ID
     const url = liffId
       ? `https://liff.line.me/${liffId}/liff/join/${detail.shareToken}?type=split`
-      : `${process.env.NEXT_PUBLIC_APP_URL ?? "https://slippy.ai"}/split/join/${detail.shareToken}`
+      : `${getAppUrl()}/split/join/${detail.shareToken}`
     try { await navigator.clipboard.writeText(url) } catch {}
     setJustCreated(false)
+  }
+
+  // Builds a Flex Message carrying the PromptPay QR (as an image, rendered via
+  // qrserver.com — same technique as /pay/[id]) for one participant's amount.
+  // Posted into whichever LINE chat the user picks via shareTargetPicker.
+  function buildQrFlex(d: GroupDetail, p: Participant) {
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${
+      encodeURIComponent(buildPromptPayPayload(d.promptpayId!, p.amount))}`
+    return {
+      type: "flex",
+      altText: `💸 ขอเงิน ${fmtTHB(p.amount)} — ${d.title}`,
+      contents: {
+        type: "bubble",
+        body: {
+          type: "box", layout: "vertical", spacing: "md",
+          contents: [
+            { type: "text", text: `🧾 ${d.title}`, weight: "bold", size: "lg", wrap: true },
+            { type: "text", text: `ขอเงินจาก ${p.name} · ${fmtTHB(p.amount)}`, size: "sm", color: "#555555", wrap: true },
+            { type: "image", url: qrImageUrl, aspectMode: "fit", aspectRatio: "1:1", margin: "md" },
+            { type: "text", text: "สแกน QR ด้วยแอปธนาคารเพื่อโอน", size: "xs", color: "#888888", align: "center" },
+          ],
+        },
+      },
+    }
   }
 
   // ───────────────────────────────────────────────────────── render helpers
@@ -487,6 +702,71 @@ export default function LiffSplitDashboard() {
                 />
               </div>
 
+              {/* ใบเสร็จ / สลิป (ไม่บังคับ) */}
+              <div>
+                <p className="text-sm font-semibold mb-2">ใบเสร็จ (ไม่บังคับ)</p>
+                {receiptPreview ? (
+                  <div className="relative rounded-xl overflow-hidden border">
+                    <img src={receiptPreview} alt="ใบเสร็จ" className="w-full max-h-56 object-contain bg-muted" />
+                    <button
+                      onClick={() => handleReceiptChange(null)}
+                      className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="w-full h-24 rounded-xl border border-dashed flex flex-col items-center justify-center gap-1 text-muted-foreground cursor-pointer hover:bg-muted/50 transition-colors">
+                    <ImagePlus className="w-5 h-5" />
+                    <span className="text-xs">แตะเพื่อแนบรูปใบเสร็จ / สลิป</span>
+                    <input
+                      type="file" accept="image/*" capture="environment" className="hidden"
+                      onChange={e => handleReceiptChange(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                )}
+              </div>
+
+              {/* รายชื่อผู้ที่จะหารด้วย (ไม่บังคับ) */}
+              <div>
+                <p className="text-sm font-semibold mb-2">รายชื่อผู้ที่จะหารด้วย (ไม่บังคับ)</p>
+                <div className="space-y-2">
+                  {members.map((m, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        value={m.name}
+                        onChange={e => setMembers(prev => prev.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                        placeholder={`ชื่อเพื่อนคนที่ ${i + 1}`}
+                        className="flex-1 min-w-0 h-11 rounded-xl border px-3 text-sm outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15"
+                      />
+                      <input
+                        type="number" inputMode="decimal" value={m.amount}
+                        onChange={e => setMembers(prev => prev.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
+                        placeholder="บาท"
+                        className="w-20 shrink-0 h-11 rounded-xl border px-2 text-sm text-right outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15"
+                      />
+                      <button
+                        onClick={() => setMembers(prev => prev.filter((_, j) => j !== i))}
+                        className="w-11 h-11 rounded-xl border flex items-center justify-center text-muted-foreground shrink-0"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => setMembers(prev => [...prev, { name: "", amount: "" }])}
+                    className="w-full h-11 rounded-xl border border-dashed flex items-center justify-center gap-1.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+                  >
+                    <UserPlus className="w-4 h-4" /> เพิ่มเพื่อน
+                  </button>
+                </div>
+                {members.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    💡 ปล่อยช่อง "บาท" ว่างไว้เพื่อหารเท่าๆ กันโดยอัตโนมัติ — ยอดของคุณจะเท่ากับยอดรวมหักส่วนของเพื่อนๆ
+                  </p>
+                )}
+              </div>
+
               <button
                 onClick={createGroup}
                 disabled={!title.trim() || !fee || Number(fee) <= 0 || busy}
@@ -543,18 +823,290 @@ export default function LiffSplitDashboard() {
               </div>
             </div>
 
+            {detail.receiptUrl && (
+              <div className="bg-card border rounded-2xl overflow-hidden shadow-sm mb-3">
+                <p className="text-xs font-semibold text-muted-foreground px-4 pt-3 pb-1 flex items-center gap-1.5">
+                  <Receipt className="w-3.5 h-3.5" /> ใบเสร็จ
+                </p>
+                <a href={detail.receiptUrl} target="_blank" rel="noreferrer" className="block px-4 pb-3 pt-1">
+                  <img src={detail.receiptUrl} alt="ใบเสร็จ" className="w-full max-h-64 object-contain rounded-xl bg-muted" />
+                </a>
+              </div>
+            )}
+
             <div className="bg-card border rounded-2xl overflow-hidden shadow-sm mb-3">
-              <p className="text-xs font-semibold text-muted-foreground px-4 pt-3 pb-1">รายชื่อ ({detail.participants.length})</p>
-              {detail.participants.map(p => (
-                <div key={p.id} className="flex items-center justify-between px-4 py-2.5 border-t first:border-t-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    {p.paid ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> : <Circle className="w-4 h-4 text-muted-foreground/40 shrink-0" />}
-                    <span className={cn("text-sm truncate", p.isMe && "font-bold")}>{p.name}{p.isMe && " (คุณ)"}</span>
+              <div className="flex items-center justify-between px-4 pt-3 pb-1">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  รายชื่อ ({detail.participants.reduce((s, p) => s + 1 + p.guests.length, 0)})
+                </p>
+                {detail.isCreator && detail.status !== "finalized" && (
+                  <button
+                    onClick={() => { setAddingMember(true); setAddMemberTab("friend"); if (friendOptions === null) loadFriendOptions() }}
+                    className="text-[11px] font-semibold text-rose-600 flex items-center gap-1 active:scale-95 transition-transform">
+                    <UserPlus className="w-3.5 h-3.5" /> เพิ่มเพื่อน
+                  </button>
+                )}
+              </div>
+              {detail.participants.map(p => {
+                const canEdit = detail.isCreator && detail.status !== "finalized"
+                const canSendQr = canEdit && !p.paid && p.amount > 0 && !!detail.promptpayId
+                return (
+                  <Fragment key={p.id}>
+                  <div className="flex items-center justify-between px-4 py-2.5 border-t first:border-t-0 gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {p.paid ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> : <Circle className="w-4 h-4 text-muted-foreground/40 shrink-0" />}
+                      <span className={cn("text-sm truncate", p.isMe && "font-bold")}>{p.name}{p.isMe && " (คุณ)"}</span>
+                    </div>
+                    {canSendQr && (
+                      <button onClick={() => setQrShareFor(p)} title="ส่ง QR เตือนจ่ายเงิน"
+                        className="w-7 h-7 rounded-lg border flex items-center justify-center text-muted-foreground shrink-0 active:scale-95 transition-transform">
+                        <QrCode className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {editingAmountId === p.id ? (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <input
+                          type="number" inputMode="decimal" autoFocus value={amountDraft}
+                          onChange={e => setAmountDraft(e.target.value)}
+                          className="w-20 h-8 rounded-lg border px-2 text-sm text-right outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15"
+                        />
+                        <button onClick={() => saveAmount(p.id)} disabled={busy} className="w-8 h-8 rounded-lg bg-rose-600 text-white flex items-center justify-center disabled:opacity-50">
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => setEditingAmountId(null)} className="w-8 h-8 rounded-lg border flex items-center justify-center">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { if (canEdit) { setEditingAmountId(p.id); setAmountDraft(String(p.amount)) } }}
+                        disabled={!canEdit}
+                        className={cn("flex items-center gap-1 shrink-0", canEdit && "active:opacity-60")}
+                      >
+                        <span className={cn("text-sm font-semibold", p.paid ? "text-emerald-600" : "text-muted-foreground")}>{fmtTHB(p.amount)}</span>
+                        {canEdit && <Pencil className="w-3 h-3 text-muted-foreground/60" />}
+                      </button>
+                    )}
+                    {/* ลบ/ยกเลิกได้แค่ตัวเอง — คนที่เข้าร่วมเองไม่มีใครลบแทนได้ */}
+                    {p.isMe && detail.status !== "finalized" && (
+                      <button onClick={() => removeGuest(p.id)} disabled={busy}
+                        title="ยกเลิกการเข้าร่วม"
+                        className="text-muted-foreground/60 hover:text-rose-600 disabled:opacity-50 shrink-0">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
-                  <span className={cn("text-sm font-semibold shrink-0", p.paid ? "text-emerald-600" : "text-muted-foreground")}>{fmtTHB(p.amount)}</span>
-                </div>
-              ))}
+                  {/* เพื่อนที่ลงชื่อไว้ — ผูกกับ p (Tree): ไม่มียอด/สถานะของตัวเอง */}
+                  {p.guests.length > 0 && (
+                    <div className="border-t bg-muted/20">
+                      {p.guests.map((g, gi) => {
+                        // ลบได้แค่คนที่เพิ่มเข้ามาเอง (p คือคนที่เพิ่ม) — ไม่ใช่ผู้สร้างบิลทุกคน
+                        const canRemove = p.isMe && detail.status !== "finalized"
+                        return (
+                          <div key={g.id} className="flex items-center gap-2 px-4 py-2 pl-9 text-sm text-muted-foreground">
+                            <span className="text-muted-foreground/50 shrink-0">{gi === p.guests.length - 1 ? "└─" : "├─"}</span>
+                            <span className="truncate flex-1">{g.name}</span>
+                            <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full shrink-0">รวมกับ {p.name}</span>
+                            {canRemove && (
+                              <button onClick={() => removeGuest(g.id)} disabled={busy}
+                                className="text-muted-foreground/60 hover:text-rose-600 disabled:opacity-50 shrink-0" aria-label={`ลบ ${g.name}`}>
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  </Fragment>
+                )
+              })}
+
+              {/* เพิ่มรายชื่อผู้ร่วมบิล — เฉพาะผู้สร้างบิล */}
+              {detail.isCreator && detail.status !== "finalized" && (
+                addingMember ? (
+                  <div className="px-4 py-2.5 border-t space-y-2.5">
+                    {/* Tabs: พิมพ์ชื่อเอง | เพื่อนในระบบ */}
+                    <div className="flex gap-1 bg-muted p-0.5 rounded-lg">
+                      {([
+                        { id: "manual", label: "✏️ พิมพ์ชื่อเอง" },
+                        { id: "friend", label: "👥 เพื่อนในระบบ" },
+                      ] as const).map(t => (
+                        <button key={t.id} type="button"
+                          onClick={() => {
+                            setAddMemberTab(t.id)
+                            if (t.id === "friend" && friendOptions === null) loadFriendOptions()
+                          }}
+                          className={cn("flex-1 h-7 rounded-md text-xs font-medium transition-colors",
+                            addMemberTab === t.id ? "bg-card shadow-sm text-foreground" : "text-muted-foreground")}>
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <p className="text-xs font-semibold text-rose-600">
+                      👥 ตอนนี้มีคนอยู่ในบิลแล้ว {detail.participants.reduce((s, p) => s + 1 + p.guests.length, 0)} คน
+                    </p>
+
+                    {addMemberTab === "manual" ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          autoFocus value={newMemberName} onChange={e => setNewMemberName(e.target.value)}
+                          placeholder="ชื่อผู้ร่วมบิล"
+                          className="flex-1 min-w-0 h-9 rounded-lg border px-2.5 text-sm outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15"
+                        />
+                        <input
+                          type="number" inputMode="decimal" value={newMemberAmount} onChange={e => setNewMemberAmount(e.target.value)}
+                          placeholder="บาท"
+                          className="w-20 shrink-0 h-9 rounded-lg border px-2 text-sm text-right outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15"
+                        />
+                        <button onClick={addParticipant} disabled={busy || !newMemberName.trim()} className="w-9 h-9 rounded-lg bg-rose-600 text-white flex items-center justify-center shrink-0 disabled:opacity-50">
+                          <Check className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex-1">
+                            <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2" />
+                            <input
+                              value={friendQuery} onChange={e => setFriendQuery(e.target.value)}
+                              placeholder="ค้นหาเพื่อน"
+                              className="w-full h-9 rounded-lg border pl-8 pr-2.5 text-sm outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15"
+                            />
+                          </div>
+                          <input
+                            type="number" inputMode="decimal" value={newMemberAmount} onChange={e => setNewMemberAmount(e.target.value)}
+                            placeholder="บาท"
+                            className="w-20 shrink-0 h-9 rounded-lg border px-2 text-sm text-right outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15"
+                          />
+                        </div>
+                        {friendSearching ? (
+                          <div className="flex justify-center py-3"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
+                        ) : (
+                          <div className="max-h-40 overflow-y-auto rounded-lg border divide-y">
+                            {(friendOptions ?? [])
+                              .filter(f => !friendQuery.trim() || f.friend.full_name?.toLowerCase().includes(friendQuery.trim().toLowerCase()))
+                              .filter(f => !detail.participants.some(p => p.userId === f.friend.id))
+                              .map(f => (
+                                <button key={f.friendshipId} type="button" disabled={busy}
+                                  onClick={() => addParticipantFromFriend(f.friend.id)}
+                                  className="w-full flex items-center gap-2 px-2.5 py-2 text-left hover:bg-muted/50 transition-colors disabled:opacity-50">
+                                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-rose-400 to-orange-500 text-white flex items-center justify-center text-[11px] font-bold shrink-0">
+                                    {f.friend.full_name?.[0]?.toUpperCase() ?? "?"}
+                                  </div>
+                                  <span className="text-sm truncate flex-1">{f.friend.full_name}</span>
+                                  <Plus className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                                </button>
+                              ))}
+                            {friendOptions !== null && friendOptions.length === 0 && (
+                              <p className="text-xs text-muted-foreground text-center py-3">ยังไม่มีเพื่อนในระบบ — เพิ่มเพื่อนได้ที่หน้าเพื่อน</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* รายชื่อผู้เข้าร่วมตอนนี้ — แสดงสดในแผงนี้เลย พร้อมปุ่มยกเลิก
+                        ไม่ต้องปิดแผงแล้วเลื่อนขึ้นไปหากล่อง "รายชื่อ" ด้านบน */}
+                    <div className="pt-1">
+                      <p className="text-xs font-semibold text-muted-foreground mb-1.5">ผู้เข้าร่วมตอนนี้</p>
+                      <div className="max-h-40 overflow-y-auto rounded-lg border divide-y">
+                        {detail.participants.map(p => (
+                          <Fragment key={p.id}>
+                            <div className="flex items-center gap-2.5 px-3 py-2">
+                              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-rose-400 to-orange-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                {p.name[0]?.toUpperCase() ?? "?"}
+                              </div>
+                              <span className="text-sm truncate flex-1">{p.name}{p.isMe && " (คุณ)"}</span>
+                              {/* ลบได้แค่ตัวเอง — คนที่เข้าร่วมเองไม่มีใครลบแทนได้ */}
+                              {p.isMe && detail.status !== "finalized" && (
+                                <button onClick={() => removeGuest(p.id)} disabled={busy}
+                                  title="ยกเลิกการเข้าร่วม" className="text-muted-foreground/60 hover:text-rose-600 disabled:opacity-50 shrink-0">
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                            {p.guests.map(g => (
+                              <div key={g.id} className="flex items-center gap-2 px-3 py-2 pl-9 text-sm text-muted-foreground">
+                                <span className="truncate flex-1">↳ {g.name}</span>
+                                {/* ลบได้แค่คนที่เพิ่มเข้ามาเอง (p คือคนที่เพิ่ม) */}
+                                {p.isMe && detail.status !== "finalized" && (
+                                  <button onClick={() => removeGuest(g.id)} disabled={busy}
+                                    title="ยกเลิก" className="text-muted-foreground/60 hover:text-rose-600 disabled:opacity-50 shrink-0">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </Fragment>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button onClick={() => { setAddingMember(false); setNewMemberName(""); setNewMemberAmount(""); setFriendQuery("") }}
+                      className="w-full h-8 rounded-lg border text-xs font-medium text-muted-foreground">
+                      ปิด
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setAddingMember(true)}
+                    className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 border-t text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+                  >
+                    <UserPlus className="w-4 h-4" /> เพิ่มรายชื่อผู้ร่วมบิล
+                  </button>
+                )
+              )}
             </div>
+
+            {/* PromptPay QR — scan to pay (dynamic, with my amount embedded) */}
+            {detail.status !== "finalized" && (() => {
+              const me = detail.participants.find(p => p.isMe)
+              return me && !me.paid && me.amount > 0 ? (
+                <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 rounded-2xl p-4 mb-3 text-center">
+                  {qrDataUrl ? (
+                    <>
+                      <p className="text-xs font-semibold text-rose-700 dark:text-rose-300 mb-2 flex items-center justify-center gap-1">
+                        <QrCode className="w-4 h-4" /> สแกน PromptPay เพื่อโอน {fmtTHB(me.amount)}
+                      </p>
+                      <img src={qrDataUrl} alt="PromptPay QR" className="w-44 h-44 mx-auto rounded-xl bg-white p-2 border" />
+                    </>
+                  ) : detail.isCreator ? (
+                    <p className="text-xs text-rose-700 dark:text-rose-300">
+                      💡 เพิ่มเบอร์ PromptPay เพื่อสร้าง QR ให้สมาชิกสแกนโอนเงิน
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">ผู้สร้างบิลยังไม่ได้ตั้งค่า PromptPay</p>
+                  )}
+
+                  {detail.isCreator && (
+                    editingPromptpay ? (
+                      <div className="flex items-center gap-1.5 mt-2">
+                        <input
+                          value={promptpayDraft} onChange={e => setPromptpayDraft(e.target.value)}
+                          placeholder="เบอร์ PromptPay เช่น 0812345678"
+                          className="flex-1 h-9 rounded-lg border px-2.5 text-sm outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15"
+                        />
+                        <button onClick={() => savePromptPay(promptpayDraft)} disabled={busy} className="w-9 h-9 rounded-lg bg-rose-600 text-white flex items-center justify-center shrink-0 disabled:opacity-50">
+                          <Check className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => setEditingPromptpay(false)} className="w-9 h-9 rounded-lg border flex items-center justify-center shrink-0">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setPromptpayDraft(detail.promptpayId ?? ""); setEditingPromptpay(true) }}
+                        className="mt-2 text-xs text-rose-700 dark:text-rose-300 underline underline-offset-2 flex items-center justify-center gap-1 mx-auto"
+                      >
+                        <Pencil className="w-3 h-3" /> {detail.promptpayId ? "เปลี่ยนเบอร์ PromptPay" : "เพิ่มเบอร์ PromptPay"}
+                      </button>
+                    )
+                  )}
+                </div>
+              ) : null
+            })()}
 
             <div className="space-y-2">
               {detail.status !== "finalized" && (
@@ -609,6 +1161,42 @@ export default function LiffSplitDashboard() {
         )}
 
       </div>
+
+      {/* ส่ง QR เตือนจ่ายเงิน — เลือกช่องทาง: LINE (shareTargetPicker) หรือในแอป (แชท) */}
+      {qrShareFor && detail && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => !sendingQr && setQrShareFor(null)} />
+          <div className="relative bg-card w-full max-w-md rounded-t-2xl p-5 pb-6 space-y-3">
+            <div className="flex items-center justify-between mb-1">
+              <div>
+                <p className="text-sm font-bold">ส่ง QR เตือนจ่ายเงิน</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{qrShareFor.name} · {fmtTHB(qrShareFor.amount)}</p>
+              </div>
+              <button onClick={() => setQrShareFor(null)} className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center text-muted-foreground shrink-0">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <button onClick={() => shareQrViaLine(qrShareFor)} disabled={!!sendingQr}
+              className="w-full h-11 rounded-xl border font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+              {sendingQr === "line" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 text-green-600" />}
+              ส่งทาง LINE
+            </button>
+
+            {qrShareFor.userId ? (
+              <button onClick={() => sendQrInApp(qrShareFor)} disabled={!!sendingQr}
+                className="w-full h-11 rounded-xl bg-gradient-to-r from-rose-500 to-orange-500 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+                {sendingQr === "inapp" ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
+                ส่งในแอป (แชท)
+              </button>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center px-2">
+                {qrShareFor.name} ยังไม่เชื่อมต่อระบบ — ส่งได้ทาง LINE เท่านั้น
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

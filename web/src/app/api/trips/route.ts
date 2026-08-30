@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient }       from "@/lib/supabase/server"
 import { createAdminClient }  from "@/lib/supabase/admin"
+import { isOrgMember }        from "@/lib/require-org-member"
+import { ensureTripConversation, postTripSystemMessage } from "@/lib/trips/trip-conversation"
 
 function generateShareToken() {
   return Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10)
@@ -57,6 +59,7 @@ export async function POST(req: NextRequest) {
     base_fee?:    number
     cover_emoji?: string
     notes?:       string
+    base_currency?: string   // defaults to THB — see migration 073
     participants: Array<{
       display_name:    string
       line_user_id?:   string
@@ -69,6 +72,9 @@ export async function POST(req: NextRequest) {
   const { orgId, title, trip_type, participants, ...rest } = body
   if (!orgId || !title || !trip_type) {
     return NextResponse.json({ error: "orgId, title, trip_type required" }, { status: 400 })
+  }
+  if (!(await isOrgMember(user.id, orgId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
   const admin = createAdminClient()
@@ -87,6 +93,7 @@ export async function POST(req: NextRequest) {
     ended_at:        rest.ended_at ?? null,
     split_mode:      rest.split_mode ?? "equal",
     base_fee:        rest.base_fee ?? 0,
+    base_currency:   rest.base_currency ?? "THB",
     cover_emoji:     rest.cover_emoji ?? (trip_type === "travel" ? "✈️" : trip_type === "sport" ? "🏸" : trip_type === "food_order" ? "🍽️" : "💰"),
     notes:           rest.notes ?? null,
     journey_type:    trip_type === "travel" ? "trip" : "event",
@@ -113,5 +120,28 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  return NextResponse.json({ tripId: journey.id, shareToken: journey.share_token })
+  // Give the trip its group chat (Phase 1 — handoff §9). Best-effort: a chat
+  // that failed to appear is recoverable at any time via
+  // POST /api/trips/[id]/conversation, whereas failing the whole request would
+  // throw away a journey and its participants that are already committed.
+  let conversationId: string | null = null
+  try {
+    const conv = await ensureTripConversation(journey.id, user.id)
+    conversationId = conv.conversationId
+    await postTripSystemMessage({
+      journeyId: journey.id,
+      event:     "trip_created",
+      body:      `สร้างทริป “${title}” แล้ว`,
+      detail:    { title, trip_type },
+      actorId:   user.id,
+    })
+  } catch (err) {
+    console.error("[trips] conversation setup failed:", (err as Error).message)
+  }
+
+  return NextResponse.json({
+    tripId: journey.id,
+    shareToken: journey.share_token,
+    conversationId,
+  })
 }

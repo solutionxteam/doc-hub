@@ -57,7 +57,7 @@ struct AddMedicationView: View {
         _doseQty     = State(initialValue: String(sched?.doseQty ?? scanned?.doseQty ?? 1))
         _mealRelation = State(initialValue: sched?.mealRelation ?? scanned?.mealRelation ?? "after")
         _reminderEnabled = State(initialValue: sched?.reminderEnabled ?? true)
-        _qtyTotal    = State(initialValue: inv?.qtyRemaining.map { String(Int($0)) }
+        _qtyTotal    = State(initialValue: inv.map { String(Int($0.qtyRemaining)) }
                               ?? scanned?.qtyTotal.map { String(Int($0)) } ?? "")
         _lowStockAlert = State(initialValue: inv.map { String(Int($0.lowStockAlert)) } ?? "7")
         let expiry = (inv?.expiryDate ?? scanned?.expiryDate).flatMap(Self.date(fromISODate:))

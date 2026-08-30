@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getVerifiedLineUserId, liffUnauthorized } from "@/lib/liff-auth"
+import { validateImageUpload } from "@/lib/validate-upload"
 
 // Resolve a LINE userId → { organization_id, user_id } via line_connections.
 // "หารบิล" groups require a linked account (same as sport/trip groups) — keeps
@@ -54,17 +56,31 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ groups })
 }
 
-// POST /api/liff/split-groups — create a new "หารบิล" group (creator auto-joins)
-export async function POST(req: NextRequest) {
-  const { lineUserId, displayName, title, fee, note } = await req.json() as {
-    lineUserId:  string
-    displayName: string
-    title:       string
-    fee:         number
-    note?:       string
-  }
+const RECEIPT_BUCKET = "payment-proofs"
+const MAX_RECEIPT_SIZE = 5 * 1024 * 1024 // matches the bucket's own limit (migration 043)
 
-  if (!lineUserId || !title?.trim() || !fee || fee <= 0) {
+// POST /api/liff/split-groups — create a new "หารบิล" group (creator auto-joins)
+// multipart/form-data fields: lineUserId, displayName, title, fee, note,
+// members (JSON array of { name, amount? } — extra participants to split with),
+// receipt (image, optional)
+export async function POST(req: NextRequest) {
+  const form = await req.formData()
+  const claimedLineUserId = form.get("lineUserId") as string | null
+  const lineUserId = getVerifiedLineUserId(req, claimedLineUserId)
+  const displayName = form.get("displayName") as string | null
+  const title       = form.get("title") as string | null
+  const fee         = Number(form.get("fee"))
+  const note        = form.get("note") as string | null
+  const receipt     = form.get("receipt") as File | null
+
+  let members: { name: string; amount?: number }[] = []
+  try { members = JSON.parse((form.get("members") as string | null) ?? "[]") } catch {}
+  members = members
+    .map(m => ({ name: (m.name ?? "").trim(), amount: Number(m.amount) }))
+    .filter(m => m.name)
+
+  if (!lineUserId) return liffUnauthorized("LINE identity mismatch")
+  if (!title?.trim() || !fee || fee <= 0) {
     return NextResponse.json({ error: "lineUserId, title, fee required" }, { status: 400 })
   }
 
@@ -88,15 +104,52 @@ export async function POST(req: NextRequest) {
 
   if (error || !bill) return NextResponse.json({ error: error?.message ?? "สร้างบิลไม่สำเร็จ" }, { status: 500 })
 
-  // Auto-add creator as the first participant (gets the full fee until others join)
+  const headCount = 1 + members.length
+  const evenShare = Math.round((fee / headCount) * 100) / 100
+
+  // Members with a custom amount keep it; ones left blank fall back to an even share
+  const memberAmounts = members.map(m => Number.isFinite(m.amount) && m.amount! >= 0 ? m.amount! : evenShare)
+  const membersTotal  = memberAmounts.reduce((s, a) => s + a, 0)
+  const creatorAmount = Math.max(0, Math.round((fee - membersTotal) * 100) / 100)
+
+  // Auto-add creator as the first participant
   await admin.from("split_participants").insert({
     split_bill_id: bill.id,
     name:          displayName ?? conn.display_name ?? "ผู้สร้างบิล",
     line_user_id:  lineUserId,
     line_display:  displayName ?? conn.display_name,
     is_non_line:   false,
-    amount:        fee,
+    amount:        creatorAmount,
   })
+
+  // Add the rest as non-LINE placeholder participants (รายชื่อผู้ที่จะหารด้วย)
+  if (members.length > 0) {
+    await admin.from("split_participants").insert(
+      members.map((m, i) => ({
+        split_bill_id: bill.id,
+        name:          m.name,
+        is_non_line:   true,
+        amount:        memberAmounts[i],
+      }))
+    )
+  }
+
+  // Receipt/slip photo (optional) — sniff actual content, never trust the
+  // client-supplied receipt.type (previously passed straight through as the
+  // storage Content-Type).
+  if (receipt && receipt.size > 0 && receipt.size <= MAX_RECEIPT_SIZE) {
+    const buffer = Buffer.from(await receipt.arrayBuffer())
+    const validated = await validateImageUpload(buffer)
+    if (validated) {
+      const path = `receipts/${bill.id}.${validated.ext}`
+      const { error: uploadError } = await admin.storage.from(RECEIPT_BUCKET)
+        .upload(path, buffer, { contentType: validated.mime, upsert: true })
+      if (!uploadError) {
+        const { data: pub } = admin.storage.from(RECEIPT_BUCKET).getPublicUrl(path)
+        await admin.from("split_bills").update({ receipt_url: pub.publicUrl }).eq("id", bill.id)
+      }
+    }
+  }
 
   return NextResponse.json({ ok: true, id: bill.id, shareToken: bill.share_token })
 }
