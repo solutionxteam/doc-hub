@@ -77,7 +77,8 @@ final class TripsViewModel: ObservableObject {
                         id, day_id, sort_order, type, title, subtitle, location, notes,
                         time_from, time_to, status, provider, confirmation_code,
                         lat, lng, end_location, end_lat, end_lng,
-                        amount, currency, exchange_rate, amount_base_currency, expense_id
+                        amount, currency, exchange_rate, amount_base_currency, expense_id,
+                        details
                     )
                 """)
                 .eq("journey_id", value: journeyId).order("day_number", ascending: true)

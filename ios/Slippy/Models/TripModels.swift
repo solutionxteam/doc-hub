@@ -185,6 +185,8 @@ struct TripItineraryItem: Codable, Identifiable {
     var placePhone: String? { detailString("phone") }
     var placeWebsite: String? { detailString("website") }
     var placeAddress: String? { detailString("address") }
+    var placeGooglePlaceId: String? { detailString("google_place_id") }
+    var placePhotoURL: String? { detailString("photo_url") }
 
     /// Trip-currency figure — the only one safe to show with a ฿ or to total.
     var baseAmount: Double { amountBaseCurrency ?? amount ?? 0 }
