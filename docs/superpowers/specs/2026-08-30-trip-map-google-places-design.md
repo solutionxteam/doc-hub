@@ -9,7 +9,7 @@ The user wants the trip map (iOS, `Slippy/Views/Trips/TripMapView.swift`) to wor
 - There is no search bar. The only way to add a stop is to tap a point on the map; `TripMapView.swift` then reverse-geocodes it on-device via `CLGeocoder` and enriches it via one `MKLocalSearch` call (confirmed by reading `lookUpName()` and the POI-tap handler in that file).
 - No photo is ever fetched or stored for a stop.
 - Every screen requires a live connection — there is no local cache of anything.
-- Pins render with iOS's default `MKPointOfInterestCategory`-driven styling; the user considers this "ugly" and wants colored category pins.
+- Pins already render as colored circles with a white SF Symbol per category (`JourneyStyle.swift` + `pinBadge()` in `TripMapView.swift`, confirmed by reading both) — this already matches the "Google Maps style" the user asked for. The one real complaint, confirmed with the user after showing them this code: the `activity` category's icon (`camera.fill`) doesn't fit — it should be `star.fill`.
 
 ## Existing infrastructure discovered (reused, not rebuilt)
 
@@ -33,7 +33,7 @@ This means the only **missing** piece on the backend is name-based search with p
 2. **Photo source:** Google Places Photos as the primary, automatic source; manual upload (already-built `/api/trips/[id]/photos`) as a supplement the user can add to any stop. (Considered and rejected: Google-only — leaves the user with no photo when Google has none; manual-only — defeats the "automatic" ask.)
 3. **Search engine:** Google Places (Text Search / Autocomplete), not Nominatim — richer results (ratings, hours, photos) and consistent with the photo source. (Considered and rejected: reusing `/api/trips/geocode` — free, but no photos, so the same place would need a second lookup anyway.)
 4. **API call routing:** iOS → `api.slippyai.app` (the existing web app), which calls Google server-side — never a Google key embedded in the iOS bundle. Same posture as `/api/places` today and the same reasoning documented in `TripDocumentAPI.swift`. (Considered and rejected: calling Google directly from iOS — a bundled key is a published key, and it would bypass `place_cache` entirely.)
-5. **Icon style:** colored circular pin + white SF Symbol per category + subtle shadow (Google Maps' own visual language), not emoji and not a fully custom illustrated set — no new asset pipeline needed, and it reads correctly in both light and dark mode using SF Symbols' built-in rendering.
+5. **Icon style:** colored circular pin + white SF Symbol per category + subtle shadow (Google Maps' own visual language) — turned out to already exist (see Problem above, corrected after showing the user the actual `JourneyStyle.swift`/`pinBadge()` code). The only confirmed real change: `activity`'s symbol, `camera.fill` → `star.fill`.
 
 ## Design
 
@@ -63,19 +63,19 @@ New file, `Slippy/Services/PlacesSearchAPI.swift`, following `TripDocumentAPI.sw
 - The existing manual-tap-a-POI flow (`appType(for: MKPointOfInterestCategory)`) is untouched — this is additive, not a replacement of the working tap gesture.
 - A "add photo" button in the stop detail view calls `PlacesSearchAPI.uploadPhoto` (the manual-supplement path from Decision 2).
 
-### 4. `CategoryPin.swift` — new SwiftUI view
+### 4. Icon fix: `activity` symbol
 
-Replaces the current annotation content in `TripMapView.swift`. A filled `Circle()` (36pt) in a per-category color, a white SF Symbol centered inside, `.shadow(radius: 3, y: 2)`. Category → (color, symbol) table, extending the existing five `appType()` cases:
+`Slippy/Models/JourneyStyle.swift:44` — one line:
 
-| Category | Color | SF Symbol |
-|---|---|---|
-| restaurant | `.red` | `fork.knife` |
-| hotel | `.blue` | `bed.double.fill` |
-| shopping | `.purple` | `bag.fill` |
-| activity | `.green` | `figure.walk` |
-| onsen | `.teal` | `drop.fill` |
+```swift
+"activity":   Spec(label: "กิจกรรม",    symbol: "camera.fill",  ...
+```
+→
+```swift
+"activity":   Spec(label: "กิจกรรม",    symbol: "star.fill",    ...
+```
 
-This is a pure view-layer change — no data model impact, so it's safe to build and verify independently of §1–3.
+Everything else in that table (colors, all 18 other symbols, the whole `pinBadge()` rendering) is already correct and untouched. This is a pure one-line, view-layer change — no data model impact, safe to build and verify independently of §1–3.
 
 ### 5. Offline cache
 
