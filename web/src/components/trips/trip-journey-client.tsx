@@ -810,8 +810,8 @@ export function TripJourneyClient({
               </>
             )}
           </div>
-          <div className="hidden xl:block">
-            <div className="sticky top-5">
+          <div>
+            <div className="xl:sticky xl:top-5">
               <TripMap tripId={trip.id} days={days} activeDay={activeDay}
                        onDaysChange={setDays} canEdit variant="compact" height={560}
                        onEditItem={setEditingItem} />

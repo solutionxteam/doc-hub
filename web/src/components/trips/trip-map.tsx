@@ -252,6 +252,16 @@ export default function TripMap({
     [scoped],
   )
 
+  // The tapped/clicked pin, resolved to its item — drives the floating detail
+  // card below. Previously a marker click only highlighted the pin and the
+  // matching side-list row; on the "Plan" tab that list sits off-screen (or,
+  // on the Overview preview, doesn't render at all), so selecting a place from
+  // the map itself appeared to do nothing.
+  const selectedPin = useMemo(
+    () => pins.find(p => p.item.id === selected) ?? null,
+    [pins, selected],
+  )
+
   const points = useMemo<Array<[number, number]>>(
     () => pins.map(p => [p.item.lat!, p.item.lng!]),
     [pins],
@@ -801,6 +811,57 @@ export default function TripMap({
             )}
           </div>
         )}
+
+        {!pending && selectedPin && (() => {
+          const { item } = selectedPin
+          const spec = itemSpec(item.type)
+          const Icon = spec.icon
+          return (
+            <div className="absolute bottom-3 left-3 right-3 z-[401] rounded-xl border bg-white p-3 shadow-xl sm:right-20">
+              <div className="flex items-start gap-2.5">
+                <span className={cn("mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg", spec.tile, spec.fg)}>
+                  <Icon className="h-3.5 w-3.5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-semibold leading-tight text-slate-900">{item.title}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    {[spec.label, hhmm(item.time_from)].filter(Boolean).join(" · ")}
+                  </p>
+                  {item.location && (
+                    <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-500">{item.location}</p>
+                  )}
+                </div>
+                <button onClick={() => setSelected(null)} aria-label="ปิด"
+                  className="shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="mt-2.5 flex items-center gap-2">
+                <a href={googleStreetViewUrl([item.lat!, item.lng!])} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50">
+                  <PersonStanding className="h-3.5 w-3.5" />Street View
+                </a>
+                <a href={googleMapsPinUrl([item.lat!, item.lng!], item.title)} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50">
+                  <ExternalLink className="h-3.5 w-3.5" />Google Maps
+                </a>
+                {canEdit && onEditItem && (
+                  <button onClick={() => onEditItem(item)}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50">
+                    <Pencil className="h-3.5 w-3.5" />ข้อมูลเพิ่มเติม
+                  </button>
+                )}
+                {canEdit && (
+                  <button onClick={() => removeStop(item.id)} disabled={busy === item.id}
+                    className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 px-2.5 text-[12px] font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50">
+                    {busy === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    ลบ
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       {/* ── Side panel — unchanged; none of this touches the map engine. ── */}

@@ -119,11 +119,6 @@ struct TripMapView: View {
             daySelector
             mapArea
             bottomBar
-            if let selected {
-                selectionCard(selected)
-            } else if let pending {
-                pendingCard(pending)
-            }
         }
         .onAppear {
             // Start on a named day rather than "whole trip" — the whole point
@@ -297,6 +292,24 @@ struct TripMapView: View {
                 VStack(spacing: 6) {
                     if resolvingPOI { resolvingBanner }
                     movingBanner
+                }
+            }
+            // Floats over the map itself — pinned to mapArea's own bottom
+            // edge, growing upward — rather than living in the outer VStack's
+            // linear flow. Both call sites embed this whole view in a fixed
+            // outer `.frame(height:)` sized only for daySelector + map +
+            // bottomBar; when this card lived in that flow, its own height
+            // (address/notes/price can push it past 150pt) routinely
+            // exceeded the remaining budget and got silently clipped by the
+            // parent's `.clipShape` — visually indistinguishable from
+            // "selecting a place does nothing." An overlay has no flow
+            // height to exceed, so it always renders fully, on top of
+            // bottomBar's own visible position, never crowding it out.
+            .overlay(alignment: .bottom) {
+                if let selected {
+                    selectionCard(selected)
+                } else if let pending {
+                    pendingCard(pending)
                 }
             }
         }
@@ -502,7 +515,10 @@ struct TripMapView: View {
             }
         }
         .padding(12)
-        .background(Color.surface)
+        .background(Color.surface, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
     }
 
     private func pendingCard(_ place: PendingPlace) -> some View {
@@ -549,7 +565,10 @@ struct TripMapView: View {
             }
         }
         .padding(12)
-        .background(Color.surface)
+        .background(Color.surface, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
     }
 
     /// Directions when the type has a road/rail equivalent Google can route

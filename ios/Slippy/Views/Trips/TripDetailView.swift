@@ -308,7 +308,12 @@ struct TripDetailView: View {
                         onChanged: { await vm.loadItinerary(journeyId: trip.id) },
                         showDayStrip: false
                     )
-                    .frame(height: 300)
+                    // Must exceed mapArea's own 320pt minHeight plus bottomBar's
+                    // height (~50pt) with real margin — this view has no day
+                    // strip (showDayStrip: false) to absorb the difference, and
+                    // too little here is exactly what silently clipped the
+                    // selection/pending card before it became a `.overlay`.
+                    .frame(height: 410)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
 
                     VStack(alignment: .leading, spacing: 10) {
