@@ -41,7 +41,7 @@ enum JourneyStyle {
         "restaurant": Spec(label: "ร้านอาหาร",  symbol: "fork.knife",                  color: Color(hex: "#F97316"), kind: .food),
         "meal":       Spec(label: "มื้ออาหาร",  symbol: "cup.and.saucer.fill",         color: Color(hex: "#FB923C"), kind: .food),
 
-        "activity":   Spec(label: "กิจกรรม",    symbol: "camera.fill",                 color: Color(hex: "#10B981"), kind: .place),
+        "activity":   Spec(label: "กิจกรรม",    symbol: "star.fill",                   color: Color(hex: "#10B981"), kind: .place),
         "onsen":      Spec(label: "ออนเซ็น",    symbol: "drop.fill",                   color: Color(hex: "#22D3EE"), kind: .place),
         "shopping":   Spec(label: "ช้อปปิ้ง",   symbol: "bag.fill",                    color: Color(hex: "#D946EF"), kind: .place),
 
