@@ -10,7 +10,7 @@ export default async function MedicationsPage() {
     supabase.from("medications")
       .select(`
         id, name, brand_name, dosage_form, strength, category, purpose,
-        is_chronic, color, notes,
+        is_chronic, color, notes, image_url,
         medication_schedules(id, times, dose_qty, meal_relation, meal_note, reminder_enabled, is_active),
         medication_inventory(qty_remaining, qty_unit, low_stock_alert, expiry_date)
       `)
