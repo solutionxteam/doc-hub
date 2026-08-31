@@ -3,6 +3,7 @@ import { createClient }  from "@/lib/supabase/server"
 import { notFound }      from "next/navigation"
 import { TripJourneyClient, type JourneyTrip } from "@/components/trips/trip-journey-client"
 import type { JourneyDay, ChecklistItem, TripNote, JourneyParticipant, TripDocument, TripPhoto } from "@/lib/trips/journey"
+import { tripFeatures } from "@/lib/trips/trip-features"
 
 /**
  * The trip screen — the Journey design running on real rows.
@@ -83,6 +84,13 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       notes={(notes ?? []) as TripNote[]}
       documents={(documents ?? []) as TripDocument[]}
       photos={photos}
+      // trip-features.ts reads process.env directly, which is only safe in
+      // server code — this page is the server component in the tree, so the
+      // resolved booleans are passed down rather than the client component
+      // reading tripFeatures itself (that would either throw on undefined
+      // envs in the client bundle or silently read `undefined`, always off).
+      featureLiveLocation={tripFeatures.liveLocation}
+      featureCalls={tripFeatures.calls}
     />
   )
 }

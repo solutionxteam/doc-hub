@@ -2,15 +2,20 @@
  * Feature gates for the Trip Full Loop phases that are not shippable yet.
  *
  * The handoff is explicit that maps, live location and calling stay behind
- * disabled flags until their credentials, schema and privacy configuration are
- * ready (§13.6), and each is blocked on something a flag cannot supply:
+ * disabled flags until their credentials and rollout configuration are ready
+ * (§13.6):
  *
  *   maps     — no restricted Google keys, and web CSP/Permissions-Policy do not
  *              yet allow Maps hosts (§5, §7).
- *   location — no `trip_location_sessions` / `trip_member_locations` schema, no
- *              retention job, and `geolocation=()` is still denied (§5, §8).
- *   calls    — no VoIP provider chosen, no token endpoint, no CallKit/PushKit
- *              flow (§5, §6.5).
+ *   location — the `trip_location_sessions` / `trip_member_locations` schema,
+ *              its RLS, the retention cron job, and the relaxed
+ *              `geolocation=(self)` Permissions-Policy all now exist
+ *              (20260831090000_trip_location_and_calls.sql) — this flag is
+ *              purely a rollout switch at this point, not blocked on missing
+ *              infrastructure.
+ *   calls    — LiveKit is wired up end to end (token endpoint, schema, web UI,
+ *              iOS CallKit-less join/leave) — this flag is likewise a rollout
+ *              switch, not blocked on missing infrastructure.
  *
  * A flag reads as enabled only when its env var is exactly "1". Anything else —
  * unset, "true", "yes", empty — is off, so a half-configured environment cannot

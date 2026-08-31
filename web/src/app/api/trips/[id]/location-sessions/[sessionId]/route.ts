@@ -3,10 +3,15 @@ import { NextRequest, NextResponse } from "next/server"
 import { getAuthedUser } from "@/lib/authed-user"
 import { getTripAccess } from "@/lib/trips/trip-access"
 import { pingLocation, stopLocationSession, type LocationPoint } from "@/lib/trips/location-sharing"
+import { tripFeatures, featureDisabledResponse } from "@/lib/trips/trip-features"
 
 type Params = { params: Promise<{ id: string; sessionId: string }> }
 
 async function guard(tripId: string, req: NextRequest) {
+  if (!tripFeatures.liveLocation) {
+    const disabled = featureDisabledResponse("liveLocation")
+    return { error: NextResponse.json(disabled.body, { status: disabled.status }) }
+  }
   const user = await getAuthedUser(req)
   if (!user) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) }
   const access = await getTripAccess(tripId, user.id)

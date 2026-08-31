@@ -52,6 +52,11 @@ const cspDirectives: Record<string, string[]> = {
                       // Vercel Speed Insights
                       "https://vitals.vercel-insights.com",
                       "https://va.vercel-scripts.com",
+                      // LiveKit Cloud voice-call rooms — a project's URL is a
+                      // subdomain of livekit.cloud, both the wss:// signaling
+                      // connection and the https:// token/API surface.
+                      "wss://*.livekit.cloud",
+                      "https://*.livekit.cloud",
                       ...googleMapsOrigins],
   "worker-src":      ["'self'", "blob:"],
   "frame-src":       ["'none'"],
@@ -98,9 +103,10 @@ const securityHeaders = [
   // Restrict browser features
   {
     // camera=(self) — allows this page to use camera, blocks third-party iframes
-    // microphone=() — still blocked (not needed by the app)
+    // microphone=(self) — trip voice calling (LiveKit) needs mic access
+    // geolocation=(self) — trip live location sharing needs the Geolocation API
     key:   "Permissions-Policy",
-    value: "camera=(self), microphone=(), geolocation=(), payment=(), usb=()",
+    value: "camera=(self), microphone=(self), geolocation=(self), payment=(), usb=()",
   },
   // Block legacy XSS auditor (old browsers)
   { key: "X-XSS-Protection",           value: "1; mode=block" },
