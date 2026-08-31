@@ -34,6 +34,15 @@ enum Config {
     static let demoOrgId    = "53d094c2-1d58-4f87-aee6-09aab0816692"
     static let storageBucket = "documents"
 
+    // MARK: – LiveKit (trip voice calls + live broadcast)
+    // See docs/superpowers/specs/2026-08-31-trip-location-and-calling-design.md.
+    // The websocket URL is not a secret (same trust level as `supabaseURL`
+    // above) — the API key/secret that mint join tokens live server-side only,
+    // in the web app's env, and never belong in this file or in the app
+    // bundle. Fill in once a LiveKit Cloud project exists (cloud.livekit.io →
+    // create project → Settings → Keys shows the Project URL).
+    static let liveKitURL: URL? = nil // e.g. URL(string: "wss://slippy-xxxxx.livekit.cloud")
+
     // MARK: – Tax
     /// Thailand's standard VAT rate — single source of truth so it's never
     /// hardcoded per-call-site. Used as a fallback when a receipt's actual
