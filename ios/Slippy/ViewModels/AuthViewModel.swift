@@ -545,6 +545,29 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
+    /// Same table/pattern as updateProfile(fullName:) — see that function's
+    /// comment for why this writes straight to `users`.
+    func updateDateOfBirth(_ isoDate: String?) async -> Bool {
+        guard let userId = session?.user.id.uuidString else { return false }
+        do {
+            struct Patch: Encodable { let date_of_birth: String? }
+            let updated: UserProfile = try await db
+                .from("users")
+                .update(Patch(date_of_birth: isoDate))
+                .eq("id", value: userId)
+                .select()
+                .single()
+                .execute()
+                .value
+            profile = updated
+            hapticSuccess()
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
     // MARK: – Upload avatar to Supabase Storage → update profile
     func uploadAvatar(_ imageData: Data) async -> Bool {
         guard let userId = session?.user.id.uuidString else { return false }
