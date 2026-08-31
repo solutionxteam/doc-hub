@@ -64,7 +64,14 @@ struct AddMedicationView: View {
         _doctorInstructions = State(initialValue: editing?.doctorInstructions ?? scanned?.instructionsVerbatim ?? "")
         _locCode            = State(initialValue: inv?.locCode ?? "")
         _lotNo              = State(initialValue: inv?.lotNo ?? scanned?.lotNo ?? "")
-        _qtyPerPack         = State(initialValue: (inv?.qtyPerPack ?? scanned?.qtyTotal).map { String(Int($0)) } ?? "")
+        // Editing must reproduce the CURRENT stock by default, not silently
+        // reset it to a full pack — packSizeSeed falls back to qtyRemaining
+        // (never blank when there's an existing inventory row), and
+        // alreadyTaken is derived so computedRemaining == qtyRemaining
+        // unless the user actually touches the calculator.
+        let packSizeSeed = inv?.qtyPerPack ?? scanned?.qtyTotal ?? inv?.qtyRemaining
+        _qtyPerPack         = State(initialValue: packSizeSeed.map { String(Int($0)) } ?? "")
+        _alreadyTaken       = State(initialValue: inv.map { String(Int(max((packSizeSeed ?? $0.qtyRemaining) - $0.qtyRemaining, 0))) } ?? "")
         _times       = State(initialValue: (sched?.times.isEmpty == false ? sched?.times
                               : (scanned?.times.isEmpty == false ? scanned?.times : nil)) ?? ["08:00"])
         _doseQty     = State(initialValue: String(sched?.doseQty ?? scanned?.doseQty ?? 1))
@@ -306,10 +313,12 @@ struct AddMedicationView: View {
                     }
                     .tint(healthGreen)
 
-                    // Inventory — pack size and already-taken calculate the
-                    // remaining count; leaving "ทานไปแล้ว" at 0 with
-                    // "จำนวนต่อกล่อง" set to what's actually on hand
-                    // reproduces the old direct-entry behavior exactly.
+                    // Inventory — pack size minus already-taken gives the
+                    // remaining count. init() seeds both fields so opening
+                    // this on an existing medication starts computedRemaining
+                    // at the current qtyRemaining — saving without touching
+                    // either field must never silently reset stock to a full
+                    // pack.
                     HStack(spacing: 12) {
                         fieldSection(title: "จำนวนต่อกล่อง") {
                             TextField("30", text: $qtyPerPack)
