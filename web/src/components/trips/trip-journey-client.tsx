@@ -14,6 +14,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import TripMap from "./trip-map-loader"
 import { TripImportDialog } from "./trip-import-dialog"
+import { LocationShareControl } from "./trip-location-share"
+import { useLocationShares } from "@/lib/trips/use-location-shares"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -448,6 +450,7 @@ export function TripJourneyClient({
   // rather than cast, so every read below has to handle it.
   const [activeDay, setActiveDay] = useState<number | null>(initialDays[0]?.day_number ?? 1)
   const [moreScreen, setMoreScreen] = useState<"menu" | "checklist" | "notes" | "documents" | "gallery">("menu")
+  const { others: liveLocations } = useLocationShares(trip.id)
 
   const [notes, setNotes] = useState(initialNotes)
   const [documents, setDocuments] = useState(initialDocuments)
@@ -825,14 +828,18 @@ export function TripJourneyClient({
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <DayStrip days={days} active={activeDay} onPick={setActiveDay} />
-            <button onClick={() => setActiveDay(v => (v === null ? days[0]?.day_number ?? 1 : null))}
-              className={cn("h-9 shrink-0 rounded-xl border px-3.5 text-xs font-semibold transition",
-                activeDay === null ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "bg-card hover:bg-muted/50")}>
-              {activeDay === null ? "กำลังดูทั้งทริป" : "ดูทั้งทริป"}
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <LocationShareControl tripId={trip.id} />
+              <button onClick={() => setActiveDay(v => (v === null ? days[0]?.day_number ?? 1 : null))}
+                className={cn("h-9 shrink-0 rounded-xl border px-3.5 text-xs font-semibold transition",
+                  activeDay === null ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "bg-card hover:bg-muted/50")}>
+                {activeDay === null ? "กำลังดูทั้งทริป" : "ดูทั้งทริป"}
+              </button>
+            </div>
           </div>
           <TripMap tripId={trip.id} days={days} activeDay={activeDay}
-                   onDaysChange={setDays} canEdit onEditItem={setEditingItem} />
+                   onDaysChange={setDays} canEdit onEditItem={setEditingItem}
+                   liveLocations={liveLocations} />
         </div>
       )}
 

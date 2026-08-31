@@ -148,13 +148,18 @@ interface Props {
    * trip-journey-client.tsx rather than being duplicated here.
    */
   onEditItem?: (item: JourneyItem) => void
+  /** Live-sharing trip members' current positions — rendered as distinct
+   * dark dot markers, separate from the itinerary pins above. Optional so
+   * every existing call site (e.g. the Overview tab's compact preview,
+   * which doesn't call useLocationShares) keeps working unchanged. */
+  liveLocations?: import("@/lib/trips/use-location-shares").ActiveLocation[]
 }
 
 interface SearchResult { label: string; name: string; lat: number; lng: number; kind: string | null }
 
 export default function TripMap({
   tripId, days, activeDay, onDaysChange, canEdit, onEditItem,
-  variant = "full", height = 560,
+  variant = "full", height = 560, liveLocations,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   // Placeholder left in the map's normal in-page position — never itself
@@ -169,6 +174,7 @@ export default function TripMap({
   useEffect(() => { setDockReady(true) }, [])
   const mapRef = useRef<google.maps.Map | null>(null)
   const markersRef = useRef<Map<string, google.maps.marker.AdvancedMarkerElement>>(new Map())
+  const liveMarkersRef = useRef<Map<string, google.maps.marker.AdvancedMarkerElement>>(new Map())
   const polylinesRef = useRef<Map<string, google.maps.Polyline>>(new Map())
   const pendingMarkerRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null)
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null)
@@ -654,6 +660,28 @@ export default function TripMap({
       markersRef.current.set(item.id, marker)
     }
   }, [pins, selected, canEdit, mapReady, patchItem])
+
+  // Live-sharing members' positions — a separate marker set from the
+  // itinerary pins above; full rebuild on each change, same as those.
+  // Greyed out once a ping is >60s old (matches the polling/ping cadence
+  // in use-location-shares.ts: 10s poll, 12s ping — 60s is several missed
+  // beats, not a hair-trigger flicker on ordinary network jitter).
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+    liveMarkersRef.current.forEach(m => { m.map = null })
+    liveMarkersRef.current.clear()
+
+    for (const loc of liveLocations ?? []) {
+      const stale = Date.now() - new Date(loc.recordedAt).getTime() > 60_000
+      const el = document.createElement("div")
+      el.innerHTML = `<div style="width:22px;height:22px;border-radius:50%;background:${stale ? "#94a3b8" : "#0f172a"};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);opacity:${stale ? 0.6 : 1}"></div>`
+      const marker = new google.maps.marker.AdvancedMarkerElement({
+        map, position: { lat: loc.lat, lng: loc.lng }, content: el,
+      })
+      liveMarkersRef.current.set(loc.sessionId, marker)
+    }
+  }, [liveLocations, mapReady])
 
   // The provisional "what's here" pin.
   useEffect(() => {
