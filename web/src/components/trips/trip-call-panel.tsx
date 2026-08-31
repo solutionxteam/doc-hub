@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Room } from "livekit-client"
 import { Phone, PhoneOff } from "lucide-react"
 
@@ -12,6 +12,15 @@ export function CallButton({ tripId }: { tripId: string }) {
   const roomRef = useRef<Room | null>(null)
   const callSessionIdRef = useRef<string | null>(null)
 
+  // If this component instance unmounts (e.g. the user switches tabs) while
+  // it's still holding a connected room, disconnect it so the mic doesn't
+  // keep capturing audio into an orphaned call with no hang-up button.
+  useEffect(() => {
+    return () => {
+      roomRef.current?.disconnect()
+    }
+  }, [])
+
   async function join() {
     setConnecting(true)
     try {
@@ -20,8 +29,17 @@ export function CallButton({ tripId }: { tripId: string }) {
       const { token, url, callSessionId } = await res.json() as { token: string; url: string; callSessionId: string }
 
       const room = new Room()
-      await room.connect(url, token)
-      await room.localParticipant.setMicrophoneEnabled(true)
+      try {
+        await room.connect(url, token)
+        await room.localParticipant.setMicrophoneEnabled(true)
+      } catch (err) {
+        // room.connect() may have succeeded even though a later step (e.g.
+        // enabling the mic) failed — this room is never stored in roomRef,
+        // so it must be disconnected here or it (and any mic track it
+        // already captured) leaks as an unreachable, still-connected room.
+        await room.disconnect()
+        throw err
+      }
       roomRef.current = room
       callSessionIdRef.current = callSessionId
       setConnected(true)
