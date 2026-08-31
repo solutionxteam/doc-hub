@@ -13,7 +13,8 @@
     "test:vat": "node --experimental-strip-types --test src/lib/vat.test.mjs",
     "test:security": "node --experimental-strip-types --test src/lib/liff-auth.test.mjs",
     "test:trips": "node --experimental-strip-types --test src/lib/trips/trip-conversation.test.mjs",
-    "test:medications": "node --experimental-strip-types --test src/lib/medications.test.mjs"
+    "test:medications": "node --experimental-strip-types --test src/lib/medications.test.mjs",
+    "test:location-sharing": "node --experimental-strip-types --test src/lib/trips/location-sharing.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",
