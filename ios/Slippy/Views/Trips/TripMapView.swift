@@ -70,6 +70,9 @@ struct TripMapView: View {
     @State private var poi: ResolvedPlace?
     @State private var resolvingPOI = false
 
+    @StateObject private var locationVM = TripLocationViewModel()
+    @State private var showShareLocationSheet = false
+
     private struct PendingPlace {
         let coordinate: CLLocationCoordinate2D
         var name: String?
@@ -128,7 +131,9 @@ struct TripMapView: View {
             }
             frameToPins()
             routeStore.ensure(for: legs)
+            locationVM.startPolling(journeyId: trip.id)
         }
+        .onDisappear { locationVM.stopPolling() }
         .onChange(of: days.count) { _, _ in routeStore.ensure(for: legs) }
         .onChange(of: activeDay) { _, _ in
             selectedId = nil
@@ -197,6 +202,12 @@ struct TripMapView: View {
                         if added { Task { await onChanged() } }
                     }
                 )
+            }
+        }
+        .sheet(isPresented: $showShareLocationSheet) {
+            ShareLocationSheet { duration in
+                showShareLocationSheet = false
+                locationVM.startSharing(journeyId: trip.id, duration: duration)
             }
         }
     }
@@ -278,6 +289,12 @@ struct TripMapView: View {
                         }
                     }
                 }
+
+                ForEach(locationVM.others) { loc in
+                    Annotation("", coordinate: CLLocationCoordinate2D(latitude: loc.latitude, longitude: loc.longitude)) {
+                        livePinBadge(loc)
+                    }
+                }
             }
             .mapStyle(.standard(elevation: .flat))
             .frame(minHeight: 320)
@@ -290,6 +307,7 @@ struct TripMapView: View {
             )
             .overlay(alignment: .top) {
                 VStack(spacing: 6) {
+                    if let session = locationVM.mySession { sharingBanner(session) }
                     if resolvingPOI { resolvingBanner }
                     movingBanner
                 }
@@ -313,6 +331,24 @@ struct TripMapView: View {
                 }
             }
         }
+    }
+
+    private func sharingBanner(_ session: TripLocationAPI.Session) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "location.fill.viewfinder").foregroundColor(.white)
+            Text("กำลังแชร์ตำแหน่ง")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white)
+            Button {
+                hapticLight()
+                locationVM.stopSharing()
+            } label: {
+                Text("หยุด").font(.system(size: 12, weight: .bold)).foregroundColor(.white)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(Capsule().fill(Color.brand500.opacity(0.9)))
+        .padding(.top, 10)
     }
 
     private var resolvingBanner: some View {
@@ -350,6 +386,21 @@ struct TripMapView: View {
         }
     }
 
+    private func livePinBadge(_ loc: TripLocationAPI.MemberLocation) -> some View {
+        let stale = (ISO8601DateFormatter().date(from: loc.recordedAt).map { Date().timeIntervalSince($0) > 60 }) ?? true
+        return ZStack {
+            Circle()
+                .fill(stale ? Color.gray : Color.brand500)
+                .frame(width: 26, height: 26)
+                .overlay(Circle().stroke(.white, lineWidth: 2))
+                .shadow(radius: 3)
+            Image(systemName: "location.fill")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.white)
+        }
+        .opacity(stale ? 0.6 : 1)
+    }
+
     @ViewBuilder
     private var movingBanner: some View {
         if let movingItem {
@@ -385,6 +436,15 @@ struct TripMapView: View {
                 }
                 .buttonStyle(.bordered)
             }
+            Button {
+                hapticLight()
+                if locationVM.mySession != nil { locationVM.stopSharing() } else { showShareLocationSheet = true }
+            } label: {
+                Label(locationVM.mySession != nil ? "หยุดแชร์ตำแหน่ง" : "แชร์ตำแหน่ง",
+                      systemImage: locationVM.mySession != nil ? "location.slash.fill" : "location.fill")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .buttonStyle(.bordered)
             Spacer()
             if busy { ProgressView().controlSize(.small) }
             Button {
@@ -770,6 +830,38 @@ fileprivate struct ResolvedPlace {
     let address: String?
     let phone: String?
     let website: String?
+}
+
+// MARK: – Share location
+
+private struct ShareLocationSheet: View {
+    let onPick: (TripLocationAPI.Duration) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("เพื่อนร่วมทริปจะเห็นตำแหน่งของคุณแบบสด ๆ จนกว่าจะหมดเวลาหรือคุณกดหยุด")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color.textSecondary)
+                }
+                ForEach([
+                    (TripLocationAPI.Duration.m15, "15 นาที"),
+                    (.h1, "1 ชั่วโมง"),
+                    (.h4, "4 ชั่วโมง"),
+                    (.eod, "จนถึงสิ้นวัน"),
+                ], id: \.0) { duration, label in
+                    Button(label) { onPick(duration); dismiss() }
+                }
+            }
+            .navigationTitle("แชร์ตำแหน่งนานแค่ไหน")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("ยกเลิก") { dismiss() } }
+            }
+        }
+    }
 }
 
 // MARK: – Add stop
