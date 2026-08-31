@@ -448,7 +448,7 @@ private struct MedicationCard: View {
                             .foregroundColor(.textSecondary)
                     }
                     if let sched = med.primarySchedule, !sched.times.isEmpty {
-                        Text("· ⏰ \(sched.times.joined(separator: ", "))")
+                        Text(sched.isBedtime ? "· 🌙 ก่อนนอน" : "· ⏰ \(sched.times.joined(separator: ", "))")
                             .font(.system(size: 11))
                             .foregroundColor(.textSecondary)
                     }
