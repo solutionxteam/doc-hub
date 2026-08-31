@@ -252,32 +252,46 @@ struct AddMedicationView: View {
                     // Reminder schedule
                     fieldSection(title: "เวลาแจ้งเตือน") {
                         VStack(spacing: 8) {
-                            ForEach(times.indices, id: \.self) { i in
-                                HStack(spacing: 8) {
-                                    DatePicker("", selection: Binding(
-                                        get: { Self.time(from: times[i]) },
-                                        set: { times[i] = Self.timeString(from: $0) }
-                                    ), displayedComponents: .hourAndMinute)
-                                    .labelsHidden()
-                                    Spacer()
-                                    if times.count > 1 {
-                                        Button {
-                                            times.remove(at: i)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .foregroundColor(.textSecondary)
+                            // Bedtime hides the picker rather than merely
+                            // labeling it — "ไม่ต้องระบุเวลาแม่นยำ" means the
+                            // user isn't asked to touch a clock at all. A real
+                            // HH:mm is still stored (LINE reminders still fire
+                            // on it); toggling on seeds a 22:00 default only
+                            // if times is still at its untouched default, so
+                            // an already-customized time survives the toggle.
+                            if !isBedtime {
+                                ForEach(times.indices, id: \.self) { i in
+                                    HStack(spacing: 8) {
+                                        DatePicker("", selection: Binding(
+                                            get: { Self.time(from: times[i]) },
+                                            set: { times[i] = Self.timeString(from: $0) }
+                                        ), displayedComponents: .hourAndMinute)
+                                        .labelsHidden()
+                                        Spacer()
+                                        if times.count > 1 {
+                                            Button {
+                                                times.remove(at: i)
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.textSecondary)
+                                            }
                                         }
                                     }
                                 }
                             }
                             bedtimeToggle
-                            Button {
-                                hapticLight()
-                                times.append("12:00")
-                            } label: {
-                                Label("เพิ่มเวลา", systemImage: "plus.circle")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(healthGreen)
+                                .onChange(of: isBedtime) { newValue in
+                                    if newValue && times == ["08:00"] { times = ["22:00"] }
+                                }
+                            if !isBedtime {
+                                Button {
+                                    hapticLight()
+                                    times.append("12:00")
+                                } label: {
+                                    Label("เพิ่มเวลา", systemImage: "plus.circle")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(healthGreen)
+                                }
                             }
                         }
                         .padding(12)
