@@ -16,7 +16,7 @@ export interface CallsDb {
       }
     }
     insert(row: Record<string, unknown>): { select(cols: string): { single(): PromiseLike<{ data: Record<string, unknown>; error: { message: string } | null }> } }
-    update(patch: Record<string, unknown>): { eq(col: string, val: string): PromiseLike<{ error: { message: string } | null }> }
+    update(patch: Record<string, unknown>): { eq(col: string, val: string): { eq(col: string, val: string): PromiseLike<{ error: { message: string } | null }> } }
   }
 }
 
@@ -74,10 +74,14 @@ export async function mintCallToken(
   return { token, url, roomName, callSessionId }
 }
 
-export async function endCallSession(callSessionId: string, db?: CallsDb): Promise<void> {
+/** Scoped to journeyId in addition to the session id — without this, any
+ * trip member holding a call session id (e.g. one retained from a trip
+ * they were since removed from) could end an unrelated trip's call. */
+export async function endCallSession(callSessionId: string, journeyId: string, db?: CallsDb): Promise<void> {
   const admin = db ?? await defaultDb()
   const { error } = await admin.from("trip_call_sessions")
     .update({ status: "ended", ended_at: new Date().toISOString() })
     .eq("id", callSessionId)
+    .eq("journey_id", journeyId)
   if (error) throw new Error(error.message)
 }

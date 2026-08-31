@@ -60,7 +60,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   try {
-    await endCallSession(body.callSessionId)
+    await endCallSession(body.callSessionId, tripId)
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "failed" }, { status: 500 })

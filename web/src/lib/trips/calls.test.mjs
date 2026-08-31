@@ -77,10 +77,18 @@ test("mintCallToken's JWT grants room-join for exactly the returned room", async
 })
 
 test("endCallSession marks the call ended with a timestamp", async () => {
-  const db = fakeDb({ trip_call_sessions: [{ id: "call-1", status: "ringing" }] })
-  await endCallSession("call-1", db)
+  const db = fakeDb({ trip_call_sessions: [{ id: "call-1", journey_id: "trip-1", status: "ringing" }] })
+  await endCallSession("call-1", "trip-1", db)
 
   const session = db._tables.trip_call_sessions[0]
   assert.equal(session.status, "ended")
   assert.ok(session.ended_at)
+})
+
+test("endCallSession is scoped to the given journeyId — cannot end another trip's call", async () => {
+  const db = fakeDb({ trip_call_sessions: [{ id: "call-1", journey_id: "trip-1", status: "ringing" }] })
+  await endCallSession("call-1", "someone-elses-trip", db)
+
+  const session = db._tables.trip_call_sessions[0]
+  assert.equal(session.status, "ringing", "a mismatched journeyId must not end someone else's call")
 })

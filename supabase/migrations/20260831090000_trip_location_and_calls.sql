@@ -44,10 +44,11 @@ CREATE POLICY "tls_insert" ON trip_location_sessions FOR INSERT TO authenticated
   WITH CHECK (user_id = auth.uid() AND is_trip_participant(journey_id));
 
 CREATE POLICY "tls_update" ON trip_location_sessions FOR UPDATE TO authenticated
-  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+  USING (user_id = auth.uid() AND is_trip_participant(journey_id))
+  WITH CHECK (user_id = auth.uid() AND is_trip_participant(journey_id));
 
 CREATE POLICY "tls_delete" ON trip_location_sessions FOR DELETE TO authenticated
-  USING (user_id = auth.uid());
+  USING (user_id = auth.uid() AND is_trip_participant(journey_id));
 
 CREATE TABLE trip_member_locations (
   session_id  uuid PRIMARY KEY REFERENCES trip_location_sessions(id) ON DELETE CASCADE,
@@ -74,10 +75,11 @@ CREATE POLICY "tml_insert" ON trip_member_locations FOR INSERT TO authenticated
   WITH CHECK (user_id = auth.uid() AND is_trip_participant(journey_id));
 
 CREATE POLICY "tml_update" ON trip_member_locations FOR UPDATE TO authenticated
-  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+  USING (user_id = auth.uid() AND is_trip_participant(journey_id))
+  WITH CHECK (user_id = auth.uid() AND is_trip_participant(journey_id));
 
 CREATE POLICY "tml_delete" ON trip_member_locations FOR DELETE TO authenticated
-  USING (user_id = auth.uid());
+  USING (user_id = auth.uid() AND is_trip_participant(journey_id));
 
 CREATE TABLE trip_call_sessions (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
