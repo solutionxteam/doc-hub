@@ -20,14 +20,34 @@ CREATE TABLE trip_location_sessions (
   started_at  timestamptz NOT NULL DEFAULT now(),
   expires_at  timestamptz NOT NULL,
   stopped_at  timestamptz,
-  created_at  timestamptz NOT NULL DEFAULT now()
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  -- Bounds how far a client can push its own expiry — without this, a
+  -- client-supplied expires_at could keep a "temporary" share alive
+  -- indefinitely, defeating the opt-in/temporary guarantee in §2 of the spec.
+  CONSTRAINT trip_location_sessions_expiry_bound CHECK (expires_at <= started_at + interval '24 hours')
 );
 
 CREATE INDEX trip_location_sessions_journey_idx ON trip_location_sessions(journey_id);
 
+-- RLS: SELECT stays trip-scoped (anyone on the trip can see who's sharing),
+-- but every write is additionally scoped to the row's own user_id — a plain
+-- `FOR ALL USING (is_trip_participant(...))` with no WITH CHECK let ANY trip
+-- participant INSERT/UPDATE/DELETE any OTHER member's session, not just read
+-- it. Split into per-command policies so each write carries its own
+-- ownership check.
 ALTER TABLE trip_location_sessions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "tls_participant" ON trip_location_sessions FOR ALL TO authenticated
+
+CREATE POLICY "tls_select" ON trip_location_sessions FOR SELECT TO authenticated
   USING (is_trip_participant(journey_id));
+
+CREATE POLICY "tls_insert" ON trip_location_sessions FOR INSERT TO authenticated
+  WITH CHECK (user_id = auth.uid() AND is_trip_participant(journey_id));
+
+CREATE POLICY "tls_update" ON trip_location_sessions FOR UPDATE TO authenticated
+  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "tls_delete" ON trip_location_sessions FOR DELETE TO authenticated
+  USING (user_id = auth.uid());
 
 CREATE TABLE trip_member_locations (
   session_id  uuid PRIMARY KEY REFERENCES trip_location_sessions(id) ON DELETE CASCADE,
@@ -43,9 +63,21 @@ CREATE TABLE trip_member_locations (
 
 CREATE INDEX trip_member_locations_journey_idx ON trip_member_locations(journey_id);
 
+-- Same split as trip_location_sessions above, and for the same reason: SELECT
+-- is trip-scoped, every write additionally requires user_id = auth.uid().
 ALTER TABLE trip_member_locations ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "tml_participant" ON trip_member_locations FOR ALL TO authenticated
+
+CREATE POLICY "tml_select" ON trip_member_locations FOR SELECT TO authenticated
   USING (is_trip_participant(journey_id));
+
+CREATE POLICY "tml_insert" ON trip_member_locations FOR INSERT TO authenticated
+  WITH CHECK (user_id = auth.uid() AND is_trip_participant(journey_id));
+
+CREATE POLICY "tml_update" ON trip_member_locations FOR UPDATE TO authenticated
+  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "tml_delete" ON trip_member_locations FOR DELETE TO authenticated
+  USING (user_id = auth.uid());
 
 CREATE TABLE trip_call_sessions (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -59,6 +91,12 @@ CREATE TABLE trip_call_sessions (
 );
 
 CREATE INDEX trip_call_sessions_journey_idx ON trip_call_sessions(journey_id);
+
+-- At most one live (ringing or active) call per trip — prevents a race in
+-- mintCallToken (SELECT ... WHERE status = 'ringing' ... .maybeSingle()) from
+-- ever finding two rows and throwing on every future call for this trip.
+CREATE UNIQUE INDEX trip_call_sessions_one_active_per_trip ON trip_call_sessions(journey_id)
+  WHERE status IN ('ringing', 'active');
 
 -- This table is only ever written by server-side routes using the
 -- service-role client (token minting needs LIVEKIT_API_SECRET, which never

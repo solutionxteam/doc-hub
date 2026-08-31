@@ -31,10 +31,12 @@ enum TripLocationAPI {
     }
 
     static func stop(sessionId: String) async throws {
+        let userId = try await db.auth.session.user.id.uuidString
         struct Patch: Encodable { let stopped_at: String }
         _ = try await db.from("trip_location_sessions")
             .update(Patch(stopped_at: ISO8601DateFormatter().string(from: Date())))
             .eq("id", value: sessionId)
+            .eq("user_id", value: userId)
             .execute()
     }
 
