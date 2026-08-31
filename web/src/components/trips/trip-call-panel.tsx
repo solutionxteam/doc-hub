@@ -4,17 +4,35 @@ import { useEffect, useRef, useState } from "react"
 import { Room } from "livekit-client"
 import { Phone, PhoneOff } from "lucide-react"
 
-/** Voice-only for this plan — no camera track is ever requested or
- * published, per the locked-in decision in the design spec. */
-export function CallButton({ tripId }: { tripId: string }) {
+export interface TripCall {
+  connected: boolean
+  connecting: boolean
+  join: () => Promise<void>
+  leave: () => Promise<void>
+}
+
+/**
+ * Voice-only for this plan — no camera track is ever requested or published,
+ * per the locked-in decision in the design spec.
+ *
+ * A single instance of this hook is meant to be called ONCE per trip page
+ * (in trip-journey-client.tsx) and its `{ connected, connecting, join, leave }`
+ * passed down to every `CallButton` render site. Previously each `CallButton`
+ * called this logic itself, so the Itinerary tab's button and the Map tab's
+ * button each held their OWN `roomRef` — switching from whichever tab you
+ * joined the call from unmounted that instance, ran its unmount-cleanup
+ * effect, and silently disconnected the call out from under you even though
+ * you never touched the hang-up button. One shared instance means there is
+ * only ever one `Room`, so no tab switch can trigger its cleanup effect.
+ */
+export function useTripCall(tripId: string): TripCall {
   const [connected, setConnected] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const roomRef = useRef<Room | null>(null)
   const callSessionIdRef = useRef<string | null>(null)
 
-  // If this component instance unmounts (e.g. the user switches tabs) while
-  // it's still holding a connected room, disconnect it so the mic doesn't
-  // keep capturing audio into an orphaned call with no hang-up button.
+  // Now only tears down when the trip page itself unmounts (this hook is
+  // called once, at the page level), not on every tab switch.
   useEffect(() => {
     return () => {
       roomRef.current?.disconnect()
@@ -54,11 +72,39 @@ export function CallButton({ tripId }: { tripId: string }) {
     roomRef.current?.disconnect()
     roomRef.current = null
     setConnected(false)
-    // Ending the last participant's call session is a server decision
-    // (does someone else remain in the room?) — left for a later pass once
-    // there's a way to check room occupancy; not blocking for this plan,
-    // since the room simply sits idle with no participants otherwise.
+    // Marks this call session `ended` so trip_call_sessions_one_active_per_trip
+    // (a partial unique index on journey_id WHERE status IN ('ringing',
+    // 'active')) doesn't stay permanently stuck on a dangling ringing/active
+    // row — without this, the very next person to try to join this trip's
+    // call would hit that unique index and mintCallToken would start
+    // failing for everyone. Not scoped to "the last participant leaves":
+    // ending it here is a simplification (a future join briefly finds no
+    // row and starts a fresh one, cheaper than tracking room occupancy),
+    // not a full call-history feature.
+    const callSessionId = callSessionIdRef.current
+    callSessionIdRef.current = null
+    if (callSessionId) {
+      try {
+        await fetch(`/api/trips/${tripId}/calls/token`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ callSessionId }),
+        })
+      } catch {
+        // Best-effort — a failed hang-up notification must never block the
+        // user from actually leaving the call locally (already done above).
+      }
+    }
   }
+
+  return { connected, connecting, join, leave }
+}
+
+/** Presentational only — state comes from `useTripCall`, called once at the
+ * trip page level and shared across every render site (see that hook's own
+ * doc comment for why). */
+export function CallButton({ call }: { call: TripCall }) {
+  const { connected, connecting, join, leave } = call
 
   if (connected) {
     return (
@@ -70,6 +116,22 @@ export function CallButton({ tripId }: { tripId: string }) {
   return (
     <button onClick={join} disabled={connecting} className="inline-flex h-9 items-center gap-1.5 rounded-xl border bg-card px-3 text-xs font-semibold hover:bg-muted/50 disabled:opacity-50">
       <Phone className="h-3.5 w-3.5" />{connecting ? "กำลังเชื่อมต่อ…" : "โทร"}
+    </button>
+  )
+}
+
+/** The "in call" indicator — rendered once, outside every tab-conditional
+ * block, so it survives switching tabs (see useTripCall's doc comment).
+ * Deliberately NOT self-positioning: the caller stacks this alongside the
+ * location-sharing banner in one positioned container. */
+export function TripCallBanner({ call }: { call: TripCall }) {
+  if (!call.connected) return null
+  return (
+    <button
+      onClick={() => call.leave()}
+      className="pointer-events-auto flex items-center gap-2 rounded-full bg-rose-600/90 px-4 py-2 text-xs font-semibold text-white shadow-lg"
+    >
+      <PhoneOff className="h-3.5 w-3.5" />กำลังคุยสาย · แตะเพื่อวางสาย
     </button>
   )
 }

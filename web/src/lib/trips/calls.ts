@@ -5,7 +5,7 @@
  * One room per trip at a time — joining an already-ringing/active call
  * reuses its room rather than starting a second, disconnected one.
  */
-import { AccessToken } from "livekit-server-sdk"
+import { AccessToken, TrackSource } from "livekit-server-sdk"
 import { getLiveKitServerConfig } from "./livekit-config.ts"
 
 export interface CallsDb {
@@ -55,8 +55,20 @@ export async function mintCallToken(
     callSessionId = created.id as string
   }
 
-  const at = new AccessToken(apiKey, apiSecret, { identity: userId })
-  at.addGrant({ roomJoin: true, room: roomName, canPublish: true, canSubscribe: true })
+  // ttl is deliberately short (well under LiveKit's 6h default): this is a
+  // voice-only trip call, not a persistent credential, and a member removed
+  // from the trip mid-call should not be holding a token that outlives their
+  // membership by hours. canPublishSources restricts publishing to the mic —
+  // this is a voice call, so camera/screen-share tracks are never granted,
+  // regardless of what a compromised or modified client asks the room to
+  // accept.
+  const at = new AccessToken(apiKey, apiSecret, { identity: userId, ttl: "4h" })
+  at.addGrant({
+    roomJoin: true,
+    room: roomName,
+    canPublishSources: [TrackSource.MICROPHONE],
+    canSubscribe: true,
+  })
   const token = await at.toJwt()
 
   return { token, url, roomName, callSessionId }

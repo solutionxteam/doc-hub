@@ -14,8 +14,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import TripMap from "./trip-map-loader"
 import { TripImportDialog } from "./trip-import-dialog"
-import { LocationShareControl } from "./trip-location-share"
-import { CallButton } from "./trip-call-panel"
+import { LocationShareControl, LocationSharingBanner } from "./trip-location-share"
+import { CallButton, TripCallBanner, useTripCall } from "./trip-call-panel"
 import { useLocationShares } from "@/lib/trips/use-location-shares"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -67,6 +67,11 @@ interface Props {
   notes: TripNote[]
   documents: TripDocument[]
   photos: TripPhoto[]
+  /** Resolved server-side from trip-features.ts (see that file's header for
+   * why) and passed down rather than read here — this component is a client
+   * component, and those flags come from server-only env vars. */
+  featureLiveLocation: boolean
+  featureCalls: boolean
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -444,6 +449,7 @@ function DayStrip({ days, active, onPick }: {
 export function TripJourneyClient({
   trip, days: initialDays, participants, checklist,
   notes: initialNotes, documents: initialDocuments, photos: initialPhotos,
+  featureLiveLocation, featureCalls,
 }: Props) {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>("overview")
@@ -451,7 +457,16 @@ export function TripJourneyClient({
   // rather than cast, so every read below has to handle it.
   const [activeDay, setActiveDay] = useState<number | null>(initialDays[0]?.day_number ?? 1)
   const [moreScreen, setMoreScreen] = useState<"menu" | "checklist" | "notes" | "documents" | "gallery">("menu")
-  const { others: liveLocations } = useLocationShares(trip.id)
+  // Lifted to the page level (was previously called separately inside
+  // LocationShareControl too) — one shared session/geolocation-watch
+  // instance means the "currently sharing" banner and the underlying ping
+  // loop both survive switching tabs, instead of being torn down the moment
+  // the Map tab (the only place this used to be mounted) is left. See
+  // LocationShareControl's and LocationSharingBanner's doc comments.
+  const { others: liveLocations, mySession: myLocationSession, start: startLocationShare, stop: stopLocationShare } = useLocationShares(trip.id)
+  const locationShare = { mySession: myLocationSession, start: startLocationShare, stop: stopLocationShare }
+  // Same reasoning, for voice calls — see useTripCall's doc comment.
+  const call = useTripCall(trip.id)
 
   const [notes, setNotes] = useState(initialNotes)
   const [documents, setDocuments] = useState(initialDocuments)
@@ -692,6 +707,14 @@ export function TripJourneyClient({
         ))}
       </nav>
 
+      {/* ── Persistent sharing/call indicators — deliberately OUTSIDE the tab
+          switch below, so they stay visible no matter which tab is active.
+          See LocationSharingBanner/TripCallBanner doc comments. ── */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex flex-col items-center gap-2">
+        <TripCallBanner call={call} />
+        <LocationSharingBanner mySession={myLocationSession} stop={stopLocationShare} />
+      </div>
+
       {/* ── Overview ── */}
       {tab === "overview" && (
         <div className="grid gap-5 xl:grid-cols-[1.5fr_.85fr]">
@@ -797,7 +820,7 @@ export function TripJourneyClient({
                     {day.summary && <p className="mt-2 text-sm text-muted-foreground">{day.summary}</p>}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <CallButton tripId={trip.id} />
+                    {featureCalls && <CallButton call={call} />}
                     <button onClick={() => setCreatingDayId(day.id)}
                       className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border bg-card px-3 text-xs font-semibold hover:bg-muted/50">
                       <Plus className="h-3.5 w-3.5" />เพิ่มรายการ
@@ -833,8 +856,8 @@ export function TripJourneyClient({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <DayStrip days={days} active={activeDay} onPick={setActiveDay} />
             <div className="flex shrink-0 items-center gap-2">
-              <LocationShareControl tripId={trip.id} />
-              <CallButton tripId={trip.id} />
+              {featureLiveLocation && <LocationShareControl share={locationShare} />}
+              {featureCalls && <CallButton call={call} />}
               <button onClick={() => setActiveDay(v => (v === null ? days[0]?.day_number ?? 1 : null))}
                 className={cn("h-9 shrink-0 rounded-xl border px-3.5 text-xs font-semibold transition",
                   activeDay === null ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "bg-card hover:bg-muted/50")}>

@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Locate, LocateOff, X } from "lucide-react"
 import { toast } from "sonner"
-import { useLocationShares, type ShareDuration } from "@/lib/trips/use-location-shares"
+import type { ShareDuration } from "@/lib/trips/use-location-shares"
 import { cn } from "@/lib/utils"
 
 const OPTIONS: { value: ShareDuration; label: string }[] = [
@@ -13,15 +13,23 @@ const OPTIONS: { value: ShareDuration; label: string }[] = [
   { value: "eod", label: "จนถึงสิ้นวัน" },
 ]
 
-/** Button + duration sheet + persistent banner while active. Exported hook
- * state (`others`) is meant to be read separately by trip-map.tsx via its
- * own useLocationShares(tripId) call — React Query-less duplication is
- * intentional here: the alternative (lifting state up) would mean every
- * consumer of the map also has to know about location sharing, and this
- * hook's own 10s poll is cheap enough that two independent instances per
- * page cost nothing a user would notice. */
-export function LocationShareControl({ tripId }: { tripId: string }) {
-  const { mySession, start, stop } = useLocationShares(tripId)
+export interface LocationShareState {
+  mySession: { id: string; expiresAt: string } | null
+  start: (duration: ShareDuration) => Promise<void>
+  stop: () => Promise<void>
+}
+
+/** Start button + duration-picker sheet only — the "currently sharing"
+ * banner itself is rendered once, tab-independently, by the caller
+ * (trip-journey-client.tsx) so it stays visible no matter which tab is
+ * active. `share` comes from a single `useLocationShares(tripId)` call
+ * lifted to the trip page: this component used to call that hook itself,
+ * which meant its browser-geolocation watch/ping timers (and the session
+ * this button believes is active) were torn down and lost the instant the
+ * Map tab — the only place this control was rendered — was left, even
+ * though the location_sessions row was still live server-side. */
+export function LocationShareControl({ share }: { share: LocationShareState }) {
+  const { mySession, start, stop } = share
   const [showPicker, setShowPicker] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -34,12 +42,6 @@ export function LocationShareControl({ tripId }: { tripId: string }) {
         {mySession ? <LocateOff className="h-3.5 w-3.5" /> : <Locate className="h-3.5 w-3.5" />}
         {mySession ? "หยุดแชร์ตำแหน่ง" : "แชร์ตำแหน่ง"}
       </button>
-
-      {mySession && (
-        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full bg-slate-900/90 px-4 py-2 text-xs font-semibold text-white shadow-lg">
-          กำลังแชร์ตำแหน่ง
-        </div>
-      )}
 
       {showPicker && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={() => setShowPicker(false)}>
@@ -70,5 +72,22 @@ export function LocationShareControl({ tripId }: { tripId: string }) {
         </div>
       )}
     </>
+  )
+}
+
+/** The "you are currently sharing" indicator — rendered once, outside every
+ * tab-conditional block, so it survives switching tabs. Deliberately NOT
+ * self-positioning (no `fixed` here): the caller stacks this alongside the
+ * call-in-progress banner in one positioned container, since both can be
+ * visible at once. */
+export function LocationSharingBanner({ mySession, stop }: { mySession: { id: string; expiresAt: string } | null; stop: () => Promise<void> }) {
+  if (!mySession) return null
+  return (
+    <button
+      onClick={() => stop()}
+      className="pointer-events-auto rounded-full bg-slate-900/90 px-4 py-2 text-xs font-semibold text-white shadow-lg"
+    >
+      กำลังแชร์ตำแหน่ง · แตะเพื่อหยุด
+    </button>
   )
 }
