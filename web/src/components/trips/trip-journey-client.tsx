@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import TripMap from "./trip-map-loader"
 import { TripImportDialog } from "./trip-import-dialog"
 import { LocationShareControl } from "./trip-location-share"
+import { CallButton } from "./trip-call-panel"
 import { useLocationShares } from "@/lib/trips/use-location-shares"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -795,10 +796,13 @@ export function TripJourneyClient({
                     </p>
                     {day.summary && <p className="mt-2 text-sm text-muted-foreground">{day.summary}</p>}
                   </div>
-                  <button onClick={() => setCreatingDayId(day.id)}
-                    className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border bg-card px-3 text-xs font-semibold hover:bg-muted/50">
-                    <Plus className="h-3.5 w-3.5" />เพิ่มรายการ
-                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <CallButton tripId={trip.id} />
+                    <button onClick={() => setCreatingDayId(day.id)}
+                      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border bg-card px-3 text-xs font-semibold hover:bg-muted/50">
+                      <Plus className="h-3.5 w-3.5" />เพิ่มรายการ
+                    </button>
+                  </div>
                 </div>
                 <div className="rounded-2xl border bg-card p-2 sm:p-4">
                   {day.trip_itinerary_items.length === 0
@@ -830,6 +834,7 @@ export function TripJourneyClient({
             <DayStrip days={days} active={activeDay} onPick={setActiveDay} />
             <div className="flex shrink-0 items-center gap-2">
               <LocationShareControl tripId={trip.id} />
+              <CallButton tripId={trip.id} />
               <button onClick={() => setActiveDay(v => (v === null ? days[0]?.day_number ?? 1 : null))}
                 className={cn("h-9 shrink-0 rounded-xl border px-3.5 text-xs font-semibold transition",
                   activeDay === null ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "bg-card hover:bg-muted/50")}>
