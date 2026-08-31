@@ -22,6 +22,7 @@ async function pushReminder(lineUserId: string, reminder: {
   meal_note:    string | null
   scheduled_at: string
   log_id:       string
+  is_bedtime:   boolean
 }) {
   const mealText: Record<string, string> = {
     before: "ก่อนอาหาร",
@@ -30,7 +31,9 @@ async function pushReminder(lineUserId: string, reminder: {
     any:    "",
   }
   const meal = reminder.meal_note || mealText[reminder.meal_relation] || ""
-  const time = new Date(reminder.scheduled_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })
+  const time = reminder.is_bedtime
+    ? "ก่อนนอน"
+    : new Date(reminder.scheduled_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })
   // "ตัวยาคืออะไร" — what this pill actually is, not just its name, so a
   // reminder also answers "why am I taking this" and gives something to
   // check a pill's appearance against before swallowing it.
@@ -75,7 +78,7 @@ async function pushReminder(lineUserId: string, reminder: {
               ...(idLine ? [{ type: "text", text: idLine, size: "xs", color: "#9ca3af", margin: "xxs" } as object] : []),
               { type: "text", text: `${reminder.dose_qty} ${reminder.dose_qty === 1 ? "เม็ด" : "เม็ด/ครั้ง"}${meal ? ` · ${meal}` : ""}`, size: "sm", color: "#6b7280", margin: "xs" },
               ...(reminder.med_purpose ? [{ type: "text", text: `🎯 ${reminder.med_purpose}`, size: "xs", color: "#6b7280", margin: "xs", wrap: true } as object] : []),
-              { type: "text", text: `⏰ ${time} น.`, size: "xs", color: "#9ca3af", margin: "sm" },
+              { type: "text", text: reminder.is_bedtime ? `🌙 ${time}` : `⏰ ${time} น.`, size: "xs", color: "#9ca3af", margin: "sm" },
             ]
           }
         ]
@@ -188,6 +191,7 @@ export async function checkAndSendReminders(): Promise<void> {
       meal_note:    r.meal_note,
       scheduled_at: r.scheduled_at,
       log_id:       r.log_id,
+      is_bedtime:   r.is_bedtime,
     })
   }
 }
