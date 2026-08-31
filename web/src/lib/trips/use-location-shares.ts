@@ -27,6 +27,7 @@ export function useLocationShares(tripId: string) {
   }, [pollOthers])
 
   const start = useCallback(async (duration: ShareDuration) => {
+    if (mySession) return
     const res = await fetch(`/api/trips/${tripId}/location-sessions`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ duration }),
@@ -35,7 +36,10 @@ export function useLocationShares(tripId: string) {
     const { session } = await res.json() as { session: { id: string; expiresAt: string } }
     setMySession(session)
 
-    if (!navigator.geolocation) return
+    if (!navigator.geolocation) {
+      await fetch(`/api/trips/${tripId}/location-sessions/${session.id}`, { method: "DELETE" })
+      throw new Error("Geolocation not available on this device")
+    }
     watchId.current = navigator.geolocation.watchPosition(() => { /* position read on each ping tick below */ })
     pingTimer.current = setInterval(() => {
       navigator.geolocation.getCurrentPosition(pos => {
@@ -48,7 +52,7 @@ export function useLocationShares(tripId: string) {
         })
       })
     }, 12_000)
-  }, [tripId])
+  }, [tripId, mySession])
 
   const stop = useCallback(async () => {
     if (!mySession) return

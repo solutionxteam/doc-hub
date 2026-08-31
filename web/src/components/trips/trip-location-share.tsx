@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Locate, LocateOff, X } from "lucide-react"
+import { toast } from "sonner"
 import { useLocationShares, type ShareDuration } from "@/lib/trips/use-location-shares"
 import { cn } from "@/lib/utils"
 
@@ -50,7 +51,17 @@ export function LocationShareControl({ tripId }: { tripId: string }) {
             <p className="mb-3 text-xs text-muted-foreground">เพื่อนร่วมทริปจะเห็นตำแหน่งของคุณแบบสด ๆ จนกว่าจะหมดเวลาหรือคุณกดหยุด</p>
             {OPTIONS.map(o => (
               <button key={o.value} disabled={busy}
-                onClick={async () => { setBusy(true); await start(o.value); setBusy(false); setShowPicker(false) }}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    await start(o.value)
+                    setShowPicker(false)
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Failed to start location sharing")
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
                 className="block w-full rounded-xl p-3 text-left text-sm hover:bg-muted/50 disabled:opacity-50">
                 {o.label}
               </button>
