@@ -25,6 +25,8 @@ struct ProfileView: View {
     @State private var showOrgSwitcher = false
     @State private var editedName      = ""
     @State private var savingName      = false
+    @State private var editedDOB: Date = Date()
+    @State private var hasDOB          = false
 
     // Photo pickers
     @State private var avatarItem:     PhotosPickerItem?
@@ -120,6 +122,13 @@ struct ProfileView: View {
                     Section("ชื่อ-นามสกุล") {
                         TextField("ชื่อ-นามสกุล", text: $editedName)
                     }
+                    Section("วันเกิด") {
+                        Toggle("ระบุวันเกิด", isOn: $hasDOB)
+                        if hasDOB {
+                            DatePicker("วันเกิด", selection: $editedDOB, displayedComponents: .date)
+                                .datePickerStyle(.compact)
+                        }
+                    }
                 }
                 .navigationTitle("แก้ไขโปรไฟล์")
                 .navigationBarTitleDisplayMode(.inline)
@@ -131,9 +140,13 @@ struct ProfileView: View {
                         Button {
                             savingName = true
                             Task {
-                                let ok = await authVM.updateProfile(fullName: editedName)
+                                let nameOK = await authVM.updateProfile(fullName: editedName)
+                                let f = DateFormatter()
+                                f.dateFormat = "yyyy-MM-dd"
+                                f.timeZone = TimeZone(identifier: "UTC")
+                                let dobOK = await authVM.updateDateOfBirth(hasDOB ? f.string(from: editedDOB) : nil)
                                 savingName = false
-                                if ok { showEditName = false }
+                                if nameOK && dobOK { showEditName = false }
                             }
                         } label: {
                             if savingName { ProgressView() } else { Text("บันทึก").bold() }
@@ -142,7 +155,7 @@ struct ProfileView: View {
                     }
                 }
             }
-            .presentationDetents([.height(220)])
+            .presentationDetents([.height(340)])
         }
     }
 
@@ -222,6 +235,16 @@ struct ProfileView: View {
 
                     Button {
                         editedName = authVM.profile?.fullName ?? authVM.profile?.displayName ?? ""
+                        hasDOB = false
+                        if let dobString = authVM.profile?.dateOfBirth {
+                            let f = DateFormatter()
+                            f.dateFormat = "yyyy-MM-dd"
+                            f.timeZone = TimeZone(identifier: "UTC")
+                            if let parsed = f.date(from: dobString) {
+                                editedDOB = parsed
+                                hasDOB = true
+                            }
+                        }
                         showEditName = true
                     } label: {
                         HStack(spacing: 6) {
@@ -436,6 +459,16 @@ struct ProfileView: View {
                 Button {
                     hapticLight()
                     editedName = authVM.profile?.fullName ?? authVM.profile?.displayName ?? ""
+                    hasDOB = false
+                    if let dobString = authVM.profile?.dateOfBirth {
+                        let f = DateFormatter()
+                        f.dateFormat = "yyyy-MM-dd"
+                        f.timeZone = TimeZone(identifier: "UTC")
+                        if let parsed = f.date(from: dobString) {
+                            editedDOB = parsed
+                            hasDOB = true
+                        }
+                    }
                     showEditName = true
                 } label: {
                     HStack {
