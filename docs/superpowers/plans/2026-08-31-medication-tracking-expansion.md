@@ -1316,7 +1316,168 @@ git commit -m "Add date of birth field to profile edit sheet"
 
 ---
 
-## Task 9: Full end-to-end verification
+## Task 9: Sync the LINE reminder worker with bedtime scheduling
+
+**Files:**
+- Create: `supabase/migrations/20260831040000_medication_reminders_include_bedtime.sql`
+- Modify: `api/src/services/medication-reminder.ts`
+
+**Interfaces:**
+- Consumes: `medication_schedules.is_bedtime` (Task 1 — already applied, no dependency on Tasks 2-8, which are iOS-only).
+- Produces: nothing further downstream — this closes a gap found mid-execution: the server-side LINE reminder worker builds its push message from `get_pending_medication_reminders`, which doesn't know about `is_bedtime` yet, so a bedtime medication's LINE reminder would show a literal `⏰ 22:00 น.` even though the app itself (Task 7) now displays "ก่อนนอน" for the same schedule — same inconsistency the trip-map-google-places plan's controller flagged and fixed for a different feature earlier in this project's work, caught here before it shipped instead of after.
+
+**Why this task exists:** found while responding to a live user request ("การแจ้งเตือนเรื่องยาให้ sync กับ reminder ด้วย" — the medication notification should sync with the reminder too) that arrived mid-execution of this plan. Confirmed by reading `api/src/services/medication-reminder.ts:33,78` directly: `pushReminder` formats `reminder.scheduled_at` into a literal `HH:mm` and puts it in the LINE flex message body (`⏰ ${time} น.`) — there is no bedtime-awareness anywhere in this file. There is already a precedent for extending this exact RPC (`supabase/migrations/20260829150000_medication_reminders_include_purpose.sql`, which added `purpose`/`strength`/`color` the same way) — this task follows that established pattern.
+
+- [ ] **Step 1: Write the RPC-extending migration**
+
+```sql
+-- 20260831040000_medication_reminders_include_bedtime.sql
+-- A bedtime medication's LINE reminder must say "ก่อนนอน", not a literal
+-- clock time — matching what the app itself now shows on the medication
+-- card (see the iOS side of this same plan). get_pending_medication_reminders
+-- already joins medication_schedules; is_bedtime just needs to ride along,
+-- same pattern as 20260829150000's purpose/strength/color addition.
+DROP FUNCTION IF EXISTS public.get_pending_medication_reminders(timestamp with time zone, timestamp with time zone);
+
+CREATE FUNCTION public.get_pending_medication_reminders(p_from timestamp with time zone DEFAULT now(), p_to timestamp with time zone DEFAULT (now() + '00:05:00'::interval))
+ RETURNS TABLE(log_id uuid, user_id uuid, medication_id uuid, med_name text, med_purpose text, med_strength text, med_color text, dose_qty numeric, meal_relation text, meal_note text, scheduled_at timestamp with time zone, reminder_via text, is_bedtime boolean)
+ LANGUAGE sql
+AS $function$
+  SELECT
+    ml.id           AS log_id,
+    ml.user_id,
+    ml.medication_id,
+    m.name          AS med_name,
+    m.purpose       AS med_purpose,
+    m.strength      AS med_strength,
+    m.color         AS med_color,
+    ms.dose_qty,
+    ms.meal_relation,
+    ms.meal_note,
+    ml.scheduled_at,
+    ms.reminder_via,
+    ms.is_bedtime
+  FROM medication_logs ml
+  JOIN medication_schedules ms ON ms.id = ml.schedule_id
+  JOIN medications m           ON m.id  = ml.medication_id
+  WHERE
+    ml.status        = 'pending'
+    AND ms.reminder_enabled = true
+    AND ml.scheduled_at - (ms.reminder_minutes * interval '1 minute')
+        BETWEEN p_from AND p_to;
+$function$
+```
+
+- [ ] **Step 2: Apply the migration**
+
+Use the Supabase MCP `apply_migration` tool (`project_id`: `ntzztcnkedcxfjvfxjrf`, `name`: `medication_reminders_include_bedtime`, `query`: the SQL from Step 1) — same mechanism Task 1 used, avoiding a CLI dependency.
+
+- [ ] **Step 3: Verify the function signature**
+
+Run via the Supabase MCP `execute_sql` tool (same project id):
+```sql
+SELECT prosrc FROM pg_proc WHERE proname = 'get_pending_medication_reminders';
+```
+Expected: the result contains `is_bedtime` in the returned text.
+
+- [ ] **Step 4: Thread `is_bedtime` through the TypeScript worker**
+
+In `api/src/services/medication-reminder.ts`, `pushReminder`'s parameter type (lines 15-25):
+```typescript
+async function pushReminder(lineUserId: string, reminder: {
+  med_name:     string
+  med_purpose:  string | null
+  med_strength: string | null
+  med_color:    string | null
+  dose_qty:     number
+  meal_relation: string
+  meal_note:    string | null
+  scheduled_at: string
+  log_id:       string
+}) {
+```
+→
+```typescript
+async function pushReminder(lineUserId: string, reminder: {
+  med_name:     string
+  med_purpose:  string | null
+  med_strength: string | null
+  med_color:    string | null
+  dose_qty:     number
+  meal_relation: string
+  meal_note:    string | null
+  scheduled_at: string
+  log_id:       string
+  is_bedtime:   boolean
+}) {
+```
+
+The `time` line and its use in the flex message body (lines 33 and 78):
+```typescript
+  const time = new Date(reminder.scheduled_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })
+```
+```typescript
+              { type: "text", text: `⏰ ${time} น.`, size: "xs", color: "#9ca3af", margin: "sm" },
+```
+→
+```typescript
+  const time = reminder.is_bedtime
+    ? "ก่อนนอน"
+    : new Date(reminder.scheduled_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })
+```
+```typescript
+              { type: "text", text: reminder.is_bedtime ? `🌙 ${time}` : `⏰ ${time} น.`, size: "xs", color: "#9ca3af", margin: "sm" },
+```
+
+`checkAndSendReminders`'s call site (lines 181-191):
+```typescript
+    await pushReminder(conn.line_user_id, {
+      med_name:     r.med_name,
+      med_purpose:  r.med_purpose,
+      med_strength: r.med_strength,
+      med_color:    r.med_color,
+      dose_qty:     r.dose_qty,
+      meal_relation: r.meal_relation,
+      meal_note:    r.meal_note,
+      scheduled_at: r.scheduled_at,
+      log_id:       r.log_id,
+    })
+```
+→
+```typescript
+    await pushReminder(conn.line_user_id, {
+      med_name:     r.med_name,
+      med_purpose:  r.med_purpose,
+      med_strength: r.med_strength,
+      med_color:    r.med_color,
+      dose_qty:     r.dose_qty,
+      meal_relation: r.meal_relation,
+      meal_note:    r.meal_note,
+      scheduled_at: r.scheduled_at,
+      log_id:       r.log_id,
+      is_bedtime:   r.is_bedtime,
+    })
+```
+
+- [ ] **Step 5: Typecheck**
+
+Run: `cd api && npx tsc --noEmit`
+Expected: 0 errors. (This project has no test target for `api/`'s services beyond typechecking — the RPC/LINE-push path itself can't be exercised without a live LINE channel and a due reminder, so typecheck + the SQL verification in Step 3 are the real gates here; Step 6 below confirms the logic reads correctly by inspection.)
+
+- [ ] **Step 6: Confirm by reading the diff**
+
+Re-read the final `pushReminder` function and `checkAndSendReminders`' call site in the file — confirm `is_bedtime` flows from the RPC result (`r.is_bedtime`) through the call site into `pushReminder`'s parameter, and that the flex message body's `⏰`/`🌙` branch matches `reminder.is_bedtime` correctly (this is a logic-correctness check a reviewer should re-verify independently, not just take on the implementer's word, since there's no automated test exercising this path).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add supabase/migrations/20260831040000_medication_reminders_include_bedtime.sql api/src/services/medication-reminder.ts
+git commit -m "Sync LINE medication reminder messages with bedtime scheduling"
+```
+
+---
+
+## Task 10: Full end-to-end verification
 
 **Files:** none (verification only).
 
