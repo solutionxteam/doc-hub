@@ -13,6 +13,7 @@ final class HealthViewModel: ObservableObject {
     /// (UNUserNotificationCenter just silently drops them), so the UI needs
     /// its own read of the real authorization state, not an assumption.
     @Published var notificationsAuthorized = false
+    @Published var providers: [MedicalProvider] = []
 
     private let db = SupabaseManager.shared.client
 
@@ -21,7 +22,8 @@ final class HealthViewModel: ObservableObject {
         defer { isLoading = false }
         async let medsTask: Void = loadMedications(userId: userId)
         async let logsTask: Void = loadTodayLogs(userId: userId)
-        _ = await (medsTask, logsTask)
+        async let providersTask: Void = loadProviders(userId: userId)
+        _ = await (medsTask, logsTask, providersTask)
         await refreshNotificationAuthorization()
         syncReminderNotifications()
     }
@@ -34,7 +36,7 @@ final class HealthViewModel: ObservableObject {
             // data shape on both surfaces.
             let rows: [Medication] = try await db
                 .from("medications")
-                .select("*, medication_schedules(*), medication_inventory(*)")
+                .select("*, medication_schedules(*), medication_inventory(*), provider:medical_providers(*)")
                 .eq("user_id", value: userId)
                 // Matches web's GET /api/medications — a soft-deleted medication
                 // (deleteMedication below) must disappear from the list, not
@@ -68,6 +70,40 @@ final class HealthViewModel: ObservableObject {
         }
     }
 
+    func loadProviders(userId: String) async {
+        do {
+            let rows: [MedicalProvider] = try await db
+                .from("medical_providers")
+                .select()
+                .eq("user_id", value: userId)
+                .order("name", ascending: true)
+                .execute()
+                .value
+            providers = rows
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func addProvider(userId: String, name: String, type: String, hn: String?) async throws -> MedicalProvider {
+        struct Insert: Encodable {
+            let user_id: String
+            let name: String
+            let type: String
+            let hn: String?
+        }
+        let created: MedicalProvider = try await db
+            .from("medical_providers")
+            .insert(Insert(user_id: userId, name: name, type: type, hn: hn?.isEmpty == true ? nil : hn))
+            .select()
+            .single()
+            .execute()
+            .value
+        providers.append(created)
+        providers.sort { $0.name < $1.name }
+        return created
+    }
+
     /// Creates the medication AND its schedule/inventory rows in one call —
     /// matching web's POST /api/medications, which writes all three tables
     /// together (see AddMedicationModal there). A medication with no
@@ -78,8 +114,10 @@ final class HealthViewModel: ObservableObject {
     func addMedication(
         userId: String, name: String, brandName: String?, dosageForm: String, notes: String?,
         strength: String? = nil, purpose: String? = nil,
-        times: [String], doseQty: Double, mealRelation: String, reminderEnabled: Bool,
-        qtyTotal: Double, qtyUnit: String, lowStockAlert: Double, expiryDate: String? = nil
+        providerId: String? = nil, doctorName: String? = nil, doctorInstructions: String? = nil,
+        times: [String], doseQty: Double, mealRelation: String, reminderEnabled: Bool, isBedtime: Bool = false,
+        qtyTotal: Double, qtyUnit: String, qtyPerPack: Double? = nil, lowStockAlert: Double, expiryDate: String? = nil,
+        locCode: String? = nil, lotNo: String? = nil
     ) async throws {
         struct MedInsert: Encodable {
             let user_id: String
@@ -89,6 +127,9 @@ final class HealthViewModel: ObservableObject {
             let strength: String?
             let purpose: String?
             let notes: String?
+            let provider_id: String?
+            let prescribed_by: String?
+            let doctor_instructions: String?
         }
         struct MedRow: Decodable { let id: String }
         struct ScheduleInsert: Encodable {
@@ -99,16 +140,20 @@ final class HealthViewModel: ObservableObject {
             let meal_relation: String
             let reminder_enabled: Bool
             let is_active: Bool
+            let is_bedtime: Bool
         }
         struct InventoryInsert: Encodable {
             let medication_id: String
             let user_id: String
             let qty_remaining: Double
             let qty_unit: String
+            let qty_per_pack: Double?
             let low_stock_alert: Double
             let expiry_date: String?
             let last_purchased_at: String
             let last_purchased_qty: Double
+            let loc_code: String?
+            let lot_no: String?
         }
 
         let med: MedRow = try await db
@@ -119,7 +164,10 @@ final class HealthViewModel: ObservableObject {
                 dosage_form: dosageForm,
                 strength: strength?.isEmpty == true ? nil : strength,
                 purpose: purpose?.isEmpty == true ? nil : purpose,
-                notes: notes?.isEmpty == true ? nil : notes
+                notes: notes?.isEmpty == true ? nil : notes,
+                provider_id: providerId,
+                prescribed_by: doctorName?.isEmpty == true ? nil : doctorName,
+                doctor_instructions: doctorInstructions?.isEmpty == true ? nil : doctorInstructions
             ))
             .select("id")
             .single()
@@ -129,14 +177,18 @@ final class HealthViewModel: ObservableObject {
         if !times.isEmpty {
             try await db.from("medication_schedules").insert(ScheduleInsert(
                 medication_id: med.id, user_id: userId, times: times, dose_qty: doseQty,
-                meal_relation: mealRelation, reminder_enabled: reminderEnabled, is_active: true
+                meal_relation: mealRelation, reminder_enabled: reminderEnabled, is_active: true,
+                is_bedtime: isBedtime
             )).execute()
         }
         if qtyTotal > 0 {
             try await db.from("medication_inventory").insert(InventoryInsert(
                 medication_id: med.id, user_id: userId, qty_remaining: qtyTotal, qty_unit: qtyUnit,
+                qty_per_pack: qtyPerPack,
                 low_stock_alert: lowStockAlert, expiry_date: expiryDate?.isEmpty == true ? nil : expiryDate,
-                last_purchased_at: todayDateOnlyString(), last_purchased_qty: qtyTotal
+                last_purchased_at: todayDateOnlyString(), last_purchased_qty: qtyTotal,
+                loc_code: locCode?.isEmpty == true ? nil : locCode,
+                lot_no: lotNo?.isEmpty == true ? nil : lotNo
             )).execute()
         }
 
@@ -184,8 +236,10 @@ final class HealthViewModel: ObservableObject {
         id: String, scheduleId: String?, inventoryId: String?,
         name: String, brandName: String?, dosageForm: String, notes: String?,
         strength: String?, purpose: String?,
-        times: [String], doseQty: Double, mealRelation: String, reminderEnabled: Bool,
-        qtyRemaining: Double, qtyUnit: String, lowStockAlert: Double, expiryDate: String?
+        providerId: String? = nil, doctorName: String? = nil, doctorInstructions: String? = nil,
+        times: [String], doseQty: Double, mealRelation: String, reminderEnabled: Bool, isBedtime: Bool = false,
+        qtyRemaining: Double, qtyUnit: String, qtyPerPack: Double? = nil, lowStockAlert: Double, expiryDate: String?,
+        locCode: String? = nil, lotNo: String? = nil
     ) async throws {
         struct MedPatch: Encodable {
             let name: String
@@ -194,6 +248,9 @@ final class HealthViewModel: ObservableObject {
             let strength: String?
             let purpose: String?
             let notes: String?
+            let provider_id: String?
+            let prescribed_by: String?
+            let doctor_instructions: String?
         }
         struct ScheduleInsert: Encodable {
             let medication_id: String
@@ -203,28 +260,36 @@ final class HealthViewModel: ObservableObject {
             let meal_relation: String
             let reminder_enabled: Bool
             let is_active: Bool
+            let is_bedtime: Bool
         }
         struct SchedulePatch: Encodable {
             let times: [String]
             let dose_qty: Double
             let meal_relation: String
             let reminder_enabled: Bool
+            let is_bedtime: Bool
         }
         struct InventoryInsert: Encodable {
             let medication_id: String
             let user_id: String
             let qty_remaining: Double
             let qty_unit: String
+            let qty_per_pack: Double?
             let low_stock_alert: Double
             let expiry_date: String?
             let last_purchased_at: String
             let last_purchased_qty: Double
+            let loc_code: String?
+            let lot_no: String?
         }
         struct InventoryPatch: Encodable {
             let qty_remaining: Double
             let qty_unit: String
+            let qty_per_pack: Double?
             let low_stock_alert: Double
             let expiry_date: String?
+            let loc_code: String?
+            let lot_no: String?
         }
         let userId = try await db.auth.session.user.id.uuidString
 
@@ -234,30 +299,40 @@ final class HealthViewModel: ObservableObject {
             dosage_form: dosageForm,
             strength: strength?.isEmpty == true ? nil : strength,
             purpose: purpose?.isEmpty == true ? nil : purpose,
-            notes: notes?.isEmpty == true ? nil : notes
+            notes: notes?.isEmpty == true ? nil : notes,
+            provider_id: providerId,
+            prescribed_by: doctorName?.isEmpty == true ? nil : doctorName,
+            doctor_instructions: doctorInstructions?.isEmpty == true ? nil : doctorInstructions
         )).eq("id", value: id).execute()
 
         if let scheduleId {
             try await db.from("medication_schedules").update(SchedulePatch(
-                times: times, dose_qty: doseQty, meal_relation: mealRelation, reminder_enabled: reminderEnabled
+                times: times, dose_qty: doseQty, meal_relation: mealRelation, reminder_enabled: reminderEnabled,
+                is_bedtime: isBedtime
             )).eq("id", value: scheduleId).execute()
         } else if !times.isEmpty {
             try await db.from("medication_schedules").insert(ScheduleInsert(
                 medication_id: id, user_id: userId, times: times, dose_qty: doseQty,
-                meal_relation: mealRelation, reminder_enabled: reminderEnabled, is_active: true
+                meal_relation: mealRelation, reminder_enabled: reminderEnabled, is_active: true,
+                is_bedtime: isBedtime
             )).execute()
         }
 
         if let inventoryId {
             try await db.from("medication_inventory").update(InventoryPatch(
-                qty_remaining: qtyRemaining, qty_unit: qtyUnit, low_stock_alert: lowStockAlert,
-                expiry_date: expiryDate?.isEmpty == true ? nil : expiryDate
+                qty_remaining: qtyRemaining, qty_unit: qtyUnit, qty_per_pack: qtyPerPack, low_stock_alert: lowStockAlert,
+                expiry_date: expiryDate?.isEmpty == true ? nil : expiryDate,
+                loc_code: locCode?.isEmpty == true ? nil : locCode,
+                lot_no: lotNo?.isEmpty == true ? nil : lotNo
             )).eq("id", value: inventoryId).execute()
         } else if qtyRemaining > 0 {
             try await db.from("medication_inventory").insert(InventoryInsert(
                 medication_id: id, user_id: userId, qty_remaining: qtyRemaining, qty_unit: qtyUnit,
+                qty_per_pack: qtyPerPack,
                 low_stock_alert: lowStockAlert, expiry_date: expiryDate?.isEmpty == true ? nil : expiryDate,
-                last_purchased_at: todayDateOnlyString(), last_purchased_qty: qtyRemaining
+                last_purchased_at: todayDateOnlyString(), last_purchased_qty: qtyRemaining,
+                loc_code: locCode?.isEmpty == true ? nil : locCode,
+                lot_no: lotNo?.isEmpty == true ? nil : lotNo
             )).execute()
         }
 
