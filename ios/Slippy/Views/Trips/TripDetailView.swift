@@ -5,6 +5,15 @@ struct TripDetailView: View {
     @EnvironmentObject var authVM: AuthViewModel
     @StateObject private var vm = TripsViewModel()
     @StateObject private var callVM = TripCallViewModel()
+    /// Lifted here (was previously a `@StateObject` inside TripMapView)
+    /// so live-location sharing and its "currently sharing" banner survive
+    /// switching between TripDetailView's own tabs — TripMapView is only on
+    /// screen for the Map tab (and the Itinerary tab's embedded map), so
+    /// owning this instance there meant leaving either tab silently killed
+    /// the ping loop and hid the banner mid-share. See TripMapView's
+    /// `locationVM` doc comment for the full reasoning; mirrors how `callVM`
+    /// just above is already scoped to this view for the same reason.
+    @StateObject private var locationVM = TripLocationViewModel()
     @State private var trip: Trip
     @State private var showAddExpense = false
     @State private var showAddParticipant = false
@@ -71,23 +80,47 @@ struct TripDetailView: View {
                 .padding(.vertical, 12)
             }
 
-            if callVM.connected {
-                VStack {
+            // Both banners live here, at the TripDetailView level — outside
+            // the `switch tab` above — so they stay visible no matter which
+            // of this view's own tabs is active. callVM already lived here;
+            // locationVM was moved up alongside it for the same reason (see
+            // its own doc comment).
+            if callVM.connected || locationVM.mySession != nil {
+                VStack(spacing: 8) {
                     Spacer()
-                    HStack(spacing: 8) {
-                        Image(systemName: "phone.fill").foregroundColor(.white)
-                        Text("กำลังคุยสาย").font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
-                        Spacer()
-                        Button { Task { await callVM.leave() } } label: {
-                            Image(systemName: "phone.down.fill").foregroundColor(.white)
+                    if callVM.connected {
+                        HStack(spacing: 8) {
+                            Image(systemName: "phone.fill").foregroundColor(.white)
+                            Text("กำลังคุยสาย").font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
+                            Spacer()
+                            Button { Task { await callVM.leave() } } label: {
+                                Image(systemName: "phone.down.fill").foregroundColor(.white)
+                            }
                         }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .background(Color.red.opacity(0.9), in: Capsule())
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(Color.red.opacity(0.9), in: Capsule())
-                    .padding(.horizontal, 16).padding(.bottom, 16)
+                    if locationVM.mySession != nil {
+                        HStack(spacing: 8) {
+                            Image(systemName: "location.fill.viewfinder").foregroundColor(.white)
+                            Text("กำลังแชร์ตำแหน่ง").font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
+                            Spacer()
+                            Button {
+                                hapticLight()
+                                locationVM.stopSharing()
+                            } label: {
+                                Image(systemName: "location.slash.fill").foregroundColor(.white)
+                            }
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .background(Color.brand500.opacity(0.9), in: Capsule())
+                    }
                 }
+                .padding(.horizontal, 16).padding(.bottom, 16)
             }
         }
+        .onAppear { locationVM.startPolling(journeyId: trip.id) }
+        .onDisappear { locationVM.stopPolling() }
         .navigationTitle(trip.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -337,6 +370,7 @@ struct TripDetailView: View {
                                            set: { activeDay = $0 }),
                         canEdit: true,
                         onChanged: { await vm.loadItinerary(journeyId: trip.id) },
+                        locationVM: locationVM,
                         showDayStrip: false
                     )
                     // Must exceed mapArea's own 320pt minHeight plus bottomBar's
@@ -582,7 +616,8 @@ struct TripDetailView: View {
                 days: days,
                 activeDay: $activeDay,
                 canEdit: true,
-                onChanged: { await vm.loadItinerary(journeyId: trip.id) }
+                onChanged: { await vm.loadItinerary(journeyId: trip.id) },
+                locationVM: locationVM
             )
             .frame(height: 560)
             .clipShape(RoundedRectangle(cornerRadius: 14))

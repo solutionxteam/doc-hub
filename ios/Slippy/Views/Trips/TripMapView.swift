@@ -43,6 +43,18 @@ struct TripMapView: View {
     let canEdit: Bool
     /// Called after any write, so the parent can refresh from the server.
     let onChanged: () async -> Void
+    /// Owned by the caller (TripDetailView), not this view: TripMapView is
+    /// only on screen while the Map tab (or the itinerary tab's embedded
+    /// map) is active, so a `@StateObject` here used to be torn down every
+    /// time the user switched away — silently killing the ping loop and
+    /// hiding the "currently sharing" banner mid-share. Lifting the instance
+    /// to TripDetailView (which persists across its own tab switches) means
+    /// sharing survives leaving this view; TripDetailView also renders the
+    /// persistent banner itself now, so this view no longer shows its own.
+    /// Placed right after the other required (non-defaulted) parameters, and
+    /// before `showDayStrip`, so every call site's positional argument order
+    /// stays unambiguous.
+    @ObservedObject var locationVM: TripLocationViewModel
     /// False when a caller already renders its own day strip above this map
     /// (the itinerary tab, whose strip also drives the timeline list below).
     var showDayStrip: Bool = true
@@ -70,7 +82,6 @@ struct TripMapView: View {
     @State private var poi: ResolvedPlace?
     @State private var resolvingPOI = false
 
-    @StateObject private var locationVM = TripLocationViewModel()
     @State private var showShareLocationSheet = false
 
     private struct PendingPlace {
@@ -131,9 +142,11 @@ struct TripMapView: View {
             }
             frameToPins()
             routeStore.ensure(for: legs)
-            locationVM.startPolling(journeyId: trip.id)
+            // locationVM's polling start/stop lives in TripDetailView now
+            // (see locationVM's own doc comment above) — tied to the whole
+            // trip screen's lifetime rather than to whichever embedding of
+            // this map happens to be on screen.
         }
-        .onDisappear { locationVM.stopPolling() }
         .onChange(of: days.count) { _, _ in routeStore.ensure(for: legs) }
         .onChange(of: activeDay) { _, _ in
             selectedId = nil
@@ -306,8 +319,12 @@ struct TripMapView: View {
                 }
             )
             .overlay(alignment: .top) {
+                // The "currently sharing" banner used to live here, but only
+                // ever appeared while THIS view happened to be on screen —
+                // TripDetailView renders it now, tab-independently, from the
+                // same shared locationVM instance. See locationVM's doc
+                // comment above.
                 VStack(spacing: 6) {
-                    if let session = locationVM.mySession { sharingBanner(session) }
                     if resolvingPOI { resolvingBanner }
                     movingBanner
                 }
@@ -331,24 +348,6 @@ struct TripMapView: View {
                 }
             }
         }
-    }
-
-    private func sharingBanner(_ session: TripLocationAPI.Session) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "location.fill.viewfinder").foregroundColor(.white)
-            Text("กำลังแชร์ตำแหน่ง")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white)
-            Button {
-                hapticLight()
-                locationVM.stopSharing()
-            } label: {
-                Text("หยุด").font(.system(size: 12, weight: .bold)).foregroundColor(.white)
-            }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 7)
-        .background(Capsule().fill(Color.brand500.opacity(0.9)))
-        .padding(.top, 10)
     }
 
     private var resolvingBanner: some View {
@@ -386,8 +385,28 @@ struct TripMapView: View {
         }
     }
 
+    /// Two formatters, not one: `ISO8601DateFormatter()`'s default options
+    /// can't parse PostgREST's `timestamptz` output, which normally includes
+    /// fractional seconds — without `.withFractionalSeconds` this silently
+    /// fails to parse every single time, and the `?? true` fallback below
+    /// then makes every live pin render as permanently stale regardless of
+    /// how recent it actually is. PostgREST isn't guaranteed to always
+    /// include fractional seconds either, so the fractional formatter is
+    /// tried first and the plain one is a fallback, not a replacement.
+    private static let iso8601Fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let iso8601Plain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     private func livePinBadge(_ loc: TripLocationAPI.MemberLocation) -> some View {
-        let stale = (ISO8601DateFormatter().date(from: loc.recordedAt).map { Date().timeIntervalSince($0) > 60 }) ?? true
+        let parsed = Self.iso8601Fractional.date(from: loc.recordedAt) ?? Self.iso8601Plain.date(from: loc.recordedAt)
+        let stale = (parsed.map { Date().timeIntervalSince($0) > 60 }) ?? true
         return ZStack {
             Circle()
                 .fill(stale ? Color.gray : Color.brand500)
