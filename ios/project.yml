@@ -96,6 +96,7 @@ targets:
         NSPhotoLibraryUsageDescription: "เลือกรูปเอกสารจากคลังภาพ"
         NSPhotoLibraryAddUsageDescription: "บันทึกภาพใบเสร็จต้นฉบับลงในคลังภาพของคุณ"
         NSFaceIDUsageDescription: "ใช้ Face ID เพื่อเข้าสู่ระบบ Slippy อย่างปลอดภัย"
+        NSLocationWhenInUseUsageDescription: "Slippy ใช้ตำแหน่งของคุณเพื่อแชร์ให้เพื่อนร่วมทริปเห็นชั่วคราว เฉพาะตอนที่คุณเปิดแชร์เท่านั้น"
 
         # ── Google Sign-In ─────────────────────────────────────────────
         GIDClientID: "940654280425-19pvlqjqssgv3oe8sd7im9nm1an62jp9.apps.googleusercontent.com"
