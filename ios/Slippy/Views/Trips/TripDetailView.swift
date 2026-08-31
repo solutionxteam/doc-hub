@@ -4,6 +4,7 @@ import PhotosUI
 struct TripDetailView: View {
     @EnvironmentObject var authVM: AuthViewModel
     @StateObject private var vm = TripsViewModel()
+    @StateObject private var callVM = TripCallViewModel()
     @State private var trip: Trip
     @State private var showAddExpense = false
     @State private var showAddParticipant = false
@@ -69,6 +70,23 @@ struct TripDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
+
+            if callVM.connected {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Image(systemName: "phone.fill").foregroundColor(.white)
+                        Text("กำลังคุยสาย").font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
+                        Spacer()
+                        Button { Task { await callVM.leave() } } label: {
+                            Image(systemName: "phone.down.fill").foregroundColor(.white)
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Color.red.opacity(0.9), in: Capsule())
+                    .padding(.horizontal, 16).padding(.bottom, 16)
+                }
+            }
         }
         .navigationTitle(trip.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -106,6 +124,16 @@ struct TripDetailView: View {
                         Task { await exportKML() }
                     } label: { Label("ส่งไป Google Maps (.kml)", systemImage: "map") }
                         .disabled(exportingKML)
+
+                    Button {
+                        hapticLight()
+                        Task {
+                            if callVM.connected { await callVM.leave() } else { await callVM.join(tripId: trip.id) }
+                        }
+                    } label: {
+                        Label(callVM.connected ? "วางสาย" : "โทรคุยกับทริปนี้",
+                              systemImage: callVM.connected ? "phone.down.fill" : "phone.fill")
+                    }
                 } label: {
                     if exportingPDF || exportingKML {
                         ProgressView().controlSize(.small)
@@ -146,6 +174,9 @@ struct TripDetailView: View {
         .alert("ไม่สำเร็จ", isPresented: .constant(toolError != nil)) {
             Button("ตกลง") { toolError = nil }
         } message: { Text(toolError ?? "") }
+        .alert("โทรไม่สำเร็จ", isPresented: .constant(callVM.errorText != nil)) {
+            Button("ตกลง") { callVM.errorText = nil }
+        } message: { Text(callVM.errorText ?? "") }
         .sheet(isPresented: $showAddExpense) {
             AddExpenseSheet(
                 journeyId: trip.id, userId: authVM.session?.user.id.uuidString ?? "",
