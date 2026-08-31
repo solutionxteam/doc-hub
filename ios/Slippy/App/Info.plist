@@ -79,6 +79,8 @@
 	<string>ใช้ Face ID เพื่อเข้าสู่ระบบ Slippy อย่างปลอดภัย</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Slippy ใช้ตำแหน่งของคุณเพื่อแชร์ให้เพื่อนร่วมทริปเห็นชั่วคราว เฉพาะตอนที่คุณเปิดแชร์เท่านั้น</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Slippy ใช้ไมโครโฟนสำหรับการโทรคุยกับเพื่อนร่วมทริป</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>บันทึกภาพใบเสร็จต้นฉบับลงในคลังภาพของคุณ</string>
 	<key>NSPhotoLibraryUsageDescription</key>
