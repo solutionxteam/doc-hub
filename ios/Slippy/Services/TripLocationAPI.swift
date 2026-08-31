@@ -7,9 +7,33 @@ import CoreLocation
 /// Supabase, the same as TripItineraryAPI, because 094_trip_participant_scoped_rls.sql
 /// already enforces "a trip belongs to whoever is on it" at the database
 /// level. See docs/superpowers/specs/2026-08-31-trip-location-and-calling-design.md §6.
+///
+/// `TRIP_FEATURE_LIVE_LOCATION` kill switch: since writes bypass the web
+/// app entirely, iOS has no server-side gate on them the way web's API
+/// routes do. isFeatureEnabled(tripId:) probes the existing
+/// GET /api/trips/{id}/location-sessions route — which already checks this
+/// flag before anything else — purely to read that same flag before this
+/// enum writes anything. Fails CLOSED (treats any non-200 response, or a
+/// network error, as "disabled") so a flag flip or a flaky network both err
+/// toward not transmitting location, never toward transmitting anyway.
 @MainActor
 enum TripLocationAPI {
     private static var db: SupabaseClient { SupabaseManager.shared.client }
+
+    private static let webBase: String = {
+        ProcessInfo.processInfo.environment["WEB_BASE_URL"] ?? Config.webAppURL.absoluteString
+    }()
+
+    static func isFeatureEnabled(tripId: String) async -> Bool {
+        guard let url = URL(string: "\(webBase)/api/trips/\(tripId)/location-sessions"),
+              let token = try? await db.auth.session.accessToken else { return false }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 10
+        guard let (_, response) = try? await URLSession.shared.data(for: req),
+              let http = response as? HTTPURLResponse else { return false }
+        return (200..<300).contains(http.statusCode)
+    }
 
     enum Duration: String { case m15 = "15m", h1 = "1h", h4 = "4h", eod = "eod" }
 

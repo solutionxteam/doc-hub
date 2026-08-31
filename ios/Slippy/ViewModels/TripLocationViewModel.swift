@@ -25,6 +25,10 @@ final class TripLocationViewModel: NSObject, ObservableObject, CLLocationManager
     func startSharing(journeyId: String, duration: TripLocationAPI.Duration) {
         self.journeyId = journeyId
         Task {
+            guard await TripLocationAPI.isFeatureEnabled(tripId: journeyId) else {
+                errorText = "ฟีเจอร์นี้ยังไม่เปิดใช้งาน"
+                return
+            }
             do {
                 let session = try await TripLocationAPI.start(journeyId: journeyId, duration: duration)
                 mySession = session
