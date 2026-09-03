@@ -73,11 +73,24 @@ enum JourneyStyle {
 
     static func categoryLabel(_ kind: Kind) -> String {
         switch kind {
-        case .stay:      return "ที่พัก"
-        case .transport: return "เดินทาง"
-        case .food:      return "อาหาร"
-        case .place:     return "กิจกรรม"
-        case .admin:     return "อื่นๆ"
+        case .stay:      return ActivityCategoryStyle.stay.label
+        case .transport: return ActivityCategoryStyle.transport.label
+        case .food:      return ActivityCategoryStyle.food.label
+        case .place:     return ActivityCategoryStyle.sightseeing.label
+        case .admin:     return ActivityCategoryStyle.general.label
+        }
+    }
+
+    /// Keeps legacy itinerary types intact while sharing the same high-level
+    /// category keys used on the Web. Callers that need the exact train/hotel
+    /// icon should continue to use `spec(_:)`.
+    static func activityCategory(_ type: String) -> ActivityCategoryStyle {
+        switch spec(type).kind {
+        case .transport: return .transport
+        case .stay:      return .stay
+        case .food:      return .food
+        case .place:     return type == "shopping" ? .shopping : .sightseeing
+        case .admin:     return type == "booking" ? .reservation : .general
         }
     }
 }

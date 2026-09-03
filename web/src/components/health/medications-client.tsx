@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 import { MedicationTimeline } from "./medication-timeline"
 import { MedicationCourseCard } from "./medication-course-card"
+import { medicationCategory } from "@/lib/activity-taxonomy"
 
 type Schedule = { id: string; times: string[]; dose_qty: number; meal_relation: string; meal_note: string | null; reminder_enabled: boolean; is_bedtime: boolean }
 type Inventory = { id: string; qty_remaining: number; qty_unit: string; qty_per_pack: number | null; low_stock_alert: number; expiry_date: string | null; loc_code: string | null; lot_no: string | null }
@@ -58,7 +59,8 @@ type ScannedMedication = {
 }
 
 const MEAL_LABEL: Record<string, string> = { before: "ก่อนอาหาร", after: "หลังอาหาร", with: "พร้อมอาหาร", any: "" }
-const CAT_EMOJI: Record<string, string> = { chronic: "💊", prescription: "💉", supplement: "🌿", vitamin: "🍊", otc: "💊", other: "💊", general: "💊" }
+const HEALTH_CATEGORY = medicationCategory()
+const HealthIcon = HEALTH_CATEGORY.icon
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })
 const isLowStock = (inv: Inventory | null) => inv && Number(inv.qty_remaining) <= Number(inv.low_stock_alert)
@@ -491,7 +493,7 @@ function TodayDoseCard({ log, medication, onUpdate }: {
       "border-border bg-card")}>
       <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0",
         isTaken ? "bg-emerald-100 dark:bg-emerald-500/20" : "bg-muted")}>
-        {CAT_EMOJI[medication.category] ?? "💊"}
+        <HealthIcon className="h-5 w-5 text-rose-600 dark:text-rose-400" aria-label={HEALTH_CATEGORY.labelTh} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium">{medication.name}</p>
@@ -623,7 +625,7 @@ function MedicationCard({ med, adherence, onEdit, onRequestDelete }: {
       <button onClick={() => setExpanded(e => !e)}
         className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-muted/20 transition-colors text-left">
         <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-xl shrink-0">
-          {CAT_EMOJI[med.category]}
+          <HealthIcon className="h-5 w-5 text-rose-600 dark:text-rose-400" aria-label={HEALTH_CATEGORY.labelTh} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -888,7 +890,7 @@ export function MedicationsClient({ medications: initial, todayLogs: initialLogs
       {/* Header */}
       <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-xl font-bold flex items-center gap-2">💊 จัดการยา</h2>
+          <h2 className="text-xl font-bold flex items-center gap-2"><HealthIcon className="h-5 w-5 text-rose-600 dark:text-rose-400" />{HEALTH_CATEGORY.labelTh}</h2>
           <p className="text-sm text-muted-foreground">ติดตามการทานยาและสต็อกยาของคุณ</p>
         </div>
         <div className="flex items-center gap-2">
@@ -935,7 +937,7 @@ export function MedicationsClient({ medications: initial, todayLogs: initialLogs
       {/* Medication list */}
       {view === "all" && (medications.length === 0 ? (
         <div className="rounded-xl border bg-card flex flex-col items-center py-14 text-center">
-          <div className="text-5xl mb-3">💊</div>
+          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10"><HealthIcon className="h-7 w-7 text-rose-600 dark:text-rose-400" /></div>
           <p className="font-medium text-lg">ยังไม่มีรายการยา</p>
           <p className="text-sm text-muted-foreground mt-1 mb-4">เพิ่มยาที่กินประจำเพื่อรับการแจ้งเตือน</p>
           <button onClick={() => setShowAdd(true)}

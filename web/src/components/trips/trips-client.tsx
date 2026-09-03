@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
-  Plus, Plane, Utensils, Trophy, DollarSign,
-  Users, ChevronRight, X, Loader2, QrCode,
+  Plus, Users, ChevronRight, X, Loader2, QrCode,
   CheckCircle2, Clock, MapPin, Calendar,
   Map, Wallet, ListChecks, LayoutGrid,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
+import { activityCategory, tripTypeCategory } from "@/lib/activity-taxonomy"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Participant = {
@@ -41,13 +41,13 @@ const fmtDate = (d: string) => new Date(d).toLocaleDateString("th-TH", { day: "n
  * inventing its own.
  */
 const TRIP_TYPES = [
-  { id: "travel",     label: "ทริปท่องเที่ยว", icon: Plane,      tone: "sky"    },
-  { id: "food_order", label: "บิลอาหาร",      icon: Utensils,   tone: "amber"  },
-  { id: "sport",      label: "กิจกรรมกีฬา",    icon: Trophy,     tone: "violet" },
-  { id: "general",    label: "หารบิลทั่วไป",   icon: DollarSign, tone: "emerald"},
+  { id: "travel",     label: "ทริปท่องเที่ยว", category: "transport" },
+  { id: "food_order", label: "บิลอาหาร",       category: "food" },
+  { id: "sport",      label: "กิจกรรมกีฬา",     category: "sightseeing" },
+  { id: "general",    label: "หารบิลทั่วไป",    category: "money" },
 ] as const
 
-type TripTone = (typeof TRIP_TYPES)[number]["tone"] | "brand" | "slate"
+type TripTone = "sky" | "violet" | "amber" | "emerald" | "rose" | "indigo" | "brand" | "slate"
 
 /**
  * Tone → tile classes. Written out in full because Tailwind scans source text
@@ -58,14 +58,13 @@ const TONE: Record<TripTone, { tile: string; icon: string }> = {
   amber:   { tile: "bg-amber-500/10",   icon: "text-amber-600 dark:text-amber-400"     },
   violet:  { tile: "bg-violet-500/10",  icon: "text-violet-600 dark:text-violet-400"   },
   emerald: { tile: "bg-emerald-500/10", icon: "text-emerald-600 dark:text-emerald-400" },
+  rose:    { tile: "bg-rose-500/10",    icon: "text-rose-600 dark:text-rose-400"       },
+  indigo:  { tile: "bg-indigo-500/10",  icon: "text-indigo-600 dark:text-indigo-400"   },
   brand:   { tile: "bg-brand-500/10",   icon: "text-brand-600 dark:text-brand-300"     },
   slate:   { tile: "bg-muted",          icon: "text-muted-foreground"                  },
 }
 
 /** The type record for a trip, falling back to the generic split-a-bill type. */
-const tripTypeOf = (id: string): (typeof TRIP_TYPES)[number] =>
-  TRIP_TYPES.find(t => t.id === id) ?? TRIP_TYPES[3]
-
 const SPORTS = ["แบดมินตัน","บาสเกตบอล","ฟุตบอล","เทนนิส","ว่ายน้ำ","กอล์ฟ","วอลเลย์บอล","ปิงปอง"]
 
 /* ─── Create Trip Modal ─────────────────────────────────────────────────────── */
@@ -130,16 +129,20 @@ function CreateTripModal({ orgId, onClose, onCreate }: {
               <div>
                 <label className="text-[11.5px] font-medium text-muted-foreground block mb-2">ประเภทกิจกรรม *</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {TRIP_TYPES.map(({ id, label, icon: Icon, tone }) => (
+                  {TRIP_TYPES.map(({ id, label, category: categoryKey }) => {
+                    const category = activityCategory(categoryKey)
+                    const Icon = category.icon
+                    return (
                     <button key={id} type="button" onClick={() => setTripType(id)}
                       className={cn("flex items-center gap-2.5 p-3 rounded-[10px] border text-left transition-colors",
                         tripType === id ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10" : "border-border hover:bg-muted/50")}>
-                      <span className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", TONE[tone].tile)}>
-                        <Icon className={cn("w-4 h-4", TONE[tone].icon)} />
+                      <span className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", TONE[category.tone].tile)}>
+                        <Icon className={cn("w-4 h-4", TONE[category.tone].icon)} />
                       </span>
                       <span className="text-sm font-medium">{label}</span>
                     </button>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
 
@@ -274,8 +277,8 @@ function TripCard({ trip }: { trip: Trip }) {
   const totalPaid  = trip.trip_participants.reduce((s, p) => s + Number(p.amount_paid), 0)
   const settled    = totalOwed > 0 && totalPaid >= totalOwed
   const pct        = totalOwed > 0 ? Math.min((totalPaid / totalOwed) * 100, 100) : 0
-  const type       = tripTypeOf(trip.trip_type)
-  const TypeIcon   = type.icon
+  const category   = tripTypeCategory(trip.trip_type)
+  const TypeIcon   = category.icon
 
   return (
     <button onClick={() => router.push(`/trips/${trip.id}`)}
@@ -284,8 +287,8 @@ function TripCard({ trip }: { trip: Trip }) {
         {/* The trip's own type icon — a settled trip goes green, so the state is
             readable from the icon alone without reading the badge on the right. */}
         <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center shrink-0",
-          settled ? TONE.emerald.tile : TONE[type.tone].tile)}>
-          <TypeIcon className={cn("w-[22px] h-[22px]", settled ? TONE.emerald.icon : TONE[type.tone].icon)} />
+          settled ? TONE.emerald.tile : TONE[category.tone].tile)}>
+          <TypeIcon className={cn("w-[22px] h-[22px]", settled ? TONE.emerald.icon : TONE[category.tone].icon)} />
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-semibold truncate">{trip.title}</p>
@@ -373,7 +376,7 @@ export function TripsClient({ orgId, trips: initial }: { orgId: string; trips: T
 
       {/* Filter tabs */}
       <div className="flex gap-1.5 mb-4 flex-wrap">
-        {[{ id: "all", label: "ทั้งหมด", icon: LayoutGrid }, ...TRIP_TYPES].map(({ id, label, icon: Icon }) => {
+        {[{ id: "all", label: "ทั้งหมด", icon: LayoutGrid }, ...TRIP_TYPES.map(type => ({ ...type, icon: activityCategory(type.category).icon }))].map(({ id, label, icon: Icon }) => {
           const on = typeFilter === id
           return (
             <button key={id} onClick={() => setTypeFilter(id)}

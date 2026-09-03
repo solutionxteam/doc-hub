@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { COMMON_CURRENCIES } from "@/lib/exchange-rates"
+import { expenseCategory } from "@/lib/activity-taxonomy"
 import { TripMembersPanel } from "./trip-members-panel"
 import {
   ArrowLeft, Plus, Check, X, Copy, ExternalLink,
@@ -45,7 +46,8 @@ type Settlement = { from_name: string; to_name: string; amount: number; from_id:
 
 const fmtTHB  = (n: number) => "฿" + Number(n).toLocaleString("th-TH", { maximumFractionDigits: 0 })
 const fmtDate = (d: string) => new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short" })
-const CAT_EMOJI: Record<string, string> = { food: "🍽️", transport: "🚗", accommodation: "🏨", activity: "🎯", other: "💰" }
+const MONEY_CATEGORY = expenseCategory()
+const MoneyIcon = MONEY_CATEGORY.icon
 /** Formats an amount in an arbitrary currency (not just THB) — used for a
  * trip expense's original entered amount before conversion. */
 const fmtCcy = (n: number, ccy: string) =>
@@ -1261,7 +1263,7 @@ function RecurringPanel({ tripId }: { tripId: string }) {
     <div className="space-y-2">
       {templates.map(t => (
         <div key={t.id} className={cn("rounded-xl border bg-card p-4 flex items-center gap-3", !t.is_active && "opacity-50")}>
-          <span className="text-lg">{CAT_EMOJI[t.category ?? "other"] ?? "💰"}</span>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10"><MoneyIcon className="h-4 w-4 text-amber-600 dark:text-amber-400" aria-label={MONEY_CATEGORY.labelTh} /></span>
           <div className="flex-1 min-w-0">
             <p className="font-medium text-sm truncate">{t.title}</p>
             <p className="text-[11.5px] text-muted-foreground">
@@ -1411,7 +1413,7 @@ export function TripDetailClient({ trip, expenses, payments, settlement, orgId }
             <div key={e.id} className="rounded-xl border bg-card overflow-hidden">
               <button onClick={() => setExpandedExp(expandedExp === e.id ? null : e.id)}
                 className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-muted/20">
-                <span className="text-lg">{CAT_EMOJI[e.category ?? "other"] ?? "💰"}</span>
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10"><MoneyIcon className="h-4 w-4 text-amber-600 dark:text-amber-400" aria-label={MONEY_CATEGORY.labelTh} /></span>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sm">{e.title}</p>
                   <p className="text-xs text-muted-foreground">{(e.trip_participants as any)?.display_name} จ่าย · {fmtDate(e.expense_date)}</p>

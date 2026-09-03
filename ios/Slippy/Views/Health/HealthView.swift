@@ -1,7 +1,7 @@
 import SwiftUI
 import PhotosUI
 
-private let healthGreen = Color(hex: "#10b981")
+private let healthCategory = ActivityCategoryStyle.medication
 
 struct HealthView: View {
     @EnvironmentObject var authVM: AuthViewModel
@@ -64,7 +64,7 @@ struct HealthView: View {
                 }
             }
             .background(Color.background.ignoresSafeArea())
-            .navigationTitle("สุขภาพ")
+            .navigationTitle(healthCategory.label)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -74,7 +74,7 @@ struct HealthView: View {
                     } label: {
                         Image(systemName: "plus")
                             .fontWeight(.semibold)
-                            .foregroundColor(healthGreen)
+                            .foregroundColor(healthCategory.color)
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -84,7 +84,7 @@ struct HealthView: View {
                     } label: {
                         Image(systemName: "text.viewfinder")
                             .fontWeight(.semibold)
-                            .foregroundColor(healthGreen)
+                            .foregroundColor(healthCategory.color)
                     }
                 }
             }
@@ -254,11 +254,11 @@ struct HealthView: View {
         return ZStack {
             RoundedRectangle(cornerRadius: 18)
                 .fill(LinearGradient(
-                    colors: [Color(hex: "#059669"), healthGreen],
+                    colors: [Color(hex: "#059669"), healthCategory.color],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ))
-                .shadow(color: healthGreen.opacity(0.3), radius: 12, x: 0, y: 6)
+                .shadow(color: healthCategory.color.opacity(0.3), radius: 12, x: 0, y: 6)
 
             HStack(spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -449,10 +449,10 @@ struct HealthView: View {
             } label: {
                 Text("เพิ่มยา")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(healthGreen)
+                    .foregroundColor(healthCategory.color)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(healthGreen.opacity(0.12))
+                    .background(healthCategory.color.opacity(0.12))
                     .clipShape(Capsule())
             }
         }
