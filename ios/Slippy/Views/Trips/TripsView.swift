@@ -56,6 +56,24 @@ struct TripsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    NavigationLink {
+                        ActivitiesView()
+                    } label: {
+                        Image(systemName: "calendar.badge.checkmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(Color.brand500)
+                    }
+                    .accessibilityLabel("เปิดกิจกรรม")
+
+                    NavigationLink {
+                        JourneyPrototypeView()
+                    } label: {
+                        Image(systemName: "map.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(Color(hex: "#08783F"))
+                    }
+                    .accessibilityLabel("เปิด Journey Prototype")
+
                     Button {
                         hapticLight()
                         showCreate = true
