@@ -9,7 +9,6 @@
 
 import { createClient }  from "@/lib/supabase/server"
 import { getMembership } from "@/lib/get-membership"
-import { SeedDemoButton } from "@/components/dashboard/seed-demo-button"
 import { DashboardView }  from "@/components/dashboard/dashboard-view"
 import type { HubDoc }    from "@/components/dashboard/recent-documents-panel"
 
@@ -212,7 +211,6 @@ export default async function DashboardPage() {
         docUsed:  org.doc_used  ?? 0,
         docQuota: org.doc_quota ?? 50,
       } : null}
-      headerAction={<SeedDemoButton />}
       counts={{
         total:      totalDocs      ?? 0,
         receipt:    receiptDocs    ?? 0,
