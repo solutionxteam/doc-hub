@@ -12,8 +12,8 @@
 
 ## Execution status
 
-- [x] Tasks 1–3 complete on `codex/activity-first`. The SQL migrations passed in isolated PostgreSQL integration tests; the repository's legacy local Supabase reset remains blocked by the historical `041_avatars_storage.sql` storage-schema incompatibility.
-- [ ] Tasks 4–7 pending. Production database deployment remains intentionally blocked until the remote migration-history baseline is reconciled and a recoverable backup destination is approved.
+- [x] Tasks 1–4 complete on `codex/activity-first`. The SQL migrations passed in isolated PostgreSQL integration tests; the repository's legacy local Supabase reset remains blocked by the historical `041_avatars_storage.sql` storage-schema incompatibility.
+- [ ] Tasks 5–7 pending. Production database deployment remains intentionally blocked until the remote migration-history baseline is reconciled and a recoverable backup destination is approved.
 
 ## Global Constraints
 
