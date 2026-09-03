@@ -173,7 +173,7 @@ extension UIImage {
 /// A URL is already unique, so it is its own identity. Using `.sheet(item:)`
 /// rather than `isPresented` matters here: the share sheet is built from the
 /// item, so it cannot be presented before the file it shares exists.
-extension URL: Identifiable {
+extension URL: @retroactive Identifiable {
     public var id: String { absoluteString }
 }
 

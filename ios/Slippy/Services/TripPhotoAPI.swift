@@ -43,7 +43,7 @@ enum TripPhotoAPI {
                 .execute()
                 .value
         } catch {
-            try? await db.storage.from(bucket).remove(paths: [path])
+            _ = try? await db.storage.from(bucket).remove(paths: [path])
             throw error
         }
     }
@@ -53,7 +53,7 @@ enum TripPhotoAPI {
     }
 
     static func remove(_ photo: TripPhoto) async throws {
-        try? await db.storage.from(bucket).remove(paths: [photo.storagePath])
+        _ = try? await db.storage.from(bucket).remove(paths: [photo.storagePath])
         try await db.from("trip_photos").delete().eq("id", value: photo.id).execute()
     }
 }

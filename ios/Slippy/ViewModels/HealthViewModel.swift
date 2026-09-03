@@ -318,6 +318,10 @@ final class HealthViewModel: ObservableObject {
         let wanted = reminderIdentifiers(medications)
 
         center.getPendingNotificationRequests { pending in
+            // Fetch the singleton again here rather than capturing the outer
+            // `center` — UNUserNotificationCenter isn't Sendable, and this
+            // completion handler runs off the main actor.
+            let center = UNUserNotificationCenter.current()
             let scheduled = Set(pending.map(\.identifier).filter { $0.hasPrefix("med-reminder-") })
             let toRemove = scheduled.subtracting(wanted.keys)
             if !toRemove.isEmpty {
