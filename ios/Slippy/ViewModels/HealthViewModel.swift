@@ -36,12 +36,8 @@ final class HealthViewModel: ObservableObject {
             // data shape on both surfaces.
             let rows: [Medication] = try await db
                 .from("medications")
-                .select("*, medication_schedules(*), medication_inventory(*), provider:medical_providers(*)")
+                .select("*, medication_schedules(*), medication_inventory(*), provider:medical_providers(*), medication_courses(*, medication_dose_slots(*))")
                 .eq("user_id", value: userId)
-                // Matches web's GET /api/medications — a soft-deleted medication
-                // (deleteMedication below) must disappear from the list, not
-                // just from wherever deleted it.
-                .eq("is_active", value: true)
                 .order("created_at", ascending: false)
                 .execute()
                 .value
@@ -59,9 +55,10 @@ final class HealthViewModel: ObservableObject {
                 .from("medication_logs")
                 .select()
                 .eq("user_id", value: userId)
-                .gte("created_at", value: today)
-                .lt("created_at", value: tomorrow)
-                .order("created_at", ascending: false)
+                .gte("scheduled_at", value: today)
+                .lt("scheduled_at", value: tomorrow)
+                .neq("status", value: "cancelled")
+                .order("scheduled_at", ascending: true)
                 .execute()
                 .value
             todayLogs = rows
@@ -115,6 +112,7 @@ final class HealthViewModel: ObservableObject {
         userId: String, name: String, brandName: String?, dosageForm: String, notes: String?,
         strength: String? = nil, purpose: String? = nil,
         providerId: String? = nil, doctorName: String? = nil, doctorInstructions: String? = nil,
+        instructionSource: String = "user",
         times: [String], doseQty: Double, mealRelation: String, reminderEnabled: Bool, isBedtime: Bool = false,
         qtyTotal: Double, qtyUnit: String, qtyPerPack: Double? = nil, lowStockAlert: Double, expiryDate: String? = nil,
         locCode: String? = nil, lotNo: String? = nil
@@ -134,6 +132,7 @@ final class HealthViewModel: ObservableObject {
         struct MedRow: Decodable { let id: String }
         struct ScheduleInsert: Encodable {
             let medication_id: String
+            let course_id: String
             let user_id: String
             let times: [String]
             let dose_qty: Double
@@ -141,6 +140,17 @@ final class HealthViewModel: ObservableObject {
             let reminder_enabled: Bool
             let is_active: Bool
             let is_bedtime: Bool
+        }
+        struct CourseInsert: Encodable {
+            let medication_id: String; let user_id: String; let status: String
+            let start_date: String; let doctor_instructions: String?
+            let instruction_source: String; let prescribed_by: String?
+        }
+        struct CourseRow: Decodable { let id: String }
+        struct SlotInsert: Encodable {
+            let course_id: String; let user_id: String; let time_value: String
+            let period_label: String; let dose_qty: Double; let meal_relation: String
+            let sort_order: Int; let reminder_enabled: Bool
         }
         struct InventoryInsert: Encodable {
             let medication_id: String
@@ -174,12 +184,24 @@ final class HealthViewModel: ObservableObject {
             .execute()
             .value
 
+        let course: CourseRow = try await db.from("medication_courses").insert(CourseInsert(
+            medication_id: med.id, user_id: userId, status: "active",
+            start_date: todayDateOnlyString(), doctor_instructions: doctorInstructions?.isEmpty == true ? nil : doctorInstructions,
+            instruction_source: instructionSource, prescribed_by: doctorName?.isEmpty == true ? nil : doctorName
+        )).select("id").single().execute().value
+
         if !times.isEmpty {
             try await db.from("medication_schedules").insert(ScheduleInsert(
-                medication_id: med.id, user_id: userId, times: times, dose_qty: doseQty,
+                medication_id: med.id, course_id: course.id, user_id: userId, times: times, dose_qty: doseQty,
                 meal_relation: mealRelation, reminder_enabled: reminderEnabled, is_active: true,
                 is_bedtime: isBedtime
             )).execute()
+            let slots = times.enumerated().map { index, time in
+                SlotInsert(course_id: course.id, user_id: userId, time_value: time,
+                    period_label: Self.periodLabel(for: time), dose_qty: doseQty,
+                    meal_relation: mealRelation, sort_order: index, reminder_enabled: reminderEnabled)
+            }
+            try await db.from("medication_dose_slots").insert(slots).execute()
         }
         if qtyTotal > 0 {
             try await db.from("medication_inventory").insert(InventoryInsert(
@@ -192,6 +214,29 @@ final class HealthViewModel: ObservableObject {
             )).execute()
         }
 
+        await load(userId: userId)
+    }
+
+    func updateDose(logId: String, status: String) async throws {
+        struct Patch: Encodable { let status: String; let taken_at: String?; let confirmed_via: String }
+        let takenAt = status == "taken" ? ISO8601DateFormatter().string(from: Date()) : nil
+        try await db.from("medication_logs").update(Patch(status: status, taken_at: takenAt, confirmed_via: "app"))
+            .eq("id", value: logId).execute()
+        if let index = todayLogs.firstIndex(where: { $0.id == logId }) {
+            await loadTodayLogs(userId: todayLogs[index].userId)
+        }
+    }
+
+    func transitionCourse(courseId: String, action: String, reason: String? = nil) async throws {
+        struct Params: Encodable {
+            let p_course_id: String; let p_action: String; let p_effective_at: String
+            let p_reason: String?; let p_confirmed_by: String; let p_idempotency_key: String
+        }
+        let params = Params(p_course_id: courseId, p_action: action,
+            p_effective_at: ISO8601DateFormatter().string(from: Date()), p_reason: reason,
+            p_confirmed_by: "self", p_idempotency_key: UUID().uuidString)
+        try await db.rpc("transition_medication_course", params: params).execute()
+        let userId = try await db.auth.session.user.id.uuidString
         await load(userId: userId)
     }
 
@@ -344,7 +389,7 @@ final class HealthViewModel: ObservableObject {
     }
 
     var takenCountToday: Int {
-        medications.filter { todayStatus(for: $0.id) == "taken" }.count
+        todayLogs.filter { $0.status == "taken" || $0.status == "late" }.count
     }
 
     // MARK: - Local notifications
@@ -439,6 +484,14 @@ final class HealthViewModel: ObservableObject {
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone.current
         return f.string(from: Date()) + "T00:00:00+00:00"
+    }
+
+    private static func periodLabel(for time: String) -> String {
+        guard let hour = Int(time.prefix(2)) else { return "custom" }
+        if hour < 11 { return "morning" }
+        if hour < 16 { return "midday" }
+        if hour < 21 { return "evening" }
+        return "bedtime"
     }
 
     private func tomorrowDateString() -> String {

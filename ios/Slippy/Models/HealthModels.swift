@@ -88,6 +88,55 @@ struct MedicalProvider: Codable, Identifiable, Hashable {
     }
 }
 
+enum MedicationCourseStatus: String, Codable {
+    case active, paused, stopped, completed
+}
+
+struct MedicationDoseSlot: Codable, Identifiable {
+    let id: String
+    let timeValue: String?
+    let periodLabel: String
+    let doseQty: Double
+    let mealRelation: String
+    let mealNote: String?
+    let sortOrder: Int
+    let reminderEnabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case timeValue = "time_value"
+        case periodLabel = "period_label"
+        case doseQty = "dose_qty"
+        case mealRelation = "meal_relation"
+        case mealNote = "meal_note"
+        case sortOrder = "sort_order"
+        case reminderEnabled = "reminder_enabled"
+    }
+}
+
+struct MedicationCourse: Codable, Identifiable {
+    let id: String
+    let status: MedicationCourseStatus
+    let startDate: String
+    let plannedEndDate: String?
+    let actualEndAt: String?
+    let prescribedBy: String?
+    let doctorInstructions: String?
+    let instructionSource: String
+    let doseSlots: [MedicationDoseSlot]
+
+    enum CodingKeys: String, CodingKey {
+        case id, status
+        case startDate = "start_date"
+        case plannedEndDate = "planned_end_date"
+        case actualEndAt = "actual_end_at"
+        case prescribedBy = "prescribed_by"
+        case doctorInstructions = "doctor_instructions"
+        case instructionSource = "instruction_source"
+        case doseSlots = "medication_dose_slots"
+    }
+}
+
 struct Medication: Codable, Identifiable {
     let id: String
     let userId: String
@@ -127,6 +176,7 @@ struct Medication: Codable, Identifiable {
     /// Reuses the existing (previously unused) `prescribed_by` column.
     let doctorName: String?
     let doctorInstructions: String?
+    let courses: [MedicationCourse]
 
     enum CodingKeys: String, CodingKey {
         case id, name, notes, purpose, color, strength, provider
@@ -140,6 +190,7 @@ struct Medication: Codable, Identifiable {
         case inventoryRows = "medication_inventory"
         case doctorName = "prescribed_by"
         case doctorInstructions = "doctor_instructions"
+        case courses = "medication_courses"
     }
 
     var inventory: MedicationInventory? { inventoryRows.first }
@@ -161,6 +212,9 @@ struct Medication: Codable, Identifiable {
     /// can only usefully show one at a time, same simplification the web
     /// card already makes (`med.medication_schedules[0]`).
     var primarySchedule: MedicationSchedule? { schedules.first }
+    var currentCourse: MedicationCourse? {
+        courses.first { $0.status == .active || $0.status == .paused } ?? courses.first
+    }
 }
 
 struct MedicationLog: Codable, Identifiable {
@@ -169,12 +223,22 @@ struct MedicationLog: Codable, Identifiable {
     let userId: String
     let status: String
     let createdAt: String
+    let scheduledAt: String
+    let takenAt: String?
+    let doseTaken: Double?
+    let courseId: String?
+    let slotId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, status
         case medicationId = "medication_id"
         case userId = "user_id"
         case createdAt = "created_at"
+        case scheduledAt = "scheduled_at"
+        case takenAt = "taken_at"
+        case doseTaken = "dose_taken"
+        case courseId = "course_id"
+        case slotId = "slot_id"
     }
 
     var statusLabel: String {
@@ -182,6 +246,7 @@ struct MedicationLog: Codable, Identifiable {
         case "taken":   return "ทานแล้ว ✅"
         case "missed":  return "ลืมทาน ❌"
         case "skipped": return "ข้าม ⏭️"
+        case "cancelled": return "ยกเลิกตามคอร์ส"
         default:        return "รอทาน ⏳"
         }
     }

@@ -7,10 +7,13 @@ import {
   Plus, Check, X, AlertTriangle, ChevronDown, ChevronUp, Loader2,
   Bell, BellOff, ScanLine, ShoppingCart, Send, Pencil, Trash2,
 } from "lucide-react"
+import { MedicationTimeline } from "./medication-timeline"
+import { MedicationCourseCard } from "./medication-course-card"
 
 type Schedule = { id: string; times: string[]; dose_qty: number; meal_relation: string; meal_note: string | null; reminder_enabled: boolean; is_bedtime: boolean }
 type Inventory = { id: string; qty_remaining: number; qty_unit: string; qty_per_pack: number | null; low_stock_alert: number; expiry_date: string | null; loc_code: string | null; lot_no: string | null }
 type Provider = { id: string; name: string; type: "hospital" | "clinic" | "pharmacy"; hn: string | null }
+type Course = { id: string; status: "active" | "paused" | "stopped" | "completed"; start_date: string; planned_end_date: string | null; prescribed_by: string | null; doctor_instructions: string | null; instruction_source: "label" | "doctor" | "pharmacist" | "user" }
 type Medication = {
   id: string; name: string; brand_name: string | null; dosage_form: string; strength: string | null
   category: string; purpose: string | null; is_chronic: boolean; color: string | null; notes: string | null
@@ -30,7 +33,7 @@ type Medication = {
   // `undefined` — no runtime error, just a NaN nobody notices until it's
   // rendered, which is exactly what happened here before this was typed
   // correctly).
-  medication_schedules: Schedule[]; medication_inventory: Inventory[]
+  medication_schedules: Schedule[]; medication_inventory: Inventory[]; medication_courses?: Course[]
 }
 type Log = { id: string; medication_id: string; scheduled_at: string; taken_at: string | null; status: string; dose_taken: number }
 type Adherence = { medication_id: string; adherence_pct: number; taken: number; total_doses: number }
@@ -111,6 +114,8 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
   const [expiry,      setExpiry]      = useState(existingInv?.expiry_date ?? scanned?.expiry_date ?? "")
   const [reminder,    setReminder]    = useState(existingSched?.reminder_enabled ?? true)
   const [isBedtime,   setIsBedtime]   = useState(existingSched?.is_bedtime ?? false)
+  const [startDate,   setStartDate]   = useState(existing?.medication_courses?.[0]?.start_date ?? new Date().toISOString().slice(0, 10))
+  const [plannedEnd,  setPlannedEnd]  = useState(existing?.medication_courses?.[0]?.planned_end_date ?? "")
   const [saving,      setSaving]      = useState(false)
 
   // Doctor / provider / LOC / LOT — see the medication-tracking-expansion
@@ -200,6 +205,8 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
               notes: notes.trim() || null,
               provider_id: providerId || undefined, doctor_instructions: doctorNotes || undefined,
               prescribed_by: doctorName || undefined,
+              instruction_source: scanned?.instructions_verbatim ? "label" : "user",
+              start_date: startDate, planned_end_date: plannedEnd || null,
               times, dose_qty: Number(doseQty) || 1,
               meal_relation: mealRelation, reminder_enabled: reminder, is_bedtime: isBedtime,
               qty_total: computedRemaining, qty_per_pack: Number(qtyPerPack) || undefined,
@@ -343,6 +350,10 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
               <textarea value={doctorNotes} onChange={e => setDoctorNotes(e.target.value)} rows={2} placeholder="เช่น กินต่อเนื่อง 7 วัน, ห้ามหยุดเอง"
                 className="w-full rounded-[10px] border bg-background px-3 py-2 text-sm outline-none focus:border-brand-500 resize-none" />
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 border-t pt-4">
+            <label className="text-[11.5px] font-medium text-muted-foreground">เริ่มใช้ยา<input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="mt-1 h-9 w-full rounded-[8px] border bg-background px-2 text-sm" /></label>
+            <label className="text-[11.5px] font-medium text-muted-foreground">กำหนดจบ (ถ้ามี)<input type="date" value={plannedEnd} onChange={e => setPlannedEnd(e.target.value)} className="mt-1 h-9 w-full rounded-[8px] border bg-background px-2 text-sm" /></label>
           </div>
 
           {/* Schedule */}
@@ -760,6 +771,8 @@ export function MedicationsClient({ medications: initial, todayLogs: initialLogs
   /// Non-nil while the "ลบยานี้?" confirmation is up — never deletes on its own.
   const [deleteTarget, setDeleteTarget] = useState<Medication | null>(null)
   const [deleting,     setDeleting]     = useState(false)
+  const [view,         setView]         = useState<"today" | "all">("today")
+  const [courseFilter, setCourseFilter] = useState<"active" | "paused" | "history">("active")
 
   const confirmDelete = async () => {
     if (!deleteTarget) return
@@ -858,6 +871,16 @@ export function MedicationsClient({ medications: initial, todayLogs: initialLogs
     setLogs(prev => prev.map(l => l.id === logId ? { ...l, status, taken_at: status !== "skipped" ? new Date().toISOString() : null } : l))
   }
 
+  const updateTimelineDose = async (logId: string, status: "taken" | "skipped") => {
+    const res = await fetch("/api/medications", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ logId, status }),
+    })
+    if (!res.ok) return toast.error("บันทึกรอบยาไม่สำเร็จ")
+    handleLogUpdate(logId, status)
+    toast.success(status === "taken" ? "บันทึกว่าทานแล้ว" : "บันทึกข้ามรอบ")
+  }
+
   const adherenceMap = Object.fromEntries(adherenceStats.map(a => [a.medication_id, a]))
 
   return (
@@ -887,31 +910,30 @@ export function MedicationsClient({ medications: initial, todayLogs: initialLogs
         </div>
       </div>
 
+      <div className="mb-4 flex w-full rounded-xl bg-muted p-1" role="tablist" aria-label="มุมมองการจัดการยา">
+        <button role="tab" aria-selected={view === "today"} onClick={() => setView("today")} className={cn("h-9 flex-1 rounded-lg text-[13px] font-medium", view === "today" && "bg-card text-teal-700 shadow-sm dark:text-teal-300")}>วันนี้</button>
+        <button role="tab" aria-selected={view === "all"} onClick={() => setView("all")} className={cn("h-9 flex-1 rounded-lg text-[13px] font-medium", view === "all" && "bg-card text-teal-700 shadow-sm dark:text-teal-300")}>ยาทั้งหมด</button>
+      </div>
+
       {/* Today's summary */}
-      {totalToday > 0 && (
+      {view === "today" && (
         <div className="rounded-xl border bg-gradient-to-br from-violet-50 to-indigo-50 dark:from-violet-500/5 dark:to-indigo-500/5 p-5 mb-6">
           <div className="flex items-center justify-between mb-3">
             <p className="font-semibold text-sm">วันนี้</p>
             <span className={cn("text-sm font-bold", takenToday === totalToday ? "text-emerald-600" : "text-amber-600")}>
-              {takenToday}/{totalToday} มื้อ
+              {takenToday}/{totalToday} โดส
             </span>
           </div>
           <div className="h-2 rounded-full bg-muted overflow-hidden mb-4">
             <div className={cn("h-full rounded-full transition-all", takenToday === totalToday ? "bg-emerald-500" : "bg-brand-500")}
               style={{ width: `${totalToday ? (takenToday / totalToday * 100) : 0}%` }} />
           </div>
-          <div className="space-y-2">
-            {logs.map(log => {
-              const med = medications.find(m => m.id === log.medication_id)
-              if (!med) return null
-              return <TodayDoseCard key={log.id} log={log} medication={med} onUpdate={handleLogUpdate} />
-            })}
-          </div>
+          <MedicationTimeline medications={medications} logs={logs} onUpdate={updateTimelineDose} />
         </div>
       )}
 
       {/* Medication list */}
-      {medications.length === 0 ? (
+      {view === "all" && (medications.length === 0 ? (
         <div className="rounded-xl border bg-card flex flex-col items-center py-14 text-center">
           <div className="text-5xl mb-3">💊</div>
           <p className="font-medium text-lg">ยังไม่มีรายการยา</p>
@@ -923,15 +945,15 @@ export function MedicationsClient({ medications: initial, todayLogs: initialLogs
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-sm font-semibold text-muted-foreground">ยาทั้งหมด ({medications.length} รายการ)</p>
-          {medications.map(m => (
-            <MedicationCard key={m.id} med={m} adherence={adherenceMap[m.id]}
-              onEdit={() => setEditingMed(m)}
-              onRequestDelete={() => setDeleteTarget(m)}
-            />
-          ))}
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            {([['active','กำลังใช้'],['paused','พักยา'],['history','ประวัติ']] as const).map(([key, label]) => <button key={key} onClick={() => setCourseFilter(key)} className={cn("shrink-0 rounded-full border px-3 py-1.5 text-[11px]", courseFilter === key && "border-teal-600 bg-teal-600 text-white")}>{label}</button>)}
+          </div>
+          {medications.filter(m => {
+            const status = m.medication_courses?.[0]?.status ?? "active"
+            return courseFilter === "history" ? status === "stopped" || status === "completed" : status === courseFilter
+          }).map(m => <MedicationCourseCard key={m.id} medication={m} onRefresh={() => window.location.reload()} />)}
         </div>
-      )}
+      ))}
 
       <p className="text-[10.5px] text-muted-foreground text-center mt-6">
         ⚠️ แอปนี้ช่วยแจ้งเตือนเท่านั้น ไม่ใช่คำแนะนำทางการแพทย์<br />

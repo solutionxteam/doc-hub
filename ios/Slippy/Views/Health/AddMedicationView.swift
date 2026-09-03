@@ -517,6 +517,7 @@ struct AddMedicationView: View {
                     providerId: selectedProvider?.id,
                     doctorName: doctorName.trimmingCharacters(in: .whitespaces),
                     doctorInstructions: doctorInstructions.trimmingCharacters(in: .whitespaces),
+                    instructionSource: scanned?.instructionsVerbatim == nil ? "user" : "label",
                     times: times,
                     doseQty: Double(doseQty) ?? 1,
                     mealRelation: mealRelation,
