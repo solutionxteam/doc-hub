@@ -19,7 +19,7 @@ import {
   User, Mail, Shield, LogOut, Camera, Check, Edit2,
   MessageCircle, Key,
   Clock, FileText, CheckCircle2, AlertCircle, Loader2,
-  Building2, Upload, X, Sparkles,
+  Trash2, Building2, Upload, X, Sparkles, Cake,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -46,6 +46,7 @@ interface ProfileProps {
   orgPlan:         string
   avatarUrl?:      string
   joinedAt?:       string
+  dateOfBirth?:    string | null
   activityLogs:    ActivityLog[]
   lineConnection:  LineConnection
 }
@@ -304,8 +305,8 @@ function AvatarSection({ userId, name, avatarUrl, onAvatarChange }: {
 
 /* ─── Edit name form ── */
 function EditableField({
-  label, value, icon: Icon, editable = false, onSave
-}: { label: string; value: string; icon: React.FC<{className?:string}>; editable?: boolean; onSave?: (v: string) => Promise<void> }) {
+  label, value, icon: Icon, editable = false, onSave, type = "text"
+}: { label: string; value: string; icon: React.FC<{className?:string}>; editable?: boolean; onSave?: (v: string) => Promise<void>; type?: "text" | "date" }) {
   const [editing, setEditing] = useState(false)
   const [val, setVal]         = useState(value)
   const [saving, setSaving]   = useState(false)
@@ -328,6 +329,7 @@ function EditableField({
         {editing ? (
           <div className="flex items-center gap-2">
             <input
+              type={type}
               value={val}
               onChange={e => setVal(e.target.value)}
               autoFocus
@@ -349,7 +351,9 @@ function EditableField({
             </button>
           </div>
         ) : (
-          <p className="text-sm font-medium">{val}</p>
+          <p className="text-sm font-medium">
+            {type === "date" && val ? new Date(val).toLocaleDateString("th-TH", { year: "numeric", month: "long", day: "numeric" }) : (val || "—")}
+          </p>
         )}
       </div>
       {editable && !editing && (
@@ -443,7 +447,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 
 /* ─── Main component ── */
 export function ProfileClient({
-  userId, name, email, role, orgName, orgPlan, avatarUrl, joinedAt, activityLogs, lineConnection,
+  userId, name, email, role, orgName, orgPlan, avatarUrl, joinedAt, dateOfBirth, activityLogs, lineConnection,
 }: ProfileProps) {
   const [tab, setTab]           = useState<ProfileTab>("info")
   const [avatar, setAvatar]     = useState(avatarUrl)
@@ -456,6 +460,12 @@ export function ProfileClient({
     const { error } = await supabase.from("users").update({ full_name: newName }).eq("id", userId)
     if (error) toast.error("ไม่สามารถบันทึกชื่อได้")
     else { toast.success("บันทึกชื่อแล้ว"); router.refresh() }
+  }
+
+  const handleSaveDob = async (newDob: string) => {
+    const { error } = await supabase.from("users").update({ date_of_birth: newDob || null }).eq("id", userId)
+    if (error) toast.error("ไม่สามารถบันทึกวันเกิดได้")
+    else { toast.success("บันทึกวันเกิดแล้ว"); router.refresh() }
   }
 
   const handleLogout = () => {
@@ -544,6 +554,7 @@ export function ProfileClient({
           <div id="profile-account" className="space-y-2 scroll-mt-6">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">บัญชี</p>
             <EditableField label="ชื่อ-นามสกุล" value={name}  icon={User}  editable onSave={handleSaveName} />
+            <EditableField label="วันเกิด" value={dateOfBirth ?? ""} type="date" icon={Cake} editable onSave={handleSaveDob} />
             <EditableField label="อีเมล"         value={email} icon={Mail}             />
           </div>
 

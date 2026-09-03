@@ -11,8 +11,10 @@ export default async function MedicationsPage() {
       .select(`
         id, name, brand_name, dosage_form, strength, category, purpose,
         is_chronic, color, notes, image_url,
-        medication_schedules(id, times, dose_qty, meal_relation, meal_note, reminder_enabled, is_active),
-        medication_inventory(id, qty_remaining, qty_unit, low_stock_alert, expiry_date)
+        provider_id, doctor_instructions, prescribed_by,
+        provider:medical_providers(id, name, type, hn),
+        medication_schedules(id, times, dose_qty, meal_relation, meal_note, reminder_enabled, is_active, is_bedtime),
+        medication_inventory(id, qty_remaining, qty_unit, qty_per_pack, low_stock_alert, expiry_date, loc_code, lot_no)
       `)
       .eq("user_id", user.id)
       .eq("is_active", true)

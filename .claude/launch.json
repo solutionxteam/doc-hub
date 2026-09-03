@@ -13,5 +13,11 @@
       "runtimeArgs": ["serve", "-p", "4321", "."],
       "port": 4321
     }
+  ,{
+      "name": "worktree-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:http", "--workspace=web", "--", "-p", "3002"],
+      "port": 3002
+    }
   ]
 }

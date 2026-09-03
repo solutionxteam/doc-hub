@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
@@ -8,11 +8,18 @@ import {
   Bell, BellOff, ScanLine, ShoppingCart, Send, Pencil, Trash2,
 } from "lucide-react"
 
-type Schedule = { id: string; times: string[]; dose_qty: number; meal_relation: string; meal_note: string | null; reminder_enabled: boolean }
-type Inventory = { id: string; qty_remaining: number; qty_unit: string; low_stock_alert: number; expiry_date: string | null }
+type Schedule = { id: string; times: string[]; dose_qty: number; meal_relation: string; meal_note: string | null; reminder_enabled: boolean; is_bedtime: boolean }
+type Inventory = { id: string; qty_remaining: number; qty_unit: string; qty_per_pack: number | null; low_stock_alert: number; expiry_date: string | null; loc_code: string | null; lot_no: string | null }
+type Provider = { id: string; name: string; type: "hospital" | "clinic" | "pharmacy"; hn: string | null }
 type Medication = {
   id: string; name: string; brand_name: string | null; dosage_form: string; strength: string | null
   category: string; purpose: string | null; is_chronic: boolean; color: string | null; notes: string | null
+  provider_id: string | null; doctor_instructions: string | null; prescribed_by: string | null
+  // Unlike medication_schedules/medication_inventory below, this embed
+  // follows medications.provider_id -> medical_providers.id — a genuine
+  // forward FK, so PostgREST returns a single object (or null), not an
+  // array, same as iOS's Medication.provider: MedicalProvider?.
+  provider: Provider | null
   /** A storage PATH despite the name — see the medication_label_images migration. Resolved to a signed URL on demand, never rendered directly. */
   image_url: string | null
   // PostgREST returns this embed as an array even though the app models it as
@@ -100,11 +107,65 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
   const [doseQty,     setDoseQty]     = useState(String(existingSched?.dose_qty ?? scanned?.dose_qty ?? 1))
   const [mealRelation,setMealRelation]= useState<"before" | "after" | "with" | "any">(
     (existingSched?.meal_relation as "before" | "after" | "with" | "any") ?? scanned?.meal_relation ?? "after")
-  const [qty,         setQty]         = useState(existingInv ? String(existingInv.qty_remaining) : (scanned?.qty_total != null ? String(scanned.qty_total) : ""))
   const [lowAlert,    setLowAlert]    = useState(existingInv ? String(existingInv.low_stock_alert) : "7")
   const [expiry,      setExpiry]      = useState(existingInv?.expiry_date ?? scanned?.expiry_date ?? "")
   const [reminder,    setReminder]    = useState(existingSched?.reminder_enabled ?? true)
+  const [isBedtime,   setIsBedtime]   = useState(existingSched?.is_bedtime ?? false)
   const [saving,      setSaving]      = useState(false)
+
+  // Doctor / provider / LOC / LOT — see the medication-tracking-expansion
+  // plan for why provider is a real reference table, not free text.
+  const [providers,       setProviders]       = useState<Provider[]>([])
+  const [providerId,      setProviderId]      = useState(existing?.provider_id ?? "")
+  const [showNewProvider, setShowNewProvider] = useState(false)
+  const [newProvName,     setNewProvName]     = useState("")
+  const [newProvType,     setNewProvType]     = useState<"hospital" | "clinic" | "pharmacy">("hospital")
+  const [newProvHn,       setNewProvHn]       = useState("")
+  const [savingProvider,  setSavingProvider]  = useState(false)
+  const [doctorName,      setDoctorName]      = useState(existing?.prescribed_by ?? scanned?.prescribing_doctor ?? "")
+  const [doctorNotes,     setDoctorNotes]     = useState(existing?.doctor_instructions ?? scanned?.instructions_verbatim ?? "")
+  const [locCode,         setLocCode]         = useState(existingInv?.loc_code ?? "")
+  const [lotNo,           setLotNo]           = useState(existingInv?.lot_no ?? scanned?.lot_no ?? "")
+
+  useEffect(() => {
+    fetch("/api/medications/providers").then(r => r.json()).then(j => setProviders(j.providers ?? [])).catch(() => {})
+  }, [])
+
+  const selectedProvider = providers.find(p => p.id === providerId) ?? null
+
+  const createProvider = async () => {
+    if (!newProvName.trim()) { toast.error("กรอกชื่อโรงพยาบาล/ร้านยา"); return }
+    setSavingProvider(true)
+    try {
+      const res = await fetch("/api/medications/providers", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newProvName.trim(), type: newProvType, hn: newProvHn || undefined }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? "เพิ่มไม่สำเร็จ")
+      setProviders(p => [...p, json.provider])
+      setProviderId(json.provider.id)
+      setShowNewProvider(false)
+      setNewProvName(""); setNewProvHn("")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "เพิ่มไม่สำเร็จ")
+    } finally {
+      setSavingProvider(false)
+    }
+  }
+
+  // Pack calculator — packSize seeded from qtyPerPack, falling back to the
+  // current qtyRemaining (never blank when there's an existing inventory
+  // row) so editing without touching either field reproduces the CURRENT
+  // stock, not a full pack. alreadyTaken is derived the same way, so
+  // computedRemaining === qtyRemaining by default on edit. See the iOS
+  // fix (AddMedicationView.swift) this mirrors — same bug, same fix.
+  const packSizeSeed = existingInv?.qty_per_pack ?? scanned?.qty_total ?? existingInv?.qty_remaining
+  const [qtyPerPack,   setQtyPerPack]   = useState(packSizeSeed != null ? String(Math.round(packSizeSeed)) : "")
+  const [alreadyTaken, setAlreadyTaken] = useState(
+    existingInv ? String(Math.max(Math.round((packSizeSeed ?? existingInv.qty_remaining) - existingInv.qty_remaining), 0)) : ""
+  )
+  const computedRemaining = Math.max((Number(qtyPerPack) || 0) - (Number(alreadyTaken) || 0), 0)
 
   const addTime = () => setTimes(t => [...t, "12:00"])
   const removeTime = (i: number) => setTimes(t => t.filter((_, j) => j !== i))
@@ -120,10 +181,14 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
               name: name.trim(), brand_name: brand || null,
               dosage_form: form, strength: strength || null, purpose: purpose || null,
               notes: notes.trim() || null,
+              provider_id: providerId || null, doctor_instructions: doctorNotes || null,
+              prescribed_by: doctorName || null,
               scheduleId: existingSched?.id, times, dose_qty: Number(doseQty) || 1,
-              meal_relation: mealRelation, reminder_enabled: reminder,
-              inventoryId: existingInv?.id, qty_remaining: Number(qty) || 0,
+              meal_relation: mealRelation, reminder_enabled: reminder, is_bedtime: isBedtime,
+              inventoryId: existingInv?.id, qty_remaining: computedRemaining,
+              qty_per_pack: Number(qtyPerPack) || null,
               low_stock_alert: Number(lowAlert) || 7, expiry_date: expiry || null,
+              loc_code: locCode || null, lot_no: lotNo || null,
             }),
           })
         : await fetch("/api/medications", {
@@ -133,10 +198,13 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
               dosage_form: form, strength: strength || null,
               purpose: purpose || null, is_chronic: isChronic,
               notes: notes.trim() || null,
+              provider_id: providerId || undefined, doctor_instructions: doctorNotes || undefined,
+              prescribed_by: doctorName || undefined,
               times, dose_qty: Number(doseQty) || 1,
-              meal_relation: mealRelation, reminder_enabled: reminder,
-              qty_total: Number(qty) || 0, low_stock_alert: Number(lowAlert) || 7,
-              expiry_date: expiry || null,
+              meal_relation: mealRelation, reminder_enabled: reminder, is_bedtime: isBedtime,
+              qty_total: computedRemaining, qty_per_pack: Number(qtyPerPack) || undefined,
+              low_stock_alert: Number(lowAlert) || 7, expiry_date: expiry || null,
+              loc_code: locCode || undefined, lot_no: lotNo || undefined,
             }),
           })
       if (!res.ok) throw new Error()
@@ -220,19 +288,89 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
             <span className="text-sm">ยาเรื้อรัง (กินต่อเนื่องระยะยาว)</span>
           </label>
 
+          {/* Provider / doctor */}
+          <div className="border-t pt-4 space-y-2">
+            <p className="text-sm font-semibold">แหล่งที่มา / แพทย์ผู้สั่ง</p>
+            <div>
+              <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">โรงพยาบาล/คลินิก/ร้านยา</label>
+              <select value={providerId} onChange={e => setProviderId(e.target.value)}
+                className="w-full h-9 rounded-[10px] border bg-background px-3 text-sm outline-none focus:border-brand-500">
+                <option value="">ไม่ระบุ</option>
+                {providers.map(p => <option key={p.id} value={p.id}>{p.name}{p.hn ? ` (HN ${p.hn})` : ""}</option>)}
+              </select>
+              {!showNewProvider ? (
+                <button onClick={() => setShowNewProvider(true)} className="text-xs text-brand-500 font-medium mt-1">+ เพิ่มใหม่</button>
+              ) : (
+                <div className="mt-2 p-2.5 rounded-[10px] border bg-muted/30 space-y-2">
+                  <input value={newProvName} onChange={e => setNewProvName(e.target.value)} placeholder="ชื่อโรงพยาบาล/คลินิก/ร้านยา"
+                    className="w-full h-8 rounded-[8px] border bg-background px-2 text-xs outline-none focus:border-brand-500" />
+                  <div className="flex gap-2">
+                    <select value={newProvType} onChange={e => setNewProvType(e.target.value as typeof newProvType)}
+                      className="flex-1 h-8 rounded-[8px] border bg-background px-2 text-xs outline-none focus:border-brand-500">
+                      <option value="hospital">โรงพยาบาล</option>
+                      <option value="clinic">คลินิก</option>
+                      <option value="pharmacy">ร้านยา</option>
+                    </select>
+                    {newProvType === "hospital" && (
+                      <input value={newProvHn} onChange={e => setNewProvHn(e.target.value)} placeholder="HN"
+                        className="w-24 h-8 rounded-[8px] border bg-background px-2 text-xs outline-none focus:border-brand-500" />
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={createProvider} disabled={savingProvider}
+                      className="h-8 px-3 rounded-[8px] bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium disabled:opacity-60">
+                      {savingProvider ? "กำลังเพิ่ม…" : "เพิ่ม"}
+                    </button>
+                    <button onClick={() => setShowNewProvider(false)} className="h-8 px-3 rounded-[8px] border text-xs font-medium hover:bg-muted">ยกเลิก</button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">ชื่อแพทย์</label>
+                <input value={doctorName} onChange={e => setDoctorName(e.target.value)} placeholder="พญ./นพ. ..."
+                  className="w-full h-9 rounded-[10px] border bg-background px-3 text-sm outline-none focus:border-brand-500" />
+              </div>
+              <div>
+                <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">HN</label>
+                <input value={selectedProvider?.hn ?? "—"} disabled
+                  className="w-full h-9 rounded-[10px] border bg-muted/40 px-3 text-sm text-muted-foreground outline-none" />
+              </div>
+            </div>
+            <div>
+              <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">คำสั่งแพทย์</label>
+              <textarea value={doctorNotes} onChange={e => setDoctorNotes(e.target.value)} rows={2} placeholder="เช่น กินต่อเนื่อง 7 วัน, ห้ามหยุดเอง"
+                className="w-full rounded-[10px] border bg-background px-3 py-2 text-sm outline-none focus:border-brand-500 resize-none" />
+            </div>
+          </div>
+
           {/* Schedule */}
           <div className="border-t pt-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold">ตารางการทาน</p>
-              <button onClick={addTime} className="text-xs text-brand-500 font-medium">+ เพิ่มเวลา</button>
+              {!isBedtime && <button onClick={addTime} className="text-xs text-brand-500 font-medium">+ เพิ่มเวลา</button>}
             </div>
-            {times.map((t, i) => (
+            {/* Bedtime hides the time pickers rather than merely labeling
+                them — "ไม่ต้องระบุเวลา" means the user isn't asked to touch a
+                clock at all. A real HH:mm is still stored (seeded to 22:00
+                only if times is still at its untouched default) so the LINE
+                reminder still fires on a real time — same fix as iOS. */}
+            {!isBedtime && times.map((t, i) => (
               <div key={i} className="flex gap-2 mb-2">
                 <input type="time" value={t} onChange={e => setTimes(times.map((tt, j) => j === i ? e.target.value : tt))}
                   className="flex-1 h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
                 {times.length > 1 && <button onClick={() => removeTime(i)} className="h-9 w-9 rounded-[8px] hover:bg-rose-50 flex items-center justify-center text-muted-foreground hover:text-rose-500"><X className="w-3.5 h-3.5" /></button>}
               </div>
             ))}
+            <label className="flex items-center gap-2 cursor-pointer mb-2">
+              <input type="checkbox" checked={isBedtime} onChange={e => {
+                const on = e.target.checked
+                setIsBedtime(on)
+                if (on && times.length === 1 && times[0] === "08:00") setTimes(["22:00"])
+              }} className="rounded" />
+              <span className="text-sm">🌙 ยาก่อนนอน — ไม่ต้องระบุเวลาแม่นยำ</span>
+            </label>
             <div className="grid grid-cols-2 gap-3 mt-2">
               <div>
                 <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">กี่เม็ดต่อครั้ง</label>
@@ -261,18 +399,37 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
             <p className="text-sm font-semibold mb-2">ข้อมูลสต็อก</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">จำนวนที่มี (เม็ด)</label>
-                <input type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="30"
+                <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">จำนวนต่อกล่อง</label>
+                <input type="number" value={qtyPerPack} onChange={e => setQtyPerPack(e.target.value)} placeholder="30"
                   className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+              </div>
+              <div>
+                <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">ทานไปแล้ว</label>
+                <input type="number" value={alreadyTaken} onChange={e => setAlreadyTaken(e.target.value)} placeholder="0"
+                  className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+              </div>
+              <div className="col-span-2 flex items-center justify-between px-1">
+                <span className="text-xs font-semibold text-muted-foreground">คงเหลือ</span>
+                <span className="text-sm font-bold text-brand-600">{computedRemaining} เม็ด</span>
               </div>
               <div>
                 <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">แจ้งเตือนเมื่อเหลือ</label>
                 <input type="number" value={lowAlert} onChange={e => setLowAlert(e.target.value)} placeholder="7"
                   className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
               </div>
-              <div className="col-span-2">
+              <div>
                 <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">วันหมดอายุ</label>
                 <input type="date" value={expiry} onChange={e => setExpiry(e.target.value)}
+                  className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+              </div>
+              <div>
+                <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">LOC</label>
+                <input value={locCode} onChange={e => setLocCode(e.target.value)} placeholder="รหัสบนซองยา"
+                  className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
+              </div>
+              <div>
+                <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">LOT</label>
+                <input value={lotNo} onChange={e => setLotNo(e.target.value)} placeholder="เลขล็อตการผลิต"
                   className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500" />
               </div>
             </div>
@@ -466,7 +623,7 @@ function MedicationCard({ med, adherence, onEdit, onRequestDelete }: {
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             {med.strength && `${med.strength} · `}
-            {sched ? `${sched.times.join(", ")} · ${sched.dose_qty} เม็ด` : "ไม่มีตาราง"}
+            {sched ? `${sched.is_bedtime ? "🌙 ก่อนนอน" : sched.times.join(", ")} · ${sched.dose_qty} เม็ด` : "ไม่มีตาราง"}
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
@@ -490,6 +647,12 @@ function MedicationCard({ med, adherence, onEdit, onRequestDelete }: {
           {med.purpose    && <p className="text-muted-foreground">🎯 {med.purpose}</p>}
           {med.notes      && <p className="rounded-lg bg-emerald-50/70 dark:bg-emerald-500/10 px-3 py-2 text-xs text-emerald-900 dark:text-emerald-200">📄 <span className="font-semibold">หมายเหตุจากฉลาก:</span> {med.notes}</p>}
           {med.brand_name && <p className="text-muted-foreground">🏷️ {med.brand_name}</p>}
+          {(med.provider || med.prescribed_by) && (
+            <p className="text-muted-foreground">
+              🏥 {med.provider?.name}{med.provider && med.prescribed_by ? " · " : ""}{med.prescribed_by}
+            </p>
+          )}
+          {med.doctor_instructions && <p className="text-muted-foreground">📋 {med.doctor_instructions}</p>}
           {sched?.meal_relation !== "any" && <p className="text-muted-foreground">🍽️ {MEAL_LABEL[sched?.meal_relation ?? "any"]}{sched?.meal_note ? ` — ${sched.meal_note}` : ""}</p>}
           {inv?.expiry_date && <p className="text-muted-foreground">📅 หมดอายุ: {new Date(inv.expiry_date).toLocaleDateString("th-TH")}</p>}
           {daysLeft != null && sched && (

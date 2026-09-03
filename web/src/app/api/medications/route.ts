@@ -13,8 +13,10 @@ export async function GET(req: NextRequest) {
       .select(`
         id, name, brand_name, generic_name, dosage_form, strength,
         category, purpose, is_chronic, is_active, color, notes, image_url, created_at,
-        medication_schedules(id, times, days_of_week, dose_qty, meal_relation, meal_note, reminder_enabled, is_active),
-        medication_inventory(qty_remaining, qty_unit, low_stock_alert, expiry_date, price_per_unit)
+        provider_id, doctor_instructions, prescribed_by,
+        provider:medical_providers(id, name, type, hn),
+        medication_schedules(id, times, days_of_week, dose_qty, meal_relation, meal_note, reminder_enabled, is_active, is_bedtime),
+        medication_inventory(id, qty_remaining, qty_unit, qty_per_pack, low_stock_alert, expiry_date, price_per_unit, loc_code, lot_no)
       `)
       .eq("user_id", user.id)
       .eq("is_active", true)
@@ -52,6 +54,9 @@ export async function POST(req: NextRequest) {
     is_chronic?:   boolean
     notes?:        string
     color?:        string
+    provider_id?:  string
+    doctor_instructions?: string
+    prescribed_by?: string
     // Schedule
     times:         string[]
     days_of_week?: number[] | null
@@ -61,12 +66,16 @@ export async function POST(req: NextRequest) {
     reminder_enabled?: boolean
     reminder_minutes?: number
     start_date?:   string
+    is_bedtime?:   boolean
     // Inventory
     qty_total:     number
     qty_unit?:     string
+    qty_per_pack?: number
     low_stock_alert?: number
     expiry_date?:  string
     price_per_unit?: number
+    loc_code?:     string
+    lot_no?:       string
   }
 
   const admin = createAdminClient()
@@ -84,6 +93,9 @@ export async function POST(req: NextRequest) {
     is_chronic:   body.is_chronic ?? false,
     notes:        body.notes ?? null,
     color:        body.color ?? null,
+    provider_id:         body.provider_id ?? null,
+    doctor_instructions: body.doctor_instructions ?? null,
+    prescribed_by:       body.prescribed_by ?? null,
   }).select("id").single()
 
   if (medErr || !med) return NextResponse.json({ error: medErr?.message }, { status: 500 })
@@ -100,6 +112,7 @@ export async function POST(req: NextRequest) {
     reminder_enabled: body.reminder_enabled ?? true,
     reminder_minutes: body.reminder_minutes ?? 0,
     start_date:       body.start_date ?? new Date().toISOString().slice(0, 10),
+    is_bedtime:       body.is_bedtime ?? false,
     is_active:        true,
   })
 
@@ -109,9 +122,12 @@ export async function POST(req: NextRequest) {
     user_id:        user.id,
     qty_remaining:  body.qty_total ?? 0,
     qty_unit:       body.qty_unit ?? "เม็ด",
+    qty_per_pack:   body.qty_per_pack ?? null,
     low_stock_alert: body.low_stock_alert ?? 7,
     expiry_date:    body.expiry_date ?? null,
     price_per_unit: body.price_per_unit ?? null,
+    loc_code:       body.loc_code ?? null,
+    lot_no:         body.lot_no ?? null,
     last_purchased_at: new Date().toISOString().slice(0, 10),
     last_purchased_qty: body.qty_total ?? 0,
   })
