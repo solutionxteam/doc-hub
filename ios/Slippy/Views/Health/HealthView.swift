@@ -324,12 +324,12 @@ struct HealthView: View {
                         ForEach(groups[time] ?? []) { log in
                             if let med = vm.medications.first(where: { $0.id == log.medicationId }) {
                                 HStack(spacing: 10) {
-                                    Image(systemName: "pills.fill").foregroundColor(healthGreen).frame(width: 28, height: 28).background(healthGreen.opacity(0.1)).cornerRadius(8)
+                                    Image(systemName: "pills.fill").foregroundColor(healthCategory.color).frame(width: 28, height: 28).background(healthCategory.color.opacity(0.1)).cornerRadius(8)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(med.name + (med.strength.map { " \($0)" } ?? "")).font(.system(size: 13, weight: .semibold))
                                         Text("\(med.primarySchedule?.doseQty.clean ?? "1") เม็ด").font(.system(size: 11)).foregroundColor(.textSecondary)
                                         if let instruction = med.currentCourse?.doctorInstructions {
-                                            Text("สแกนจากฉลาก · \(instruction)").lineLimit(1).font(.system(size: 10)).foregroundColor(healthGreen)
+                                            Text("สแกนจากฉลาก · \(instruction)").lineLimit(1).font(.system(size: 10)).foregroundColor(healthCategory.color)
                                         }
                                     }
                                     Spacer()
@@ -339,7 +339,7 @@ struct HealthView: View {
                                         Text("ข้ามรอบ").font(.system(size: 11)).foregroundColor(.textSecondary)
                                     } else {
                                         Button("ทานแล้ว") { Task { try? await vm.updateDose(logId: log.id, status: "taken") } }
-                                            .font(.system(size: 11, weight: .semibold)).buttonStyle(.borderedProminent).tint(healthGreen)
+                                            .font(.system(size: 11, weight: .semibold)).buttonStyle(.borderedProminent).tint(healthCategory.color)
                                     }
                                 }
                             }
@@ -511,7 +511,7 @@ private struct MedicationCourseManagementCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "cross.case.fill").foregroundColor(healthGreen).frame(width: 38, height: 38).background(healthGreen.opacity(0.1)).cornerRadius(10)
+                Image(systemName: "cross.case.fill").foregroundColor(healthCategory.color).frame(width: 38, height: 38).background(healthCategory.color.opacity(0.1)).cornerRadius(10)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
                         Text(med.name + (med.strength.map { " \($0)" } ?? "")).font(.system(size: 14, weight: .semibold))
@@ -522,7 +522,7 @@ private struct MedicationCourseManagementCard: View {
                     if let course = med.currentCourse {
                         Text("เริ่ม \(course.startDate)" + (course.plannedEndDate.map { " · ถึง \($0)" } ?? "")).font(.system(size: 10)).foregroundColor(.textSecondary)
                         if let instruction = course.doctorInstructions {
-                            Text("สแกนจากฉลาก · \(instruction)").font(.system(size: 10)).foregroundColor(healthGreen).lineLimit(2)
+                            Text("สแกนจากฉลาก · \(instruction)").font(.system(size: 10)).foregroundColor(healthCategory.color).lineLimit(2)
                         }
                     }
                     if let inventory = med.inventory { Text("เหลือ \(inventory.qtyRemaining.clean) \(inventory.qtyUnit)").font(.system(size: 10)).foregroundColor(.textSecondary) }
@@ -532,7 +532,7 @@ private struct MedicationCourseManagementCard: View {
             if let course = med.currentCourse, course.status == .active {
                 HStack { Spacer(); Button("พักยา") { transition(course, "pause") }.buttonStyle(.bordered).font(.system(size: 11)); Button("จบคอร์ส") { transition(course, "complete") }.buttonStyle(.bordered).font(.system(size: 11)); Button("หยุดยา") { transition(course, "stop") }.buttonStyle(.bordered).tint(.red).font(.system(size: 11)) }
             } else if let course = med.currentCourse, course.status == .paused {
-                HStack { Spacer(); Button("กลับมาใช้") { transition(course, "resume") }.buttonStyle(.borderedProminent).tint(healthGreen).font(.system(size: 11)); Button("หยุดถาวร") { transition(course, "stop") }.buttonStyle(.bordered).tint(.red).font(.system(size: 11)) }
+                HStack { Spacer(); Button("กลับมาใช้") { transition(course, "resume") }.buttonStyle(.borderedProminent).tint(healthCategory.color).font(.system(size: 11)); Button("หยุดถาวร") { transition(course, "stop") }.buttonStyle(.bordered).tint(.red).font(.system(size: 11)) }
             }
         }.padding(14).background(Color.surface).cornerRadius(15).overlay(RoundedRectangle(cornerRadius: 15).stroke(Color.border, lineWidth: 1))
     }

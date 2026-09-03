@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { COMMON_CURRENCIES } from "@/lib/exchange-rates"
-import { expenseCategory } from "@/lib/activity-taxonomy"
+import { expenseCategory, ACTIVITY_CATEGORIES } from "@/lib/activity-taxonomy"
 import { TripMembersPanel } from "./trip-members-panel"
 import {
   ArrowLeft, Plus, Check, X, Copy, ExternalLink,
@@ -356,7 +356,7 @@ function AddExpenseModal({ tripId, baseCurrency, participants, onClose, onAdd }:
               <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">หมวด</label>
               <select value={category} onChange={e => setCategory(e.target.value)}
                 className="w-full h-9 rounded-[8px] border bg-background px-2 text-sm outline-none focus:border-brand-500">
-                {Object.entries(CAT_EMOJI).map(([k]) => <option key={k} value={k}>{k}</option>)}
+                {ACTIVITY_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.labelTh}</option>)}
               </select>
             </div>
           </div>
