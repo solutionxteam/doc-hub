@@ -62,6 +62,7 @@ const financeItems = [
 // Group 3: กิจกรรม & เครื่องมือ (Activities & Tools)
 const activityItems = [
   { key: "trips",      href: "/trips",        icon: Icons.MapPin,       label: undefined },  // ทริป & กิจกรรม
+  { key: "activities", href: "/activities",   icon: Icons.Calendar,     label: undefined },
   { key: "split",      href: "/split",        icon: Icons.Split,        label: undefined },  // หารบิล (ใช้ร่วมกันทั้งโหมดองค์กร/ส่วนตัว)
   { key: "incomeBills", href: "/split/income", icon: Icons.Wallet,      label: undefined },  // บิลรายรับ — สลิป + สถิติจากกลุ่มต่างๆ
   { key: "messages",   href: "/messages",     icon: Icons.MessageSquare, label: "ข้อความ" },
@@ -159,6 +160,7 @@ export function Sidebar({ org, allOrgs, user, collapsed, mobileOpen, onToggle, o
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard"
     if (href === "/trips") return pathname === "/trips" || pathname.startsWith("/trips/")
+    if (href === "/activities") return pathname === "/activities" || pathname.startsWith("/activities/")
     if (href === "/split") return pathname === "/split" || (pathname.startsWith("/split/") && !pathname.startsWith("/split/income"))
     return pathname.startsWith(href)
   }
