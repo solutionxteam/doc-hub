@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { toSearchResult } from "./route.ts"
+import { toSearchResult } from "../../../../lib/places/search.ts"
 
 test("toSearchResult maps a full Google result", () => {
   const raw = {
