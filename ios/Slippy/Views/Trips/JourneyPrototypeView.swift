@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import UIKit
+import PhotosUI
 
 /// Additive, local-only prototype for the future Trip & Journey module.
 /// This view intentionally does not call Supabase or mutate production trip data.
@@ -532,13 +533,17 @@ struct JourneyWorkspaceView: View {
     @State private var addItemDay: TripItineraryDay?
     @State private var showFriendPicker = false
     @State private var isPreparingShare = false
+    @State private var showTravelImport = false
+    @State private var showTravelDocuments = false
+    @State private var showTripProfileManager = false
+    @State private var showKyushuTemplateConfirmation = false
+    @State private var applyingKyushuTemplate = false
+    @State private var setupError: String?
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("ส่วนของทริป", selection: $tab) {
-                Text("ภาพรวม").tag(0); Text("แผน").tag(1); Text("แผนที่").tag(2); Text("ค่าใช้จ่าย").tag(3); Text("ร่วมทริป").tag(4)
-            }
-            .pickerStyle(.segmented).padding(12)
+            journeyHeader
+            journeyTabBar
 
             Group {
                 switch tab {
@@ -550,8 +555,9 @@ struct JourneyWorkspaceView: View {
                 }
             }
         }
-        .background(Color.background.ignoresSafeArea())
-        .navigationTitle(trip.title).navigationBarTitleDisplayMode(.inline)
+        .background(Color(hex: "#080C1A").ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .navigationTitle("").navigationBarTitleDisplayMode(.inline)
         .task {
             await vm.loadItinerary(journeyId: trip.id)
             await vm.loadTripConversation(journeyId: trip.id)
@@ -565,41 +571,432 @@ struct JourneyWorkspaceView: View {
         .sheet(isPresented: $showFriendPicker) { TripFriendPicker(friends: socialVM.friends) { friend in
             try await vm.addFriendToTrip(journeyId: trip.id, friendId: friend.id)
         }}
+        .sheet(isPresented: $showTravelImport) {
+            TripImportDocumentSheet(tripId: trip.id) { await vm.loadItinerary(journeyId: trip.id) }
+        }
+        .sheet(isPresented: $showTravelDocuments) {
+            TripDocumentsView(trip: trip)
+        }
+        .sheet(isPresented: $showTripProfileManager) {
+            TripProfileManagerSheet(participants: trip.participants ?? []) { participantId, name, role, emergencyContact, avatarData, sharedWithTrip in
+                var avatarURL: String?
+                if let avatarData {
+                    let photo = try await TripPhotoAPI.upload(
+                        journeyId: trip.id, itemId: nil, data: avatarData,
+                        caption: "Trip profile avatar"
+                    )
+                    avatarURL = TripPhotoAPI.publicURL(photo)?.absoluteString
+                }
+                try await vm.updateTripProfile(
+                    participantId: participantId, displayName: name,
+                    tripRole: role, emergencyContact: emergencyContact,
+                    avatarUrl: avatarURL, profileSharedWithTrip: sharedWithTrip
+                )
+            }
+        }
+        .confirmationDialog("ใช้แผน Kyushu 21–28 พ.ย. 2026?", isPresented: $showKyushuTemplateConfirmation) {
+            Button("เพิ่มแผน 8 วัน") { Task { await applyKyushuTemplate() } }
+            Button("ยกเลิก", role: .cancel) {}
+        } message: {
+            Text("เพิ่มเฉพาะเมื่อทริปยังไม่มีแผน เพื่อป้องกันรายการซ้ำ รถเช่าเป็นรายการรอตัดสินใจ ไม่ถือว่าจองแล้ว")
+        }
+        .alert("เตรียมแผนไม่สำเร็จ", isPresented: .constant(setupError != nil)) {
+            Button("ตกลง") { setupError = nil }
+        } message: { Text(setupError ?? "") }
+    }
+
+    private var journeyHeader: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(Color.brand300)
+                .frame(width: 34, height: 34)
+                .background(Color.brand600.opacity(0.55), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(trip.title).font(.system(size: 20, weight: .bold)).foregroundColor(.white).lineLimit(1)
+                Text([trip.destination, "\(vm.itineraryDays.count) วัน"].compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 11)).foregroundColor(Color(hex: "#94A3B8"))
+            }
+            Spacer()
+            HStack(spacing: -7) {
+                JourneyAvatar(url: authVM.profile?.avatarUrl, initials: authVM.profile?.initials ?? "ฉ", tint: .brand500)
+                ForEach(Array((trip.participants ?? []).prefix(3).enumerated()), id: \.offset) { index, member in
+                    JourneyAvatar(url: nil, initials: String(member.displayName.prefix(1)), tint: [Color.statusProcessing, .statusApproved, .statusPushed][index])
+                }
+            }
+            Button { showTripProfileManager = true } label: {
+                Image(systemName: "person.crop.circle.badge.pencil")
+                    .font(.system(size: 18, weight: .medium)).foregroundColor(.brand300)
+                    .padding(.leading, 5)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 12)
+        .background(Color(hex: "#0E1527"))
+    }
+
+    private var journeyTabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                journeyTab("ภาพรวม", icon: "sparkles", index: 0)
+                journeyTab("แผน", icon: "calendar", index: 1)
+                journeyTab("แผนที่", icon: "map", index: 2)
+                journeyTab("ค่าใช้จ่าย", icon: "wallet.pass", index: 3)
+                journeyTab("ทีม", icon: "person.2", index: 4)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 11)
+        }
+        .background(Color(hex: "#0B1120"))
+    }
+
+    private func journeyTab(_ title: String, icon: String, index: Int) -> some View {
+        Button { withAnimation(.easeInOut(duration: 0.2)) { tab = index } } label: {
+            Label(title, systemImage: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(tab == index ? .white : Color(hex: "#9CA9C4"))
+                .padding(.horizontal, 13).padding(.vertical, 9)
+                .background(tab == index ? Color.brand500 : Color(hex: "#151D32"), in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var overview: some View {
         ScrollView {
             VStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(trip.tripTypeEmoji + " " + trip.title).font(.system(size: 25, weight: .bold))
-                    if let destination = trip.destination ?? trip.venue { Label(destination, systemImage: "mappin.and.ellipse") }
-                    if let start = trip.startedAt ?? trip.eventDate {
-                        Label([start.prefix(10), trip.endedAt?.prefix(10)].compactMap { $0.map(String.init) }.joined(separator: " – "), systemImage: "calendar")
-                    }
-                    Label("สกุลเงินหลัก \(trip.baseCurrency ?? "THB")", systemImage: "coloncurrencysign.circle")
-                    if let notes = trip.notes, !notes.isEmpty { Divider(); Text(notes).foregroundColor(.textSecondary) }
-                }
-                .font(.system(size: 13)).padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.surface).clipShape(RoundedRectangle(cornerRadius: 18))
+                journeyHero
+                nextKyushuMoment
+                journeyManagementCenter
+                kyushuTravelCrew
+                travelIdentityTags
 
                 HStack(spacing: 10) {
                     workspaceStat("วัน", "\(vm.itineraryDays.count)", "calendar")
                     workspaceStat("ผู้ร่วม", "\(trip.participants?.count ?? 0)", "person.2")
                     workspaceStat("ค่าใช้จ่าย", fmtTHB(trip.computedTotal), "wallet.pass")
                 }
+                kyushuGallery
+                travelCommandCenter
                 Button { tab = 1 } label: {
                     Label(vm.itineraryDays.isEmpty ? "เริ่มวางแผนรายวัน" : "เปิดแผนการเดินทาง", systemImage: "arrow.right.circle.fill")
                         .font(.system(size: 15, weight: .semibold)).foregroundColor(.white)
-                        .frame(maxWidth: .infinity).padding(14).background(Color(hex: "#08783F"))
+                        .frame(maxWidth: .infinity).padding(14).background(LinearGradient(colors: [.brand500, .brand600], startPoint: .leading, endPoint: .trailing))
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
             }.padding(16)
         }
     }
 
+    private var journeyHero: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image("KyushuTripCover")
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, minHeight: 250, maxHeight: 250)
+                .clipped()
+            LinearGradient(
+                colors: [Color(hex: "#071126").opacity(0.96), Color(hex: "#111C46").opacity(0.72), .clear],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            LinearGradient(colors: [.clear, Color(hex: "#081126").opacity(0.93)], startPoint: .top, endPoint: .bottom)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("KYUSHU ANIME JOURNEY · 2026").font(.system(size: 10, weight: .bold)).tracking(1.2).foregroundColor(Color(hex: "#DAD5FF"))
+                Text(trip.tripTypeEmoji + " " + trip.title).font(.system(size: 26, weight: .bold)).foregroundColor(.white).shadow(color: Color.black.opacity(0.7), radius: 3, x: 0, y: 1).lineLimit(2)
+                if let destination = trip.destination ?? trip.venue { Label(destination, systemImage: "mappin.and.ellipse") }
+                if let start = trip.startedAt ?? trip.eventDate {
+                    Label([start.prefix(10), trip.endedAt?.prefix(10)].compactMap { $0.map(String.init) }.joined(separator: " – "), systemImage: "calendar")
+                }
+                HStack(spacing: -7) {
+                    JourneyAvatar(url: authVM.profile?.avatarUrl, initials: authVM.profile?.initials ?? "ฉ", tint: .brand900)
+                    ForEach(Array((trip.participants ?? []).prefix(3).enumerated()), id: \.offset) { index, member in
+                        JourneyAvatar(url: nil, initials: String(member.displayName.prefix(1)), tint: [Color.statusProcessing, .statusApproved, .statusPushed][index])
+                    }
+                    Text("  \(trip.participants?.count ?? 1) ผู้ร่วมเดินทาง").font(.system(size: 11, weight: .semibold)).foregroundColor(.brand100)
+                }
+            }
+            .font(.system(size: 13)).foregroundColor(.brand100)
+            .padding(19).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: 250)
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.brand300.opacity(0.45), lineWidth: 1))
+    }
+
+    private var kyushuGallery: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Kyushu visual diary", systemImage: "photo.stack.fill")
+                    .font(.system(size: 16, weight: .bold))
+                Spacer()
+                Text("Anime gallery")
+                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.brand300)
+            }
+            Text("เก็บบรรยากาศแต่ละช่วงของทริปไว้เป็นแรงบันดาลใจ ก่อนเพิ่มภาพจริงของทีม")
+                .font(.system(size: 11)).foregroundColor(.textSecondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    KyushuMomentCard(imageName: "KyushuFukuoka", title: "Fukuoka at night", subtitle: "Canal City · yatai lights", accent: .brand400)
+                    KyushuMomentCard(imageName: "KyushuKumamoto", title: "Kumamoto & Aso", subtitle: "Castle · one-piece route", accent: .statusProcessing)
+                    KyushuMomentCard(imageName: "KyushuYufuin", title: "Yufuin morning", subtitle: "Lake · ryokan · mist", accent: .statusApproved)
+                    KyushuMomentCard(imageName: "KyushuShrine", title: "Temple day", subtitle: "Maple · shrine · calm", accent: .statusPushed)
+                }
+            }
+        }
+        .padding(15).background(Color(hex: "#0E1527")).clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    private var kyushuTravelCrew: some View {
+        let sharedProfiles = (trip.participants ?? []).filter(\.profileSharedWithTrip)
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Label("Kyushu travel crew", systemImage: "person.3.sequence.fill")
+                    .font(.system(size: 16, weight: .bold))
+                Spacer()
+                Text("Nov 2026").font(.system(size: 11, weight: .semibold)).foregroundColor(.brand300)
+            }
+            HStack(spacing: 8) {
+                KyushuCrewBadge(imageName: "KyushuDrTom", name: "Dr. Tom", role: "Mentor")
+                KyushuCrewBadge(imageName: "KyushuDrJoey", name: "Dr. Joey", role: "Navigator")
+                KyushuCrewBadge(imageName: "KyushuNancy", name: "Nancy", role: "Planner")
+                KyushuCrewBadge(imageName: "KyushuVivi", name: "Vivi", role: "Story")
+            }
+            if !sharedProfiles.isEmpty {
+                Divider().overlay(Color(hex: "#27324D"))
+                Text("Profile ที่สมาชิกเลือกแชร์")
+                    .font(.system(size: 10, weight: .semibold)).foregroundColor(.brand300)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 9) {
+                        ForEach(sharedProfiles) { member in
+                            SharedTripProfileBadge(member: member)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14).background(Color(hex: "#0E1527")).clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    private var travelIdentityTags: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Label("Travel identity tags", systemImage: "tag.fill")
+                    .font(.system(size: 16, weight: .bold))
+                Spacer()
+                Text("พร้อมติดกระเป๋า").font(.system(size: 11, weight: .semibold)).foregroundColor(.brand300)
+            }
+            Text("บัตรสัมภาระเฉพาะตัวของทีม · กดดูเพื่อเก็บเป็นความทรงจำของทริป")
+                .font(.system(size: 11)).foregroundColor(.textSecondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    KyushuMascotIdentityTag(imageName: "KyushuMascotTom", name: "Dr. Tom", animal: "Shiba Inu")
+                    KyushuMascotIdentityTag(imageName: "KyushuMascotJoey", name: "Dr. Joey", animal: "Wise Owl")
+                    KyushuMascotIdentityTag(imageName: "KyushuMascotNancy", name: "Nancy", animal: "Red Panda")
+                    KyushuMascotIdentityTag(imageName: "KyushuMascotVivi", name: "Vivi", animal: "Lucky Rabbit")
+                }
+            }
+        }
+        .padding(14).background(Color(hex: "#0E1527")).clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    private var nextKyushuMoment: some View {
+        let day = vm.itineraryDays.first
+        let title = day?.title ?? "เริ่มสร้างตอนแรกของการเดินทาง"
+        let detail = day?.items?.first?.title ?? "เพิ่มจุดหมายแรก แล้ว Slippy จะรวมแผน เอกสาร และการนำทางไว้ให้"
+
+        return HStack(spacing: 13) {
+            ZStack {
+                Image("KyushuShrine")
+                    .resizable().scaledToFill()
+                    .frame(width: 82, height: 96).clipped()
+                LinearGradient(colors: [.clear, Color(hex: "#071126").opacity(0.65)], startPoint: .top, endPoint: .bottom)
+                Image(systemName: "sparkle.magnifyingglass")
+                    .font(.system(size: 20, weight: .bold)).foregroundColor(.white)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 15))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("NEXT KYUSHU MOMENT")
+                    .font(.system(size: 10, weight: .bold)).tracking(0.9).foregroundColor(.brand300)
+                Text(title).font(.system(size: 15, weight: .bold)).foregroundColor(.white).lineLimit(1)
+                Text(detail).font(.system(size: 11)).foregroundColor(Color(hex: "#B8C2D9")).lineLimit(2)
+            }
+            Spacer(minLength: 0)
+            Button { tab = 1 } label: {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 12, weight: .bold)).foregroundColor(.white)
+                    .frame(width: 31, height: 31).background(Color.brand500, in: Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(10)
+        .background(Color(hex: "#151D32"), in: RoundedRectangle(cornerRadius: 19))
+        .overlay(RoundedRectangle(cornerRadius: 19).stroke(Color.brand500.opacity(0.36), lineWidth: 1))
+    }
+
+    private var journeyManagementCenter: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                Label("จัดการทริป", systemImage: "slider.horizontal.3")
+                    .font(.system(size: 16, weight: .bold))
+                Spacer()
+                Text("ทุกอย่างในที่เดียว")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.brand300)
+            }
+            Text("เปิดส่วนที่ต้องจัดการได้ทันที โดยยังคงบรรยากาศทริป Kyushu ไว้ในหน้าเดียว")
+                .font(.system(size: 11)).foregroundColor(.textSecondary)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
+                Button { tab = 1 } label: {
+                    JourneyManagementAction(title: "แผน 8 วัน", detail: "ตาราง · จุดหมาย", icon: "calendar", tint: .brand500)
+                }
+                .buttonStyle(.plain)
+                Button { showTravelDocuments = true } label: {
+                    JourneyManagementAction(title: "Travel Wallet", detail: "พาสปอร์ต · ใบจอง", icon: "folder.fill", tint: .statusApproved)
+                }
+                .buttonStyle(.plain)
+                Button { tab = 3 } label: {
+                    JourneyManagementAction(title: "ค่าใช้จ่าย", detail: "แยกจ่าย · สรุป", icon: "wallet.pass.fill", tint: .statusProcessing)
+                }
+                .buttonStyle(.plain)
+                Button { tab = 4 } label: {
+                    JourneyManagementAction(title: "ทีมและแท็ก", detail: "สมาชิก · สัมภาระ", icon: "person.3.fill", tint: .statusPushed)
+                }
+                .buttonStyle(.plain)
+                Button { showTripProfileManager = true } label: {
+                    JourneyManagementAction(title: "Profile ทริป", detail: "รูป · บทบาท · ติดต่อ", icon: "person.crop.circle.badge.pencil", tint: .brand400)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14).background(Color(hex: "#0E1527")).clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    /// One operational home for the things travellers otherwise lose between
+    /// email, a rental-car site and several map apps. The document reader
+    /// keeps a human review step before writing any booking into the plan.
+    private var travelCommandCenter: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Travel Command Center", systemImage: "suitcase.rolling.fill")
+                    .font(.system(size: 16, weight: .bold))
+                Spacer()
+                if applyingKyushuTemplate { ProgressView().controlSize(.small) }
+            }
+            Text("เอกสารสำคัญ แผนที่ และรายการพร้อมเดินทางอยู่ในทริปเดียว")
+                .font(.system(size: 12)).foregroundColor(.textSecondary)
+
+            HStack(spacing: 10) {
+                Button { showTravelImport = true } label: {
+                    commandAction("สแกนเอกสาร", "ตั๋ว · โรงแรม · รถเช่า", "doc.text.viewfinder")
+                }.buttonStyle(.plain)
+                Button { showTravelDocuments = true } label: {
+                    commandAction("Travel Wallet", "พาสปอร์ต · ประกัน", "folder.fill")
+                }.buttonStyle(.plain)
+            }
+
+            HStack(spacing: 10) {
+                Button { tab = 2 } label: {
+                    commandAction("แผนที่ & นำทาง", "Apple Maps · Google Maps", "map.fill")
+                }.buttonStyle(.plain)
+                Button { showKyushuTemplateConfirmation = true } label: {
+                    commandAction("ใช้แผน Kyushu", "21–28 พ.ย. · 8 วัน", "calendar.badge.plus")
+                }
+                .buttonStyle(.plain)
+                .disabled(!vm.itineraryDays.isEmpty || applyingKyushuTemplate)
+            }
+
+            Label("รถเช่า 23–25 พ.ย. ยังเป็นรอตัดสินใจ: ยืนยันจุดรับรถ/คืนรถและจำนวนผู้โดยสารก่อนกดจอง", systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(Color(hex: "#9A3412"))
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(hex: "#FFF7ED"), in: RoundedRectangle(cornerRadius: 11))
+        }
+        .padding(15).background(Color(hex: "#0E1527")).clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func commandAction(_ title: String, _ subtitle: String, _ icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Image(systemName: icon).font(.system(size: 17, weight: .semibold)).foregroundColor(.brand300)
+            Text(title).font(.system(size: 12, weight: .semibold)).foregroundColor(.textPrimary)
+            Text(subtitle).font(.system(size: 10)).foregroundColor(.textSecondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).padding(11)
+        .background(Color(hex: "#171E33"), in: RoundedRectangle(cornerRadius: 13))
+    }
+
+    private struct KyushuDay {
+        let date: String; let title: String; let city: String
+        let items: [(type: String, title: String, location: String, time: String?, notes: String?)]
+    }
+
+    /// The latest user-supplied outline. It is deliberately a one-tap template
+    /// rather than a hidden seed: dates, hotels and the final rental booking
+    /// remain visible and editable decisions owned by the traveller.
+    private static let kyushuTemplate: [KyushuDay] = [
+        .init(date: "2026-11-21", title: "Fukuoka old town & Nakasu", city: "Fukuoka", items: [
+            ("activity", "Kushida Shrine", "Kushida Shrine, Fukuoka", nil, nil),
+            ("shopping", "Canal City Hakata", "Canal City Hakata", nil, nil),
+            ("meal", "Nakasu evening", "Nakasu, Fukuoka", nil, "เลือกร้านและจองโต๊ะถ้าจำเป็น")]),
+        .init(date: "2026-11-22", title: "Fukuoka autumn", city: "Fukuoka", items: [
+            ("activity", "Yusentei Park", "Yusentei Park, Fukuoka", nil, nil),
+            ("activity", "Ohori Park", "Ohori Park, Fukuoka", nil, nil),
+            ("activity", "Fukuoka Castle", "Fukuoka Castle Ruins", nil, "ตรวจช่วงใบไม้แดง"),
+            ("shopping", "Tenjin", "Tenjin, Fukuoka", nil, nil)]),
+        .init(date: "2026-11-23", title: "Kumamoto & One Piece", city: "Kumamoto", items: [
+            ("shinkansen", "Hakata → Kumamoto", "Hakata Station", "07:30", "ยืนยันตั๋วและเวลาขบวน"),
+            ("car_rental", "รับรถเช่า (รอตัดสินใจ)", "Kumamoto Station Shinkansen Exit", "09:00", "เปรียบเทียบ Nippon 7 ที่นั่ง กับ Nissan 8 ที่นั่ง; ตรวจใบขับขี่สากล, ETC และประกัน"),
+            ("activity", "Kumamoto Castle", "Kumamoto Castle", nil, nil),
+            ("activity", "One Piece statues", "Kumamoto Prefectural Government Office", nil, "Luffy เป็นจุดหลัก; Chopper/Zoro/Usopp/Franky เป็น optional ตามเวลา")]),
+        .init(date: "2026-11-24", title: "Dazaifu → Yufuin", city: "Yufuin", items: [
+            ("activity", "Dazaifu Tenmangu", "Dazaifu Tenmangu", nil, nil),
+            ("activity", "Kamado Shrine", "Kamado Shrine, Dazaifu", nil, "ตรวจเวลาเปิดและการเดินขึ้น"),
+            ("hotel", "พัก Yufuin", "Yufuin, Oita", nil, "เพิ่มใบยืนยันโรงแรม")]),
+        .init(date: "2026-11-25", title: "Yufuin → Fukuoka", city: "Fukuoka", items: [
+            ("activity", "Kirin Lake", "Kinrinko Lake, Yufuin", nil, nil),
+            ("activity", "Yunotsubo Street", "Yunotsubo Kaido, Yufuin", nil, nil),
+            ("shopping", "Yufuin Floral Village", "Yufuin Floral Village", nil, nil),
+            ("car_rental", "คืนรถเช่า", "Kumamoto Station Shinkansen Exit", nil, "ยืนยันสาขาคืนรถจริงและค่าน้ำมัน")]),
+        .init(date: "2026-11-26", title: "Temple day", city: "Fukuoka", items: [
+            ("train", "Nanzoin Temple", "Nanzoin Temple", nil, nil),
+            ("activity", "Kaizan Sennyuji", "Kaizan Sennyuji, Fukuoka", nil, nil),
+            ("shopping", "Hakata", "Hakata Station", nil, nil)]),
+        .init(date: "2026-11-27", title: "Hakata & Tenjin", city: "Fukuoka", items: [
+            ("activity", "Tochoji Temple", "Tochoji Temple", nil, nil),
+            ("shopping", "Tenjin Underground Mall", "Tenjin Chikagai", nil, nil),
+            ("shopping", "Canal City final shopping", "Canal City Hakata", nil, "จัด tax-free และแพ็กกระเป๋า")]),
+        .init(date: "2026-11-28", title: "Departure", city: "Fukuoka", items: [
+            ("flight", "เดินทางไป Fukuoka Airport", "Fukuoka Airport", nil, "เพิ่มเที่ยวบิน เช็กอิน และคืน SIM/Wi‑Fi")])
+    ]
+
+    @MainActor
+    private func applyKyushuTemplate() async {
+        guard vm.itineraryDays.isEmpty else { return }
+        applyingKyushuTemplate = true
+        defer { applyingKyushuTemplate = false }
+        do {
+            for source in Self.kyushuTemplate {
+                try await vm.addItineraryDay(journeyId: trip.id, date: source.date, title: source.title)
+                guard let day = vm.itineraryDays.last else { throw TemplateError.dayCreation }
+                for item in source.items {
+                    try await vm.addItineraryItem(dayId: day.id, type: item.type, title: item.title,
+                                                  location: item.location, timeFrom: item.time, notes: item.notes)
+                }
+            }
+            await vm.loadItinerary(journeyId: trip.id)
+            hapticSuccess()
+            tab = 1
+        } catch { setupError = error.localizedDescription }
+    }
+
+    private enum TemplateError: LocalizedError { case dayCreation
+        var errorDescription: String? { "สร้างวันในแผนไม่สำเร็จ" }
+    }
+
     private func workspaceStat(_ label: String, _ value: String, _ icon: String) -> some View {
-        VStack(spacing: 6) { Image(systemName: icon).foregroundColor(Color(hex: "#08783F")); Text(value).font(.system(size: 14, weight: .bold)).lineLimit(1).minimumScaleFactor(0.7); Text(label).font(.system(size: 10)).foregroundColor(.textSecondary) }
-            .frame(maxWidth: .infinity).padding(.vertical, 14).background(Color.surface).clipShape(RoundedRectangle(cornerRadius: 14))
+        VStack(spacing: 6) { Image(systemName: icon).foregroundColor(.brand400); Text(value).font(.system(size: 14, weight: .bold)).lineLimit(1).minimumScaleFactor(0.7); Text(label).font(.system(size: 10)).foregroundColor(Color(hex: "#94A3B8")) }
+            .frame(maxWidth: .infinity).padding(.vertical, 14).background(Color(hex: "#0E1527")).clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private var itinerary: some View {
@@ -687,6 +1084,315 @@ struct JourneyWorkspaceView: View {
     }
 }
 
+/// Compact, native avatar used in the Journey header and hero. It uses the
+/// profile image when available and falls back to a stable initial badge, so a
+/// missing upload never leaves an empty participant slot.
+private struct JourneyAvatar: View {
+    let url: String?
+    let initials: String
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            if let url, let imageURL = URL(string: url) {
+                AsyncImage(url: imageURL) { phase in
+                    if let image = phase.image { image.resizable().scaledToFill() }
+                    else { fallback }
+                }
+            } else { fallback }
+        }
+        .frame(width: 31, height: 31)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color(hex: "#0E1527"), lineWidth: 2))
+    }
+
+    private var fallback: some View {
+        Text(initials.uppercased())
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(tint)
+    }
+}
+
+/// A reusable visual-diary tile. Generated travel mood images stay separate
+/// from a traveller's private uploads in the real photo gallery.
+private struct KyushuMomentCard: View {
+    let imageName: String
+    let title: String
+    let subtitle: String
+    let accent: Color
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image(imageName)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 208, height: 142)
+                .clipped()
+            LinearGradient(colors: [.clear, Color(hex: "#071126").opacity(0.92)], startPoint: .top, endPoint: .bottom)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 14, weight: .bold)).foregroundColor(.white)
+                Text(subtitle).font(.system(size: 10, weight: .medium)).foregroundColor(.white.opacity(0.82))
+            }
+            .padding(12)
+        }
+        .frame(width: 208, height: 142)
+        .clipShape(RoundedRectangle(cornerRadius: 15))
+        .overlay(RoundedRectangle(cornerRadius: 15).stroke(accent.opacity(0.75), lineWidth: 1))
+    }
+}
+
+private struct KyushuCrewBadge: View {
+    let imageName: String
+    let name: String
+    let role: String
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Image(imageName)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 68, height: 68, alignment: .top)
+                .clipped()
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.brand300.opacity(0.65), lineWidth: 1.5))
+                .frame(maxWidth: .infinity)
+            Text(name).font(.system(size: 10, weight: .bold)).foregroundColor(.white).lineLimit(1)
+            Text(role).font(.system(size: 8, weight: .medium)).foregroundColor(Color(hex: "#94A3B8")).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct KyushuMascotIdentityTag: View {
+    let imageName: String
+    let name: String
+    let animal: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Image(imageName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 104, height: 104)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 13))
+                .background(Color(hex: "#181F3A"), in: RoundedRectangle(cornerRadius: 13))
+            Text(name).font(.system(size: 11, weight: .bold)).foregroundColor(.white)
+            Text(animal).font(.system(size: 9, weight: .medium)).foregroundColor(.brand300)
+        }
+        .padding(9)
+        .frame(width: 122, alignment: .leading)
+        .background(Color(hex: "#151D32"), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct SharedTripProfileBadge: View {
+    let member: TripParticipant
+
+    var body: some View {
+        HStack(spacing: 7) {
+            TripProfileAvatar(url: member.avatarUrl, initials: String(member.displayName.prefix(1)))
+                .scaleEffect(0.65)
+                .frame(width: 30, height: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(member.displayName).font(.system(size: 10, weight: .bold)).foregroundColor(.white).lineLimit(1)
+                Text(member.tripRole?.nilIfBlank ?? "Traveller").font(.system(size: 8)).foregroundColor(Color(hex: "#9CA9C4")).lineLimit(1)
+            }
+        }
+        .padding(7)
+        .background(Color(hex: "#171E33"), in: RoundedRectangle(cornerRadius: 11))
+    }
+}
+
+private struct JourneyManagementAction: View {
+    let title: String
+    let detail: String
+    let icon: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(tint)
+                .frame(width: 31, height: 31)
+                .background(tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 12, weight: .bold)).foregroundColor(.white).lineLimit(1)
+                Text(detail).font(.system(size: 9, weight: .medium)).foregroundColor(Color(hex: "#9CA9C4")).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color(hex: "#151D32"), in: RoundedRectangle(cornerRadius: 13))
+    }
+}
+
+/// Keeps the traveller's journey-facing identity distinct from their account
+/// profile. A photo is uploaded to the trip gallery so all active members can
+/// see the avatar that was chosen for this specific trip.
+private struct TripProfileManagerSheet: View {
+    let participants: [TripParticipant]
+    let save: (String, String, String?, String?, Data?, Bool) async throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var editing: TripParticipant?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("รูป บทบาท และข้อมูลติดต่อฉุกเฉินในหน้านี้ใช้เฉพาะทริปนี้ ไม่เปลี่ยนโปรไฟล์บัญชีหลัก")
+                        .font(.footnote).foregroundColor(.secondary)
+                }
+                Section("สมาชิกในทริป") {
+                    if participants.isEmpty {
+                        ContentUnavailableView("ยังไม่มีสมาชิก", systemImage: "person.2.slash", description: Text("เพิ่มสมาชิกในแท็บทีมก่อน แล้วจึงกำหนด Profile สำหรับทริป"))
+                    } else {
+                        ForEach(participants) { member in
+                            Button { editing = member } label: {
+                                HStack(spacing: 12) {
+                                    TripProfileAvatar(url: member.avatarUrl, initials: String(member.displayName.prefix(1)))
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(member.displayName).foregroundColor(.primary)
+                                        Text(member.profileSharedWithTrip ? (member.tripRole?.isEmpty == false ? member.tripRole! : (member.isHost ? "Host" : "Traveller")) : "Profile ส่วนตัว")
+                                            .font(.caption).foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Profile ทริป")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("เสร็จ") { dismiss() } } }
+            .sheet(item: $editing) { member in
+                TripProfileEditorSheet(member: member, save: save)
+            }
+        }
+    }
+}
+
+private struct TripProfileEditorSheet: View {
+    let member: TripParticipant
+    let save: (String, String, String?, String?, Data?, Bool) async throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var role: String
+    @State private var emergencyContact: String
+    @State private var pickedImage: PhotosPickerItem?
+    @State private var preview: UIImage?
+    @State private var imageData: Data?
+    @State private var sharedWithTrip: Bool
+    @State private var saving = false
+    @State private var errorText: String?
+
+    init(member: TripParticipant, save: @escaping (String, String, String?, String?, Data?, Bool) async throws -> Void) {
+        self.member = member
+        self.save = save
+        _name = State(initialValue: member.displayName)
+        _role = State(initialValue: member.tripRole ?? (member.isHost ? "Host" : "Traveller"))
+        _emergencyContact = State(initialValue: member.emergencyContact ?? "")
+        _sharedWithTrip = State(initialValue: member.profileSharedWithTrip)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("รูปในทริป") {
+                    HStack {
+                        Spacer()
+                        PhotosPicker(selection: $pickedImage, matching: .images) {
+                            ZStack(alignment: .bottomTrailing) {
+                                if let preview {
+                                    Image(uiImage: preview).resizable().scaledToFill()
+                                } else {
+                                    TripProfileAvatar(url: member.avatarUrl, initials: String(name.prefix(1)))
+                                }
+                                Image(systemName: "camera.fill")
+                                    .font(.caption.weight(.bold)).foregroundColor(.white)
+                                    .frame(width: 28, height: 28).background(Color.brand500, in: Circle())
+                            }
+                            .frame(width: 92, height: 92)
+                            .clipShape(Circle())
+                        }
+                        Spacer()
+                    }
+                    Text("เลือกภาพใหม่เพื่อใช้เป็น Avatar เฉพาะใน Journey นี้")
+                        .font(.caption).foregroundColor(.secondary).frame(maxWidth: .infinity, alignment: .center)
+                }
+                Section("ข้อมูลในทริป") {
+                    TextField("ชื่อที่แสดง", text: $name)
+                    TextField("บทบาท เช่น Navigator", text: $role)
+                    TextField("ผู้ติดต่อฉุกเฉิน", text: $emergencyContact)
+                        .textContentType(.telephoneNumber)
+                }
+                Section("การแชร์กับทีม") {
+                    Toggle("แชร์ Avatar และบทบาทให้ทีม", isOn: $sharedWithTrip)
+                    Text("หากปิดไว้ ข้อมูลนี้จะแสดงเฉพาะเจ้าของ Profile ในมุมมองทริป")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                if let errorText { Section { Text(errorText).foregroundColor(.red) } }
+            }
+            .navigationTitle("แก้ไข Profile")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("ยกเลิก") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "กำลังบันทึก…" : "บันทึก") {
+                        saving = true
+                        Task {
+                            defer { saving = false }
+                            do {
+                                try await save(member.id, name.trimmingCharacters(in: .whitespacesAndNewlines),
+                                               role.nilIfBlank, emergencyContact.nilIfBlank, imageData, sharedWithTrip)
+                                dismiss()
+                            } catch { errorText = error.localizedDescription }
+                        }
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving)
+                }
+            }
+            .onChange(of: pickedImage) { _, item in
+                Task {
+                    guard let source = try? await item?.loadTransferable(type: Data.self),
+                          let image = UIImage(data: source) else { return }
+                    preview = image
+                    imageData = image.jpegData(compressionQuality: 0.78)
+                }
+            }
+        }
+    }
+}
+
+private struct TripProfileAvatar: View {
+    let url: String?
+    let initials: String
+
+    var body: some View {
+        Group {
+            if let url, let remote = URL(string: url) {
+                AsyncImage(url: remote) { image in image.resizable().scaledToFill() } placeholder: { avatarFallback }
+            } else { avatarFallback }
+        }
+        .frame(width: 46, height: 46).clipShape(Circle())
+    }
+
+    private var avatarFallback: some View {
+        Text(initials.uppercased()).font(.system(size: 16, weight: .bold)).foregroundColor(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.brand600)
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}
+
 private struct AddItineraryDaySheet: View {
     let save: (String?, String?) async throws -> Void
     @Environment(\.dismiss) private var dismiss
@@ -733,7 +1439,19 @@ private struct TripRouteMapView: View {
                 ContentUnavailableView("ยังไม่มีตำแหน่งบนแผนที่", systemImage: "map", description: Text("เพิ่มชื่อสถานที่ในแผนรายวันก่อน"))
                     .padding().background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 18)).padding()
             } else {
-                HStack { VStack(alignment: .leading) { Text("\(pins.count) สถานที่").font(.headline); Text("Apple Maps · จากแผนรายวัน").font(.caption).foregroundColor(.textSecondary) }; Spacer(); Button("เปิดนำทาง") { openFirstPin() } }
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text("\(pins.count) สถานที่").font(.headline)
+                        Text("เลือก Apple Maps หรือ Google Maps สำหรับนำทาง").font(.caption).foregroundColor(.textSecondary)
+                    }
+                    Spacer()
+                    Menu {
+                        Button("Apple Maps") { openFirstPin() }
+                        Button("Google Maps") { openFirstPinInGoogleMaps() }
+                    } label: {
+                        Label("นำทาง", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                    }
+                }
                     .padding(14).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 16)).padding()
             }
         }.task(id: days.flatMap { $0.items ?? [] }.map(\.location).description) { await resolvePins() }
@@ -758,5 +1476,13 @@ private struct TripRouteMapView: View {
     private func openFirstPin() {
         guard let pin = pins.first else { return }
         MKMapItem(placemark: MKPlacemark(coordinate: pin.coordinate)).openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+    }
+
+    private func openFirstPinInGoogleMaps() {
+        guard let pin = pins.first else { return }
+        // A universal Maps URL hands off to the Google Maps app when installed,
+        // but keeps a safe browser fallback for travellers without it.
+        GoogleMapsLinks.open(GoogleMapsLinks.directionsURL(
+            destination: (pin.coordinate.latitude, pin.coordinate.longitude), mode: .driving))
     }
 }

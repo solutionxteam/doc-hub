@@ -4,6 +4,34 @@ struct TripsView: View {
     @EnvironmentObject var authVM: AuthViewModel
     @StateObject private var vm = TripsViewModel()
     @State private var showCreate = false
+    @State private var space: JourneySpace = .personal
+
+    private enum JourneySpace: String, CaseIterable, Identifiable {
+        case personal
+        case groups
+
+        var id: String { rawValue }
+        var title: String { self == .personal ? "ชีวิตของฉัน" : "ทริปกลุ่ม" }
+        var subtitle: String {
+            self == .personal
+                ? "บันทึกและวางแผนแบบเป็นส่วนตัว"
+                : "แผนร่วมกัน · ค่าใช้จ่าย · แชต · ตำแหน่ง"
+        }
+        var icon: String { self == .personal ? "sparkles" : "person.3.fill" }
+    }
+
+    /// These are presentation spaces, not parallel data models. A shared trip
+    /// remains the same `life_journeys` record (and the same participants,
+    /// itinerary, expenses and conversation) wherever it is opened.
+    private var displayedTrips: [Trip] {
+        switch space {
+        case .personal:
+            let currentUserId = authVM.session?.user.id.uuidString.lowercased()
+            return vm.trips.filter { $0.creatorId?.lowercased() == currentUserId }
+        case .groups:
+            return vm.trips.filter { ($0.participants?.count ?? 0) > 1 }
+        }
+    }
 
     // No NavigationStack here — this view is only ever reached by being
     // pushed onto a NavigationLink from Dashboard or the "เพิ่มเติม" hub,
@@ -28,15 +56,6 @@ struct TripsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    NavigationLink {
-                        JourneyPrototypeView()
-                    } label: {
-                        Image(systemName: "map.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(Color(hex: "#08783F"))
-                    }
-                    .accessibilityLabel("เปิด Journey Prototype")
-
                     Button {
                         hapticLight()
                         showCreate = true
@@ -72,7 +91,13 @@ struct TripsView: View {
     private var tripsList: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(vm.trips) { trip in
+                journeySpacePicker
+
+                if displayedTrips.isEmpty {
+                    spaceEmptyState
+                }
+
+                ForEach(displayedTrips) { trip in
                     NavigationLink(destination: JourneyWorkspaceView(trip: trip)
                         .environmentObject(authVM)) {
                         TripCard(trip: trip)
@@ -83,6 +108,55 @@ struct TripsView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
+    }
+
+    private var journeySpacePicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: space.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Color(hex: "#08783F"))
+                    .frame(width: 42, height: 42)
+                    .background(Color(hex: "#ECFDF5"))
+                    .clipShape(RoundedRectangle(cornerRadius: 13))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(space.title).font(.system(size: 19, weight: .bold)).foregroundColor(.textPrimary)
+                    Text(space.subtitle).font(.system(size: 12)).foregroundColor(.textSecondary)
+                }
+                Spacer()
+            }
+
+            Picker("มุมมอง Journey", selection: $space) {
+                ForEach(JourneySpace.allCases) { item in
+                    Text(item.title).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("เลือกมุมมอง Journey")
+        }
+        .padding(16)
+        .background(
+            LinearGradient(
+                colors: [Color(hex: "#F0FDF4"), Color.surface],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private var spaceEmptyState: some View {
+        VStack(spacing: 9) {
+            Image(systemName: space == .personal ? "heart.text.square" : "person.3.sequence.fill")
+                .font(.system(size: 26)).foregroundColor(Color(hex: "#08783F"))
+            Text(space == .personal ? "ยังไม่มี Journey ส่วนตัว" : "ยังไม่มีทริปกลุ่ม")
+                .font(.system(size: 15, weight: .semibold)).foregroundColor(.textPrimary)
+            Text(space == .personal
+                 ? "สร้างแผนหรือบันทึกการเดินทางของคุณได้เลย"
+                 : "เชิญเพื่อนเข้าทริป แล้วทุกคนจะเห็นแผนและค่าใช้จ่ายชุดเดียวกัน")
+                .font(.system(size: 12)).foregroundColor(.textSecondary).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 32).padding(.horizontal, 24)
+        .background(Color.surface).clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
     // MARK: – Empty State

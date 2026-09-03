@@ -15,7 +15,7 @@ final class SplitViewModel: ObservableObject {
         do {
             bills = try await db
                 .from("split_bills")
-                .select("*, split_participants(*)")
+                .select("*, split_participants(*), split_bill_receipts(*)")
                 .eq("organization_id", value: orgId)
                 .order("created_at", ascending: false)
                 .execute()

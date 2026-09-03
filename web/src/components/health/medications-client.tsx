@@ -4,15 +4,15 @@ import { useRef, useState } from "react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
-  Plus, Pill, Clock, Check, X, AlertTriangle, ChevronDown, ChevronUp, Loader2,
-  Bell, BellOff, Package, ScanLine, ShoppingCart, Send, Pencil, Trash2,
+  Plus, Check, X, AlertTriangle, ChevronDown, ChevronUp, Loader2,
+  Bell, BellOff, ScanLine, ShoppingCart, Send, Pencil, Trash2,
 } from "lucide-react"
 
 type Schedule = { id: string; times: string[]; dose_qty: number; meal_relation: string; meal_note: string | null; reminder_enabled: boolean }
 type Inventory = { id: string; qty_remaining: number; qty_unit: string; low_stock_alert: number; expiry_date: string | null }
 type Medication = {
   id: string; name: string; brand_name: string | null; dosage_form: string; strength: string | null
-  category: string; purpose: string | null; is_chronic: boolean; color: string | null
+  category: string; purpose: string | null; is_chronic: boolean; color: string | null; notes: string | null
   /** A storage PATH despite the name — see the medication_label_images migration. Resolved to a signed URL on demand, never rendered directly. */
   image_url: string | null
   // PostgREST returns this embed as an array even though the app models it as
@@ -91,9 +91,10 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
   const existingInv   = existing?.medication_inventory[0]
   const [name,        setName]        = useState(existing?.name ?? scanned?.name ?? "")
   const [brand,       setBrand]       = useState(existing?.brand_name ?? scanned?.brand_name ?? "")
-  const [form,        setForm]        = useState(existing?.dosage_form ?? scanned?.dosage_form ?? "tablet")
+  const [form]                         = useState(existing?.dosage_form ?? scanned?.dosage_form ?? "tablet")
   const [strength,    setStrength]    = useState(existing?.strength ?? scanned?.strength ?? "")
   const [purpose,     setPurpose]     = useState(existing?.purpose ?? scanned?.purpose ?? "")
+  const [notes,       setNotes]       = useState(existing?.notes ?? scanned?.instructions_verbatim ?? "")
   const [isChronic,   setIsChronic]   = useState(existing?.is_chronic ?? false)
   const [times,       setTimes]       = useState(existingSched?.times.length ? existingSched.times : (scanned?.times.length ? scanned.times : ["08:00"]))
   const [doseQty,     setDoseQty]     = useState(String(existingSched?.dose_qty ?? scanned?.dose_qty ?? 1))
@@ -118,6 +119,7 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
             body: JSON.stringify({
               name: name.trim(), brand_name: brand || null,
               dosage_form: form, strength: strength || null, purpose: purpose || null,
+              notes: notes.trim() || null,
               scheduleId: existingSched?.id, times, dose_qty: Number(doseQty) || 1,
               meal_relation: mealRelation, reminder_enabled: reminder,
               inventoryId: existingInv?.id, qty_remaining: Number(qty) || 0,
@@ -130,6 +132,7 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
               name: name.trim(), brand_name: brand || null,
               dosage_form: form, strength: strength || null,
               purpose: purpose || null, is_chronic: isChronic,
+              notes: notes.trim() || null,
               times, dose_qty: Number(doseQty) || 1,
               meal_relation: mealRelation, reminder_enabled: reminder,
               qty_total: Number(qty) || 0, low_stock_alert: Number(lowAlert) || 7,
@@ -201,6 +204,16 @@ function AddMedicationModal({ onClose, onCreate, scanned, scanIssues, existing }
             <label className="text-[11.5px] font-medium text-muted-foreground block mb-1">ใช้สำหรับ</label>
             <input value={purpose} onChange={e => setPurpose(e.target.value)} placeholder="ลดความดัน, วิตามิน, ..."
               className="w-full h-9 rounded-[10px] border bg-background px-3 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <div>
+            <label className="text-[11.5px] font-medium text-muted-foreground mb-1 flex items-center gap-1.5">
+              หมายเหตุจากฉลาก
+              {scanned && <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9.5px] font-semibold text-emerald-700">สแกนจากฉลาก</span>}
+            </label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+              placeholder="ข้อความวิธีใช้หรือคำเตือนบนฉลากยา"
+              className="w-full rounded-[10px] border bg-background px-3 py-2 text-sm outline-none focus:border-brand-500 resize-y" />
+            {scanned && <p className="mt-1 text-[10.5px] text-muted-foreground">บันทึกอัตโนมัติจากฉลาก กรุณาตรวจสอบก่อนยืนยัน</p>}
           </div>
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={isChronic} onChange={e => setIsChronic(e.target.checked)} className="rounded" />
@@ -475,6 +488,7 @@ function MedicationCard({ med, adherence, onEdit, onRequestDelete }: {
       {expanded && (
         <div className="border-t px-4 py-3 space-y-2 text-sm">
           {med.purpose    && <p className="text-muted-foreground">🎯 {med.purpose}</p>}
+          {med.notes      && <p className="rounded-lg bg-emerald-50/70 dark:bg-emerald-500/10 px-3 py-2 text-xs text-emerald-900 dark:text-emerald-200">📄 <span className="font-semibold">หมายเหตุจากฉลาก:</span> {med.notes}</p>}
           {med.brand_name && <p className="text-muted-foreground">🏷️ {med.brand_name}</p>}
           {sched?.meal_relation !== "any" && <p className="text-muted-foreground">🍽️ {MEAL_LABEL[sched?.meal_relation ?? "any"]}{sched?.meal_note ? ` — ${sched.meal_note}` : ""}</p>}
           {inv?.expiry_date && <p className="text-muted-foreground">📅 หมดอายุ: {new Date(inv.expiry_date).toLocaleDateString("th-TH")}</p>}
@@ -570,13 +584,13 @@ function MedicationCard({ med, adherence, onEdit, onRequestDelete }: {
 }
 
 /* ─── Main ────────────────────────────────────────────────────────────────────── */
-export function MedicationsClient({ medications: initial, todayLogs: initialLogs, adherenceStats, userId }: {
+export function MedicationsClient({ medications: initial, todayLogs: initialLogs, adherenceStats, userId: _userId }: {
   medications:    Medication[]
   todayLogs:      Log[]
   adherenceStats: Adherence[]
   userId:         string
 }) {
-  const [medications, setMedications] = useState(initial)
+  const [medications]                 = useState(initial)
   const [logs,        setLogs]        = useState(initialLogs)
   const [showAdd,     setShowAdd]     = useState(false)
   const [editingMed,  setEditingMed]  = useState<Medication | null>(null)
@@ -675,7 +689,6 @@ export function MedicationsClient({ medications: initial, todayLogs: initialLogs
   }
 
   const takenToday  = logs.filter(l => l.status === "taken" || l.status === "late").length
-  const pendingToday = logs.filter(l => l.status === "pending").length
   const totalToday  = logs.length
 
   const handleLogUpdate = (logId: string, status: string) => {

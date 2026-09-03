@@ -22,11 +22,15 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   await getMembership()          // still required: unauthenticated users get bounced
   const supabase = await createClient()
 
+  // Profile-sharing migration 096 is now part of the deployed Journey schema.
+  // Read the fields here (rather than issuing a client-side follow-up query) so
+  // the first Crew render never flashes initials before its selected avatar.
   const { data: trip } = await supabase.from("life_journeys")
     .select(`
       id, title, destination, description, status, started_at, ended_at,
       base_currency, cover_emoji, notes,
-      trip_participants(id, display_name, is_host, amount_owed, amount_paid)
+      trip_participants(id, display_name, avatar_url, trip_role,
+                        profile_shared_with_trip, is_host, amount_owed, amount_paid)
     `)
     .eq("id", id)
     .single()

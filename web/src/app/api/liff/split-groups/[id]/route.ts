@@ -66,7 +66,7 @@ async function resolveConnection(admin: ReturnType<typeof createAdminClient>, li
 
 async function loadDetail(admin: ReturnType<typeof createAdminClient>, id: string, lineUserId?: string | null) {
   const { data: bill } = await admin.from("split_bills")
-    .select("id, title, note, total_amount, status, share_token, organization_id, creator_id, promptpay_id, receipt_url, split_participants(id, name, amount, paid_at, line_user_id, added_by_participant_id)")
+    .select("id, title, note, total_amount, status, share_token, organization_id, creator_id, promptpay_id, receipt_url, split_mode, allocation_details, split_participants(id, name, amount, paid_at, line_user_id, line_picture_url, added_by_participant_id)")
     .eq("id", id)
     .eq("category", "general")
     .maybeSingle()
@@ -93,6 +93,7 @@ async function loadDetail(admin: ReturnType<typeof createAdminClient>, id: strin
       id: p.id, name: p.name, amount: Number(p.amount), paid: !!p.paid_at,
       isMe: lineUserId ? p.line_user_id === lineUserId : false,
       userId: p.line_user_id ? (userIdByLineId[p.line_user_id] ?? null) : null,
+      avatarUrl: p.line_picture_url ?? null,
       addedByParticipantId: p.added_by_participant_id ?? null,
     }))
 
@@ -111,6 +112,21 @@ async function loadDetail(admin: ReturnType<typeof createAdminClient>, id: strin
     .map(p => ({ ...p, guests: (guestsByParent.get(p.id) ?? []).map(g => ({ id: g.id, name: g.name })) }))
     .sort((a, b) => Number(b.isMe) - Number(a.isMe))
 
+  const { data: receiptRows } = await admin.from("split_bill_receipts")
+    .select("id, document_id, receipt_url, title, amount, expense_date, meal_type, paid_by_participant_id")
+    .eq("split_bill_id", id).order("created_at", { ascending: true })
+  const participantNameById = Object.fromEntries(allParticipants.map(p => [p.id, p.name]))
+  const receipts = (receiptRows ?? []).map((r: any) => ({
+    id: r.id,
+    url: r.receipt_url ?? null,
+    title: r.title ?? null,
+    amount: Number(r.amount),
+    expenseDate: r.expense_date,
+    mealType: r.meal_type ?? "other",
+    payerName: r.paid_by_participant_id ? (participantNameById[r.paid_by_participant_id] ?? null) : null,
+    documentId: r.document_id ?? null,
+  }))
+
   return {
     id:         bill.id,
     title:      bill.title,
@@ -120,6 +136,9 @@ async function loadDetail(admin: ReturnType<typeof createAdminClient>, id: strin
     shareToken: bill.share_token,
     promptpayId: bill.promptpay_id ?? null,
     receiptUrl: bill.receipt_url ?? null,
+    splitMode: (bill.allocation_details as any)?.mode ?? bill.split_mode ?? "equal",
+    allocationDetails: bill.allocation_details ?? {},
+    receipts,
     isCreator,
     participants,
     paidTotal:  participants.filter(p => p.paid).reduce((s, p) => s + p.amount, 0),
@@ -142,7 +161,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = await req.json() as {
-    action:      "join" | "pay" | "unpay" | "finalize" | "setPromptPay" | "addParticipant" | "setAmount" | "removeGuest"
+    action:      "join" | "pay" | "unpay" | "finalize" | "setPromptPay" | "addParticipant" | "setAmount" | "removeGuest" | "attachDocument"
     lineUserId:  string
     displayName?: string
     promptpayId?: string
@@ -150,19 +169,52 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     friendUserId?:  string  // addParticipant (from in-app friends list)
     amount?:        number  // addParticipant | setAmount
     participantId?: string  // setAmount
+    documentId?:    string  // attachDocument: receipt from the general document inbox
   }
   const lineUserId = getVerifiedLineUserId(req, body.lineUserId)
   if (!lineUserId) return liffUnauthorized("LINE identity mismatch")
-  const { action, displayName, promptpayId, name, friendUserId, amount, participantId } = body
+  const { action, displayName, promptpayId, name, friendUserId, amount, participantId, documentId } = body
   if (!action) return NextResponse.json({ error: "action required" }, { status: 400 })
 
   let lineNotify: NotifyResult | undefined
   const admin = createAdminClient()
   const { data: bill } = await admin.from("split_bills")
-    .select("id, status, total_amount, category, creator_id")
+    .select("id, status, total_amount, category, creator_id, organization_id")
     .eq("id", id).eq("category", "general").maybeSingle()
 
   if (!bill) return NextResponse.json({ error: "ไม่พบบิล" }, { status: 404 })
+
+  // Connect an existing receipt/document to this bill. This is the bridge used
+  // by the normal document inbox and scanner when several travellers upload
+  // their own receipts. The selected participant is the person who paid first.
+  if (action === "attachDocument") {
+    if (bill.status === "finalized") return NextResponse.json({ error: "บิลนี้ปิดแล้วครับ" }, { status: 400 })
+    const conn = await resolveConnection(admin, lineUserId)
+    if (!conn || conn.user_id !== bill.creator_id) return NextResponse.json({ error: "เฉพาะผู้สร้างบิลเท่านั้นที่แนบใบเสร็จได้" }, { status: 403 })
+    if (!documentId || !participantId) return NextResponse.json({ error: "documentId and participantId required" }, { status: 400 })
+
+    const [{ data: document }, { data: payer }] = await Promise.all([
+      admin.from("documents").select("id, vendor_name, total_amount").eq("id", documentId).eq("organization_id", bill.organization_id).maybeSingle(),
+      admin.from("split_participants").select("id").eq("id", participantId).eq("split_bill_id", id).maybeSingle(),
+    ])
+    if (!document) return NextResponse.json({ error: "ไม่พบใบเสร็จในองค์กรนี้" }, { status: 404 })
+    if (!payer) return NextResponse.json({ error: "ไม่พบผู้จ่ายในบิลนี้" }, { status: 404 })
+
+    const receiptRecord = {
+      split_bill_id: id,
+      document_id: document.id,
+      paid_by_participant_id: payer.id,
+      title: document.vendor_name ?? "ใบเสร็จทั่วไป",
+      amount: Number(document.total_amount ?? 0),
+      source: "document",
+    }
+    const { data: existingReceipt } = await admin.from("split_bill_receipts")
+      .select("id").eq("split_bill_id", id).eq("document_id", document.id).maybeSingle()
+    const { error: attachError } = existingReceipt
+      ? await admin.from("split_bill_receipts").update(receiptRecord).eq("id", existingReceipt.id)
+      : await admin.from("split_bill_receipts").insert(receiptRecord)
+    if (attachError) return NextResponse.json({ error: attachError.message }, { status: 500 })
+  }
 
   // "เข้าร่วม" — re-sends the roster card to the LINE group every time it's
   // pressed, even on a repeat tap from someone already in the list.

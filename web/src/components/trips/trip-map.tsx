@@ -49,10 +49,11 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
   Search, X, Loader2, Trash2, GripVertical, MapPin, LocateFixed,
-  Maximize2, Minimize2, Plus, ExternalLink, PersonStanding, Pencil,
+  Maximize2, Minimize2, Plus, ExternalLink, PersonStanding, Pencil, Navigation,
 } from "lucide-react"
 import { MAP_LAYERS, DEFAULT_LAYER, GOOGLE_MAPS_KEY, GOOGLE_MAP_ID } from "@/lib/trips/map-config"
 import { googleMapsPinUrl, googleStreetViewUrl } from "@/lib/trips/google-maps-links"
+import { appleMapsPinUrl } from "@/lib/trips/apple-maps-links"
 import { MODE_LABEL, isStale, type RouteGeometry } from "@/lib/trips/routing"
 import {
   type JourneyDay, type JourneyItem,
@@ -267,6 +268,7 @@ export default function TripMap({
     () => pins.find(p => p.item.id === selected) ?? null,
     [pins, selected],
   )
+  const appleTarget = selectedPin?.item ?? pins[0]?.item ?? null
 
   const points = useMemo<Array<[number, number]>>(
     () => pins.map(p => [p.item.lat!, p.item.lng!]),
@@ -777,7 +779,24 @@ export default function TripMap({
           )}
         </div>
 
-        <div className="absolute right-3 top-3 z-[400] flex overflow-hidden rounded-xl bg-white shadow-lg">
+        <div className="absolute right-3 top-3 z-[400] flex max-w-[calc(100%-6rem)] flex-col items-end gap-2 sm:max-w-none">
+          <div className="flex overflow-hidden rounded-xl bg-white shadow-lg">
+            <span className="inline-flex items-center gap-1.5 bg-slate-900 px-2.5 py-2 text-[11px] font-semibold text-white">
+              <MapPin className="h-3.5 w-3.5" />Google Map
+            </span>
+            {appleTarget ? (
+              <a href={appleMapsPinUrl([appleTarget.lat!, appleTarget.lng!], appleTarget.title)} target="_blank" rel="noopener noreferrer"
+                title="เปิดจุดที่เลือกใน Apple Maps"
+                className="inline-flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50">
+                <Navigation className="h-3.5 w-3.5" />Apple Maps
+              </a>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-semibold text-slate-400">
+                <Navigation className="h-3.5 w-3.5" />Apple Maps
+              </span>
+            )}
+          </div>
+          <div className="flex overflow-hidden rounded-xl bg-white shadow-lg">
           {MAP_LAYERS.map(l => (
             <button key={l.id} onClick={() => setLayerId(l.id)}
               className={cn("px-2.5 py-2 text-[11px] font-semibold transition",
@@ -785,6 +804,7 @@ export default function TripMap({
               {l.label}
             </button>
           ))}
+          </div>
         </div>
 
         {busy && (
@@ -872,6 +892,10 @@ export default function TripMap({
                 <a href={googleMapsPinUrl([item.lat!, item.lng!], item.title)} target="_blank" rel="noopener noreferrer"
                   className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50">
                   <ExternalLink className="h-3.5 w-3.5" />Google Maps
+                </a>
+                <a href={appleMapsPinUrl([item.lat!, item.lng!], item.title)} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50">
+                  <Navigation className="h-3.5 w-3.5" />Apple Maps
                 </a>
                 {canEdit && onEditItem && (
                   <button onClick={() => onEditItem(item)}

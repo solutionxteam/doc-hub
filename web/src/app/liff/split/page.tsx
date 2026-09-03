@@ -34,18 +34,45 @@ interface GroupSummary {
 interface NamedGuest { id: string; name: string }
 interface Participant {
   id: string; name: string; amount: number; paid: boolean; isMe: boolean; userId: string | null
+  avatarUrl: string | null
   guests: NamedGuest[]
 }
 interface GroupDetail {
   id: string; title: string; note: string | null
   fee: number; status: string; shareToken: string
   promptpayId: string | null; receiptUrl: string | null; isCreator: boolean
+  splitMode: "equal" | "custom" | "itemized"; allocationDetails: {
+    creator?: { detail?: string; paymentMethod?: string }
+    members?: { name: string; detail?: string; paymentMethod?: string }[]
+  }
+  receipts: { id: string; url: string | null; title: string | null; amount: number; expenseDate: string; mealType: string; payerName: string | null; documentId: string | null }[]
   participants: Participant[]; paidTotal: number
 }
 interface FriendOption { friendshipId: string; friend: { id: string; full_name: string; avatar_url: string | null } }
 
 function fmtTHB(n: number) {
   return "฿" + n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const PAYMENT_METHODS = [
+  { value: "transfer", label: "โอนเงิน" },
+  { value: "cash", label: "เงินสด" },
+  { value: "card", label: "บัตร" },
+  { value: "other", label: "อื่นๆ" },
+] as const
+
+function paymentLabel(value?: string) {
+  return PAYMENT_METHODS.find(m => m.value === value)?.label ?? "โอนเงิน"
+}
+
+function ParticipantAvatar({ participant, size = "w-9 h-9" }: { participant: Participant; size?: string }) {
+  return participant.avatarUrl ? (
+    <img src={participant.avatarUrl} alt={participant.name} className={cn(size, "rounded-full object-cover border-2 border-white/80 shrink-0")} />
+  ) : (
+    <div className={cn(size, "rounded-full bg-indigo-500 text-white text-xs font-black flex items-center justify-center border-2 border-white/80 shrink-0")}>
+      {participant.name[0]?.toUpperCase() ?? "?"}
+    </div>
+  )
 }
 
 type AuthStatus = "checking" | "needLogin" | "outsideLine" | "ready" | "authError"
@@ -77,7 +104,14 @@ export default function LiffSplitDashboard() {
   const [note, setNote]   = useState("")
   const [receiptFile, setReceiptFile]   = useState<File | null>(null)
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null)
-  const [members, setMembers] = useState<{ name: string; amount: string }[]>([])
+  const [receiptPayerName, setReceiptPayerName] = useState("__creator__")
+  const [receiptDate, setReceiptDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [receiptMealType, setReceiptMealType] = useState("other")
+  const [summaryScope, setSummaryScope] = useState<"trip" | "day" | "meal">("trip")
+  const [splitMode, setSplitMode] = useState<"equal" | "custom" | "itemized">("equal")
+  const [creatorDetail, setCreatorDetail] = useState("")
+  const [creatorPaymentMethod, setCreatorPaymentMethod] = useState("transfer")
+  const [members, setMembers] = useState<{ name: string; amount: string; detail: string; paymentMethod: string }[]>([])
 
   // เพิ่มสมาชิกใหม่ในหน้ารายละเอียดบิล (เฉพาะผู้สร้างบิล)
   const [addingMember, setAddingMember] = useState(false)
@@ -274,9 +308,19 @@ export default function LiffSplitDashboard() {
       form.set("displayName", profile.displayName)
       form.set("title", title.trim())
       form.set("fee", fee)
+      form.set("allocationMode", splitMode)
+      form.set("creatorDetail", creatorDetail)
+      form.set("creatorPaymentMethod", creatorPaymentMethod)
+      form.set("receiptPayerName", receiptPayerName)
+      form.set("receiptDate", receiptDate)
+      form.set("receiptMealType", receiptMealType)
+      if (profile.pictureUrl) form.set("linePictureUrl", profile.pictureUrl)
       if (note.trim()) form.set("note", note.trim())
       form.set("members", JSON.stringify(
-        members.filter(m => m.name.trim()).map(m => ({ name: m.name.trim(), amount: m.amount ? Number(m.amount) : undefined }))
+        members.filter(m => m.name.trim()).map(m => ({
+          name: m.name.trim(), amount: splitMode === "equal" ? undefined : (m.amount ? Number(m.amount) : undefined),
+          detail: m.detail.trim(), paymentMethod: m.paymentMethod,
+        }))
       ))
       if (receiptFile) form.set("receipt", receiptFile)
 
@@ -288,7 +332,7 @@ export default function LiffSplitDashboard() {
         return
       }
       setTitle(""); setFee(""); setNote("")
-      handleReceiptChange(null); setMembers([])
+      handleReceiptChange(null); setMembers([]); setSplitMode("equal"); setCreatorDetail(""); setCreatorPaymentMethod("transfer"); setReceiptPayerName("__creator__")
       await loadGroups(profile.userId)
       await openDetail(data.id, { justCreated: true })
     } catch {
@@ -407,6 +451,11 @@ export default function LiffSplitDashboard() {
     } finally { setBusy(false) }
   }
 
+  function allocationFor(d: GroupDetail, p: Participant) {
+    if (p.isMe && d.allocationDetails?.creator) return d.allocationDetails.creator
+    return d.allocationDetails?.members?.find(m => m.name === p.name) ?? {}
+  }
+
   // Builds the "การ์ดเชิญ" Flex Message — ชื่อบิล · หมายเหตุ · ค่าใช้จ่าย/หัว ·
   // ปุ่มเข้าร่วม — posted into whichever LINE chat the user picks below.
   function buildInviteFlex(d: GroupDetail) {
@@ -427,6 +476,14 @@ export default function LiffSplitDashboard() {
       { type: "text", text: "💰", flex: 0, size: "sm" },
       { type: "text", text: `${fmtTHB(perPerson)} / คน  (รวม ${fmtTHB(d.fee)})`, size: "sm", color: "#555555", margin: "md", wrap: true },
     ]})
+    for (const p of d.participants.slice(0, 10)) {
+      const allocation = allocationFor(d, p)
+      const suffix = [allocation.detail, paymentLabel(allocation.paymentMethod)].filter(Boolean).join(" · ")
+      rows.push({ type: "box", layout: "baseline", spacing: "sm", contents: [
+        { type: "text", text: p.name, size: "sm", color: "#333333", flex: 5, wrap: true },
+        { type: "text", text: `${fmtTHB(p.amount)}${suffix ? `\n${suffix}` : ""}`, size: "sm", color: "#e11d48", align: "end", flex: 5, wrap: true },
+      ]})
+    }
 
     return {
       type: "flex",
@@ -694,6 +751,23 @@ export default function LiffSplitDashboard() {
               </div>
 
               <div>
+                <p className="text-sm font-semibold mb-2">รูปแบบการหาร</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    ["equal", "หารเท่ากัน", "เฉลี่ยทุกคน"],
+                    ["custom", "กำหนดเอง", "ใส่ยอดรายคน"],
+                    ["itemized", "ตามรายการ", "ระบุว่าใครจ่ายอะไร"],
+                  ] as const).map(([value, label, hint]) => (
+                    <button key={value} type="button" onClick={() => setSplitMode(value)}
+                      className={cn("min-h-16 rounded-xl border px-2 py-2 text-center transition-colors", splitMode === value && "border-rose-500 bg-rose-50 text-rose-700 ring-2 ring-rose-500/10")}>
+                      <span className="block text-xs font-bold">{label}</span>
+                      <span className="block text-[10px] opacity-70 mt-0.5">{hint}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
                 <p className="text-sm font-semibold mb-2">หมายเหตุ (ไม่บังคับ)</p>
                 <input
                   value={note} onChange={e => setNote(e.target.value)}
@@ -706,14 +780,31 @@ export default function LiffSplitDashboard() {
               <div>
                 <p className="text-sm font-semibold mb-2">ใบเสร็จ (ไม่บังคับ)</p>
                 {receiptPreview ? (
-                  <div className="relative rounded-xl overflow-hidden border">
-                    <img src={receiptPreview} alt="ใบเสร็จ" className="w-full max-h-56 object-contain bg-muted" />
-                    <button
-                      onClick={() => handleReceiptChange(null)}
-                      className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                  <div className="rounded-xl overflow-hidden border">
+                    <div className="relative">
+                      <img src={receiptPreview} alt="ใบเสร็จ" className="w-full max-h-56 object-contain bg-muted" />
+                      <button onClick={() => handleReceiptChange(null)} className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center"><X className="w-4 h-4" /></button>
+                    </div>
+                    <div className="p-3 bg-background">
+                      <label className="text-xs font-semibold block mb-1.5">ใครเป็นผู้จ่ายใบเสร็จนี้ไปก่อน</label>
+                      <select value={receiptPayerName} onChange={e => setReceiptPayerName(e.target.value)} className="w-full h-10 rounded-lg border bg-background px-3 text-sm">
+                        <option value="__creator__">{profile?.displayName ?? "คุณ"} (คุณ)</option>
+                        {members.filter(m => m.name.trim()).map((m, i) => <option key={`${m.name}-${i}`} value={m.name.trim()}>{m.name.trim()}</option>)}
+                      </select>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground block mb-1">วันที่ใช้จ่าย</label>
+                          <input type="date" value={receiptDate} onChange={e => setReceiptDate(e.target.value)} className="w-full h-10 rounded-lg border bg-background px-2 text-xs" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground block mb-1">มื้อ / ช่วงเวลา</label>
+                          <select value={receiptMealType} onChange={e => setReceiptMealType(e.target.value)} className="w-full h-10 rounded-lg border bg-background px-2 text-xs">
+                            <option value="breakfast">🌅 มื้อเช้า</option><option value="lunch">☀️ มื้อกลางวัน</option><option value="dinner">🌙 มื้อเย็น</option><option value="snack">🍡 ของว่าง</option><option value="other">🧾 ค่าใช้จ่ายอื่น</option>
+                          </select>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-1.5">ยอดนี้จะถูกนับเป็นเงินที่คนนี้สำรองจ่าย ไม่ใช่ยอดชำระคืน</p>
+                    </div>
                   </div>
                 ) : (
                   <label className="w-full h-24 rounded-xl border border-dashed flex flex-col items-center justify-center gap-1 text-muted-foreground cursor-pointer hover:bg-muted/50 transition-colors">
@@ -727,52 +818,70 @@ export default function LiffSplitDashboard() {
                 )}
               </div>
 
-              {/* รายชื่อผู้ที่จะหารด้วย (ไม่บังคับ) */}
+              {/* รายชื่อและการจัดสรรยอด */}
               <div>
-                <p className="text-sm font-semibold mb-2">รายชื่อผู้ที่จะหารด้วย (ไม่บังคับ)</p>
+                <div className="flex items-end justify-between mb-2">
+                  <div>
+                    <p className="text-sm font-semibold">ใครจ่ายอะไร เท่าไหร่</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">เพิ่มรายละเอียดให้ครบก่อนบันทึกบิล</p>
+                  </div>
+                </div>
                 <div className="space-y-2">
+                  <div className="rounded-xl border bg-muted/20 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-rose-500 text-white text-xs font-bold flex items-center justify-center shrink-0">คุณ</div>
+                      <span className="text-sm font-semibold flex-1 truncate">{profile?.displayName ?? "คุณ"}</span>
+                      <select value={creatorPaymentMethod} onChange={e => setCreatorPaymentMethod(e.target.value)} className="h-9 rounded-lg border bg-background px-2 text-xs">
+                        {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </select>
+                    </div>
+                    {splitMode === "itemized" && <input value={creatorDetail} onChange={e => setCreatorDetail(e.target.value)} placeholder="รายการของคุณ เช่น ข้าวผัด + น้ำ" className="w-full h-10 rounded-lg border px-3 text-sm outline-none focus:border-rose-500" />}
+                  </div>
                   {members.map((m, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <input
-                        value={m.name}
-                        onChange={e => setMembers(prev => prev.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
-                        placeholder={`ชื่อเพื่อนคนที่ ${i + 1}`}
-                        className="flex-1 min-w-0 h-11 rounded-xl border px-3 text-sm outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15"
-                      />
-                      <input
-                        type="number" inputMode="decimal" value={m.amount}
-                        onChange={e => setMembers(prev => prev.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
-                        placeholder="บาท"
-                        className="w-20 shrink-0 h-11 rounded-xl border px-2 text-sm text-right outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15"
-                      />
-                      <button
-                        onClick={() => setMembers(prev => prev.filter((_, j) => j !== i))}
-                        className="w-11 h-11 rounded-xl border flex items-center justify-center text-muted-foreground shrink-0"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                    <div key={i} className="rounded-xl border p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <input value={m.name} onChange={e => setMembers(prev => prev.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} placeholder={`ชื่อเพื่อนคนที่ ${i + 1}`} className="flex-1 min-w-0 h-10 rounded-lg border px-3 text-sm outline-none focus:border-rose-500" />
+                        {splitMode !== "equal" && <input type="number" inputMode="decimal" value={m.amount} onChange={e => setMembers(prev => prev.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))} placeholder="บาท" className="w-20 h-10 rounded-lg border px-2 text-sm text-right outline-none focus:border-rose-500" />}
+                        <button onClick={() => setMembers(prev => prev.filter((_, j) => j !== i))} className="w-10 h-10 rounded-lg border flex items-center justify-center text-muted-foreground shrink-0"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                      <div className="flex gap-2">
+                        {splitMode === "itemized" && <input value={m.detail} onChange={e => setMembers(prev => prev.map((x, j) => j === i ? { ...x, detail: e.target.value } : x))} placeholder="รายการ เช่น สเต๊ก + โค้ก" className="flex-1 min-w-0 h-10 rounded-lg border px-3 text-sm outline-none focus:border-rose-500" />}
+                        <select value={m.paymentMethod} onChange={e => setMembers(prev => prev.map((x, j) => j === i ? { ...x, paymentMethod: e.target.value } : x))} className="h-10 rounded-lg border bg-background px-2 text-xs">
+                          {PAYMENT_METHODS.map(method => <option key={method.value} value={method.value}>{method.label}</option>)}
+                        </select>
+                      </div>
                     </div>
                   ))}
                   <button
-                    onClick={() => setMembers(prev => [...prev, { name: "", amount: "" }])}
+                    onClick={() => setMembers(prev => [...prev, { name: "", amount: "", detail: "", paymentMethod: "transfer" }])}
                     className="w-full h-11 rounded-xl border border-dashed flex items-center justify-center gap-1.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
                   >
                     <UserPlus className="w-4 h-4" /> เพิ่มเพื่อน
                   </button>
                 </div>
-                {members.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    💡 ปล่อยช่อง "บาท" ว่างไว้เพื่อหารเท่าๆ กันโดยอัตโนมัติ — ยอดของคุณจะเท่ากับยอดรวมหักส่วนของเพื่อนๆ
-                  </p>
-                )}
               </div>
+
+              {fee && Number(fee) > 0 && (
+                <div className="rounded-xl bg-slate-900 text-white p-3.5">
+                  <div className="flex justify-between items-center mb-2"><p className="text-xs font-bold">สรุปก่อนบันทึก</p><span className="text-xs text-white/60">{1 + members.filter(m => m.name.trim()).length} คน</span></div>
+                  <div className="space-y-1 text-xs">
+                    {(() => {
+                      const named = members.filter(m => m.name.trim())
+                      const even = Number(fee) / (named.length + 1)
+                      const others = named.reduce((sum, m) => sum + (Number(m.amount) || 0), 0)
+                      const rows = [{ name: profile?.displayName ?? "คุณ", amount: splitMode === "equal" ? even : Math.max(0, Number(fee) - others), detail: creatorDetail }, ...named.map(m => ({ name: m.name, amount: splitMode === "equal" ? even : (Number(m.amount) || 0), detail: m.detail }))]
+                      return rows.map((row, i) => <div key={`${row.name}-${i}`} className="flex gap-2"><span className="flex-1 truncate">{row.name}{row.detail ? ` · ${row.detail}` : ""}</span><span className="font-semibold">{fmtTHB(row.amount)}</span></div>)
+                    })()}
+                  </div>
+                </div>
+              )}
 
               <button
                 onClick={createGroup}
                 disabled={!title.trim() || !fee || Number(fee) <= 0 || busy}
                 className="w-full h-11 rounded-xl bg-gradient-to-r from-rose-500 to-orange-500 text-white font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "สร้างบิล →"}
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "บันทึกบิลและดูสรุป →"}
               </button>
               <p className="text-xs text-muted-foreground text-center">
                 💡 ระบบจะหารยอดเท่าๆ กันให้อัตโนมัติเมื่อเพื่อนเข้าร่วม
@@ -802,7 +911,10 @@ export default function LiffSplitDashboard() {
               </div>
             )}
 
-            <div className="bg-gradient-to-r from-rose-500 to-orange-500 rounded-2xl p-4 text-white shadow-lg mb-3">
+            <div className="relative overflow-hidden bg-gradient-to-br from-[#0e1527] to-[#1a2742] rounded-[22px] p-5 text-white shadow-lg mb-3 border border-[#27324d]">
+              <div className="absolute right-0 top-0 w-32 h-full bg-indigo-500/10 skew-x-[-18deg] translate-x-12" />
+              <div className="relative">
+              <p className="text-[10px] font-bold tracking-[0.14em] text-indigo-200 mb-2">JOURNEY · EXPENSES</p>
               {detail.note && <p className="text-sm text-white/80 mb-1">{detail.note}</p>}
               <div className="flex items-end justify-between">
                 <div>
@@ -821,16 +933,49 @@ export default function LiffSplitDashboard() {
                   <span className="ml-auto flex items-center gap-1 bg-white/20 rounded-full px-2 py-0.5"><Lock className="w-3 h-3" />ปิดบิลแล้ว</span>
                 )}
               </div>
+              <div className="flex items-center mt-4">
+                <div className="flex -space-x-2">
+                  {detail.participants.slice(0, 5).map(p => <ParticipantAvatar key={p.id} participant={p} size="w-9 h-9" />)}
+                </div>
+                <span className="ml-3 text-[11px] text-slate-300">ผู้ร่วมเดินทาง · {detail.participants.length} คน</span>
+              </div>
+              </div>
             </div>
 
-            {detail.receiptUrl && (
+            {/* Expense summary scopes: whole trip, per day, or per meal. */}
+            <div className="bg-[#0e1527] text-white border border-[#27324d] rounded-[18px] p-3.5 shadow-sm mb-3">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div><p className="text-sm font-bold">สรุปค่าใช้จ่าย</p><p className="text-[10px] text-slate-400">ภาพรวมของ Journey นี้</p></div>
+                <div className="flex rounded-xl bg-[#171f35] p-1">
+                  {([['trip','ทั้งทริป'],['day','รายวัน'],['meal','รายมื้อ']] as const).map(([scope, label]) => <button key={scope} onClick={() => setSummaryScope(scope)} className={cn("px-2.5 py-1.5 rounded-lg text-[10px] font-bold", summaryScope === scope ? "bg-indigo-500 text-white" : "text-slate-400")}>{label}</button>)}
+                </div>
+              </div>
+              {(() => {
+                const source = detail.receipts?.length ? detail.receipts : [{ id: 'legacy', url: detail.receiptUrl, title: detail.title, amount: detail.fee, expenseDate: '', mealType: 'other', payerName: null, documentId: null }]
+                const mealNames: Record<string,string> = { breakfast:'🌅 มื้อเช้า', lunch:'☀️ มื้อกลางวัน', dinner:'🌙 มื้อเย็น', snack:'🍡 ของว่าง', other:'🧾 อื่นๆ' }
+                const grouped = new Map<string, { amount: number; count: number }>()
+                for (const receipt of source) {
+                  const key = summaryScope === 'trip' ? 'ค่าใช้จ่ายทั้งหมด' : summaryScope === 'day' ? (receipt.expenseDate || 'ไม่ระบุวันที่') : (mealNames[receipt.mealType] ?? mealNames.other)
+                  const current = grouped.get(key) ?? { amount: 0, count: 0 }; current.amount += receipt.amount; current.count += 1; grouped.set(key, current)
+                }
+                return <div className="space-y-2">{Array.from(grouped.entries()).map(([label, value]) => <div key={label} className="flex items-center gap-3 rounded-xl bg-[#171f35] border border-[#27324d] px-3 py-2.5"><div className="w-8 h-8 rounded-lg bg-indigo-500/15 text-indigo-300 flex items-center justify-center">฿</div><div className="flex-1"><p className="text-xs font-semibold">{label}</p><p className="text-[10px] text-slate-400">{value.count} ใบเสร็จ</p></div><p className="text-sm font-black text-indigo-200">{fmtTHB(value.amount)}</p></div>)}</div>
+              })()}
+            </div>
+
+            {(detail.receipts?.length > 0 || detail.receiptUrl) && (
               <div className="bg-card border rounded-2xl overflow-hidden shadow-sm mb-3">
                 <p className="text-xs font-semibold text-muted-foreground px-4 pt-3 pb-1 flex items-center gap-1.5">
-                  <Receipt className="w-3.5 h-3.5" /> ใบเสร็จ
+                  <Receipt className="w-3.5 h-3.5" /> ใบเสร็จ ({detail.receipts?.length || 1})
                 </p>
-                <a href={detail.receiptUrl} target="_blank" rel="noreferrer" className="block px-4 pb-3 pt-1">
-                  <img src={detail.receiptUrl} alt="ใบเสร็จ" className="w-full max-h-64 object-contain rounded-xl bg-muted" />
-                </a>
+                {(detail.receipts?.length ? detail.receipts : [{ id: "legacy", url: detail.receiptUrl, title: detail.title, amount: detail.fee, expenseDate: "", mealType: "other", payerName: null, documentId: null }]).map(receipt => (
+                  <div key={receipt.id} className="px-4 pb-3 pt-1">
+                    {receipt.url && <a href={receipt.url} target="_blank" rel="noreferrer"><img src={receipt.url} alt="ใบเสร็จ" className="w-full max-h-64 object-contain rounded-xl bg-muted" /></a>}
+                    <div className="flex items-center justify-between gap-2 mt-2 text-xs">
+                      <span className="text-muted-foreground truncate">ผู้จ่ายก่อน: <strong className="text-foreground">{receipt.payerName ?? "ยังไม่ระบุ"}</strong></span>
+                      <span className="font-bold text-rose-600">{fmtTHB(receipt.amount)}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -855,7 +1000,14 @@ export default function LiffSplitDashboard() {
                   <div className="flex items-center justify-between px-4 py-2.5 border-t first:border-t-0 gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       {p.paid ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> : <Circle className="w-4 h-4 text-muted-foreground/40 shrink-0" />}
+                      <ParticipantAvatar participant={p} />
                       <span className={cn("text-sm truncate", p.isMe && "font-bold")}>{p.name}{p.isMe && " (คุณ)"}</span>
+                      {(() => {
+                        const allocation = allocationFor(detail, p)
+                        return allocation.detail || allocation.paymentMethod ? (
+                          <span className="text-[10px] text-muted-foreground truncate hidden sm:inline">{allocation.detail || "ไม่ระบุรายการ"} · {paymentLabel(allocation.paymentMethod)}</span>
+                        ) : null
+                      })()}
                     </div>
                     {canSendQr && (
                       <button onClick={() => setQrShareFor(p)} title="ส่ง QR เตือนจ่ายเงิน"

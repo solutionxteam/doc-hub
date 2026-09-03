@@ -51,7 +51,7 @@ struct AddMedicationView: View {
         _dosageForm  = State(initialValue: editing?.dosageForm ?? scanned?.dosageForm ?? "tablet")
         _strength    = State(initialValue: editing?.strength ?? scanned?.strength ?? "")
         _purpose     = State(initialValue: editing?.purpose ?? scanned?.purpose ?? "")
-        _notes       = State(initialValue: editing?.notes ?? "")
+        _notes       = State(initialValue: editing?.notes ?? scanned?.instructionsVerbatim ?? "")
         _times       = State(initialValue: (sched?.times.isEmpty == false ? sched?.times
                               : (scanned?.times.isEmpty == false ? scanned?.times : nil)) ?? ["08:00"])
         _doseQty     = State(initialValue: String(sched?.doseQty ?? scanned?.doseQty ?? 1))
@@ -244,13 +244,18 @@ struct AddMedicationView: View {
                     }
 
                     // Notes field
-                    fieldSection(title: "หมายเหตุ (ไม่บังคับ)") {
+                    fieldSection(title: scanned == nil ? "หมายเหตุ (ไม่บังคับ)" : "หมายเหตุจากฉลาก") {
                         TextField("เช่น ทานหลังอาหาร, ทาน 1 เม็ด เช้า-เย็น", text: $notes, axis: .vertical)
                             .font(.system(size: 15))
                             .lineLimit(3, reservesSpace: true)
                             .padding(12)
                             .background(Color.background)
                             .cornerRadius(10)
+                        if scanned != nil {
+                            Label("สแกนจากฉลาก · ตรวจสอบก่อนบันทึก", systemImage: "text.viewfinder")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(healthGreen)
+                        }
                     }
 
                     if let err = errorMsg {

@@ -467,6 +467,12 @@ private struct MedicationCard: View {
                     }
                     .foregroundColor(lowStock ? .red : .textSecondary)
                 }
+                if let notes = med.notes, !notes.isEmpty {
+                    Label(notes, systemImage: "doc.text")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.textSecondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer()

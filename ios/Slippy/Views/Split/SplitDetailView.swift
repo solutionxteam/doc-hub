@@ -7,6 +7,12 @@ struct Settlement: Identifiable {
     let amount: Double
 }
 
+private enum ExpenseSummaryScope: String, CaseIterable {
+    case trip = "ทั้งทริป"
+    case day = "รายวัน"
+    case meal = "รายมื้อ"
+}
+
 func simplifyDebts(_ participants: [SplitParticipant]) -> [Settlement] {
     var balances: [String: Double] = [:]
     for p in participants {
@@ -39,6 +45,7 @@ struct SplitDetailView: View {
     @State private var markingPaidId: String?
     @State private var showSettleUp = false
     @State private var showShareSheet = false
+    @State private var summaryScope: ExpenseSummaryScope = .trip
 
     init(bill: SplitBill, vm: SplitViewModel) {
         self.bill = bill
@@ -57,6 +64,7 @@ struct SplitDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     amountCard
+                    journeyExpenseSummary
                     progressCard
                     participantsList
                     if !(localBill.participants ?? []).isEmpty {
@@ -133,11 +141,15 @@ struct SplitDetailView: View {
         ZStack {
             RoundedRectangle(cornerRadius: 20)
                 .fill(LinearGradient(
-                    colors: [Color(hex: "#7c72f5"), Color(hex: "#6366f1")],
+                    colors: [Color(hex: "#0E1527"), Color(hex: "#1A2742")],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ))
-            VStack(spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("JOURNEY · EXPENSES")
+                        .font(.system(size: 10, weight: .bold)).tracking(1.2)
+                        .foregroundColor(Color(hex: "#C7D2FE"))
                 Text("ยอดรวมทั้งหมด")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white.opacity(0.8))
@@ -153,10 +165,108 @@ struct SplitDetailView: View {
                     .foregroundColor(.white.opacity(0.9))
                     .padding(.top, 2)
                 }
+                }
+                Spacer()
+                avatarStack
             }
-            .padding(.vertical, 28)
+            .padding(20)
         }
-        .shadow(color: Color(hex: "#6366f1").opacity(0.3), radius: 12, y: 6)
+        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(hex: "#27324D"), lineWidth: 1))
+        .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
+    }
+
+    private var avatarStack: some View {
+        HStack(spacing: -8) {
+            ForEach(Array((localBill.participants ?? []).prefix(4))) { participant in
+                participantAvatar(participant, size: 36)
+            }
+        }
+    }
+
+    private func participantAvatar(_ participant: SplitParticipant, size: CGFloat) -> some View {
+        Group {
+            if let raw = participant.linePictureUrl, let url = URL(string: raw) {
+                AsyncImage(url: url) { image in image.resizable().scaledToFill() }
+                    placeholder: { avatarFallback(participant, size: size) }
+            } else {
+                avatarFallback(participant, size: size)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 2))
+    }
+
+    private func avatarFallback(_ participant: SplitParticipant, size: CGFloat) -> some View {
+        ZStack {
+            Circle().fill(Color.brand500)
+            Text(String(participant.name.prefix(1))).font(.system(size: size * 0.36, weight: .bold)).foregroundColor(.white)
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var journeyExpenseSummary: some View {
+        let receipts = localBill.receipts ?? []
+        let groups: [(String, Double, Int)] = {
+            if receipts.isEmpty { return [("ค่าใช้จ่ายทั้งหมด", localBill.totalAmount, 0)] }
+            var values: [String: (Double, Int)] = [:]
+            for receipt in receipts {
+                let key: String
+                switch summaryScope {
+                case .trip: key = "ค่าใช้จ่ายทั้งหมด"
+                case .day: key = receipt.expenseDate
+                case .meal: key = receipt.mealLabel
+                }
+                let old = values[key] ?? (0, 0)
+                values[key] = (old.0 + receipt.amount, old.1 + 1)
+            }
+            return values.map { ($0.key, $0.value.0, $0.value.1) }.sorted { $0.0 < $1.0 }
+        }()
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("สรุปค่าใช้จ่าย").font(.system(size: 15, weight: .bold)).foregroundColor(.white)
+                    Text("ภาพรวมของ Journey นี้").font(.system(size: 10)).foregroundColor(Color(hex: "#9CA9C4"))
+                }
+                Spacer()
+            }
+            HStack(spacing: 4) {
+                ForEach(ExpenseSummaryScope.allCases, id: \.self) { scope in
+                    Button { withAnimation(.easeInOut(duration: 0.2)) { summaryScope = scope } } label: {
+                        Text(scope.rawValue).font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(summaryScope == scope ? .white : Color(hex: "#9CA9C4"))
+                            .frame(maxWidth: .infinity).padding(.vertical, 8)
+                            .background(summaryScope == scope ? Color.brand500 : Color.clear, in: RoundedRectangle(cornerRadius: 9))
+                    }.buttonStyle(.plain)
+                }
+            }.padding(4).background(Color(hex: "#171F35"), in: RoundedRectangle(cornerRadius: 12))
+
+            ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+                summaryGroupRow(label: group.0, amount: group.1, count: group.2)
+            }
+        }
+        .padding(14).background(Color(hex: "#0E1527"), in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(hex: "#27324D"), lineWidth: 1))
+    }
+
+    private func summaryGroupRow(label: String, amount: Double, count: Int) -> some View {
+        let icon = summaryScope == .day ? "calendar" : (summaryScope == .meal ? "fork.knife" : "wallet.pass")
+        let subtitle = count == 0 ? "ยังไม่มีใบเสร็จที่เชื่อมไว้" : "\(count) ใบเสร็จ"
+        return HStack(spacing: 11) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold)).foregroundColor(Color.brand300)
+                .frame(width: 32, height: 32)
+                .background(Color.brand500.opacity(0.14), in: RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
+                Text(subtitle).font(.system(size: 10)).foregroundColor(Color(hex: "#9CA9C4"))
+            }
+            Spacer()
+            Text(fmtTHB(amount)).font(.system(size: 14, weight: .bold)).foregroundColor(Color.brand300)
+        }
+        .padding(11).background(Color(hex: "#171F35"), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "#27324D"), lineWidth: 1))
     }
 
     private var progressCard: some View {
@@ -219,22 +329,13 @@ struct SplitDetailView: View {
 
     private func participantRow(_ participant: SplitParticipant) -> some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(participant.isPaid
-                          ? Color.green.opacity(0.15)
-                          : Color.brand500.opacity(0.12))
-                    .frame(width: 36, height: 36)
-                if participant.isPaid {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.green)
-                } else {
-                    Text(String(participant.name.prefix(1)))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color.brand500)
+            participantAvatar(participant, size: 36)
+                .overlay(alignment: .bottomTrailing) {
+                    if participant.isPaid {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12)).foregroundColor(.green).background(Color.white, in: Circle())
+                    }
                 }
-            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(participant.name)
@@ -335,14 +436,7 @@ struct SplitDetailView: View {
 
                 ForEach(participants) { p in
                     HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(p.isPaid ? Color.green.opacity(0.12) : Color.brand500.opacity(0.12))
-                                .frame(width: 32, height: 32)
-                            Text(String(p.name.prefix(1)))
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(p.isPaid ? .green : Color.brand500)
-                        }
+                        participantAvatar(p, size: 32)
                         Text(p.name)
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(Color.textPrimary)
@@ -388,7 +482,11 @@ struct SplitDetailView: View {
                     email: old.email,
                     amount: old.amount,
                     paidAt: nowStr,
-                    createdAt: old.createdAt
+                    createdAt: old.createdAt,
+                    guestCount: old.guestCount,
+                    paymentProofUrl: old.paymentProofUrl,
+                    addedByParticipantId: old.addedByParticipantId,
+                    linePictureUrl: old.linePictureUrl
                 )
                 localBill = SplitBill(
                     id: localBill.id,
@@ -401,7 +499,8 @@ struct SplitDetailView: View {
                     lineGroupId: localBill.lineGroupId,
                     status: localBill.status,
                     createdAt: localBill.createdAt,
-                    participants: parts
+                    participants: parts,
+                    receipts: localBill.receipts
                 )
             }
         } catch {

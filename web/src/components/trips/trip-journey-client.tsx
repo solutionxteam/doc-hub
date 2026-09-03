@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import TripMap from "./trip-map-loader"
 import { TripImportDialog } from "./trip-import-dialog"
+import { TripMembersPanel } from "./trip-members-panel"
 import { LocationShareControl, LocationSharingBanner } from "./trip-location-share"
 import { CallButton, TripCallBanner, useTripCall } from "./trip-call-panel"
 import { useLocationShares } from "@/lib/trips/use-location-shares"
@@ -26,7 +27,7 @@ import {
   Wallet, Users, CheckCircle2, Circle, MapPin, Receipt, FileText,
   ListChecks, Pin, PinOff, Ticket, FileUp, Printer, ExternalLink,
   FolderOpen, Images, Camera, Upload, Plus, Trash2, Pencil, X, Loader2,
-  PersonStanding,
+  PersonStanding, Sparkles, Tag, UserPlus,
 } from "lucide-react"
 import {
   type JourneyDay, type JourneyItem, type JourneyParticipant,
@@ -36,15 +37,22 @@ import {
 } from "@/lib/trips/journey"
 import { googleMapsPinUrl, googleMapsDirectionsUrl, googleTravelMode, googleStreetViewUrl } from "@/lib/trips/google-maps-links"
 
-type Tab = "overview" | "plan" | "map" | "budget" | "more"
+type Tab = "overview" | "plan" | "map" | "budget" | "manage"
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof MapPin }> = [
   { id: "overview", label: "ภาพรวม",   icon: Compass },
   { id: "plan",     label: "แผนเดินทาง", icon: CalendarDays },
   { id: "map",      label: "แผนที่",     icon: MapIcon },
   { id: "budget",   label: "ค่าใช้จ่าย",  icon: Wallet },
-  { id: "more",     label: "อื่นๆ",      icon: Ellipsis },
+  { id: "manage",   label: "จัดการทริป", icon: Ellipsis },
 ]
+
+const KYUSHU_CREW = [
+  { name: "Dr. Tom", role: "Shiba · Mentor", avatar: "/design/kyushu-avatar-tom.png", mascot: "/design/kyushu-mascot-shiba.png", tone: "from-amber-400/25 to-violet-500/20" },
+  { name: "Dr. Joey", role: "Owl · Navigator", avatar: "/design/kyushu-avatar-joey.png", mascot: "/design/kyushu-mascot-owl.png", tone: "from-sky-400/25 to-indigo-500/20" },
+  { name: "Nancy", role: "Red panda · Planner", avatar: "/design/kyushu-avatar-nancy.png", mascot: "/design/kyushu-mascot-red-panda.png", tone: "from-rose-400/25 to-orange-500/20" },
+  { name: "Vivi", role: "Rabbit · Story", avatar: "/design/kyushu-avatar-vivi.png", mascot: "/design/kyushu-mascot-rabbit.png", tone: "from-fuchsia-400/25 to-violet-500/20" },
+] as const
 
 export interface JourneyTrip {
   id: string
@@ -456,7 +464,8 @@ export function TripJourneyClient({
   // null = "whole trip", which the Map tab offers explicitly. Typed as such
   // rather than cast, so every read below has to handle it.
   const [activeDay, setActiveDay] = useState<number | null>(initialDays[0]?.day_number ?? 1)
-  const [moreScreen, setMoreScreen] = useState<"menu" | "checklist" | "notes" | "documents" | "gallery">("menu")
+  const [moreScreen, setMoreScreen] = useState<"menu" | "checklist" | "notes" | "documents" | "gallery" | "members" | "profile">("menu")
+  const [selectedCrew, setSelectedCrew] = useState<{ name: string; role: string; avatar: string; participant?: JourneyParticipant } | null>(null)
   // Lifted to the page level (was previously called separately inside
   // LocationShareControl too) — one shared session/geolocation-watch
   // instance means the "currently sharing" banner and the underlying ping
@@ -719,24 +728,81 @@ export function TripJourneyClient({
       {tab === "overview" && (
         <div className="grid gap-5 xl:grid-cols-[1.5fr_.85fr]">
           <div className="space-y-5">
-            <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-950 via-indigo-800 to-violet-600 p-6 text-white sm:p-8">
-              <div className="absolute -right-12 -top-16 h-52 w-52 rounded-full bg-white/10" />
-              <div className="relative">
-                <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-medium backdrop-blur">{countdownLabel}</span>
-                <h2 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">{trip.title}</h2>
-                {trip.description && <p className="mt-2 max-w-xl text-sm text-indigo-100">{trip.description}</p>}
+            <section className="relative min-h-[290px] overflow-hidden rounded-3xl bg-indigo-950 p-6 text-white sm:p-8">
+              <img src="/design/kyushu-anime-trip-cover.png" alt="กลุ่มนักเดินทาง Kyushu Anime Journey" className="absolute inset-0 h-full w-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/75 to-indigo-950/15" />
+              <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-slate-950/85 to-transparent" />
+              <span className="absolute left-0 top-0 rounded-full bg-white/15 px-3 py-1 text-xs font-medium backdrop-blur">{countdownLabel}</span>
+              <div className="relative flex min-h-[242px] flex-col justify-end pt-16">
+                <p className="text-xs font-bold tracking-[0.18em] text-violet-200">KYUSHU ANIME JOURNEY · 2026</p>
+                <h2 className="mt-2 text-3xl font-bold tracking-tight drop-shadow-md sm:text-4xl">{trip.title}</h2>
+                <p className="mt-2 max-w-xl text-sm text-slate-100 drop-shadow">
+                  {trip.description ?? "จัดการแผน รูปภาพ เอกสาร และช่วงเวลาของทีมไว้ใน Journey เดียว"}
+                </p>
                 <div className="mt-7 flex flex-wrap items-center gap-4">
                   <div className="flex -space-x-2">
                     {participants.slice(0, 5).map((p, i) => (
-                      <div key={p.id} title={p.display_name}
-                        className={cn("grid h-8 w-8 place-items-center rounded-full border-2 border-indigo-900 text-[11px] font-bold text-white",
-                          ["bg-indigo-500", "bg-rose-500", "bg-amber-500", "bg-emerald-500", "bg-slate-600"][i % 5])}>
-                        {p.display_name.trim().charAt(0)}
+                      <div key={p.id} title={p.display_name} className="h-8 w-8 overflow-hidden rounded-full border-2 border-slate-950 bg-indigo-500">
+                        {p.profile_shared_with_trip && p.avatar_url
+                          ? <img src={p.avatar_url} alt="" className="h-full w-full object-cover" />
+                          : <span className="grid h-full w-full place-items-center text-[11px] font-bold text-white">{p.display_name.trim().charAt(0)}</span>}
                       </div>
                     ))}
                   </div>
                   <span className="text-sm text-indigo-100">{participants.length} คนเดินทาง</span>
                 </div>
+              </div>
+            </section>
+
+            <section className="rounded-3xl border bg-card p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="flex items-center gap-2 text-lg font-semibold"><Users className="h-4 w-4 text-violet-500" />Kyushu travel crew</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">แตะการ์ดเพื่อจัดการโปรไฟล์ เอกสาร และข้อมูลส่วนตัวของสมาชิก</p>
+                </div>
+                <button onClick={() => { setMoreScreen("members"); setTab("manage") }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold text-violet-600 hover:bg-violet-500/10 dark:text-violet-300">
+                  <UserPlus className="h-3.5 w-3.5" />เพิ่มสมาชิก
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {KYUSHU_CREW.map((member, index) => {
+                  const profile = participants[index]
+                  const sharedImage = profile?.profile_shared_with_trip ? profile.avatar_url : null
+                  const sharedRole = profile?.profile_shared_with_trip ? profile.trip_role : null
+                  return (
+                    <button key={member.name} onClick={() => {
+                      setSelectedCrew({ name: profile?.profile_shared_with_trip ? profile.display_name : member.name, role: sharedRole || member.role, avatar: sharedImage || member.avatar, participant: profile })
+                      setMoreScreen("profile")
+                      setTab("manage")
+                    }} className={cn("relative overflow-hidden rounded-2xl border bg-gradient-to-br p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-violet-500", member.tone)}>
+                      <div className="relative mx-auto h-24 w-24 overflow-hidden rounded-full border-2 border-white/60 bg-slate-950/35">
+                        <img src={sharedImage || member.avatar} alt={`${member.name} avatar`} className="h-full w-full object-cover object-top" />
+                      </div>
+                      <p className="mt-3 truncate text-center text-sm font-semibold">{profile?.profile_shared_with_trip ? profile.display_name : member.name}</p>
+                      <p className="mt-0.5 truncate text-center text-[11px] text-muted-foreground">{sharedRole || member.role}</p>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+
+            <section className="rounded-3xl border bg-card p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="flex items-center gap-2 text-lg font-semibold"><Tag className="h-4 w-4 text-violet-500" />Travel identity</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">สัตว์นำโชค Anime สำหรับป้ายกระเป๋าและพื้นที่ส่วนตัวของทีม</p>
+                </div>
+                <Sparkles className="h-5 w-5 text-violet-500" />
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {KYUSHU_CREW.map(member => (
+                  <div key={member.name} className="flex min-h-28 flex-col items-center justify-center rounded-2xl border bg-muted/30 p-3 text-center">
+                    <img src={member.mascot} alt={`${member.name} lucky mascot`} className="h-16 w-16 object-contain" />
+                    <p className="mt-1 text-xs font-semibold">{member.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{member.role.split(" · ")[0]}</p>
+                  </div>
+                ))}
               </div>
             </section>
 
@@ -978,7 +1044,7 @@ export function TripJourneyClient({
         </div>
       )}
 
-      {/* ── More ── */}
+      {/* ── Trip management ── */}
       {importing && (
         <TripImportDialog tripId={trip.id} onClose={() => setImporting(false)}
           onImported={() => router.refresh()} />
@@ -996,40 +1062,52 @@ export function TripJourneyClient({
         />
       )}
 
-      {tab === "more" && (
+      {tab === "manage" && (
         <div>
           {moreScreen !== "menu" && (
             <button onClick={() => setMoreScreen("menu")} className="mb-4 inline-flex items-center gap-2 text-sm font-semibold">
-              <ArrowLeft className="h-4 w-4" />อื่นๆ
+              <ArrowLeft className="h-4 w-4" />จัดการทริป
             </button>
           )}
 
           {moreScreen === "menu" && (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {[
-                { icon: ListChecks, title: "Checklist", sub: `${doneChecks}/${checklist.length} เสร็จแล้ว`, go: () => setMoreScreen("checklist") },
-                { icon: FileText,   title: "โน้ตของทริป", sub: `${notes.length} โน้ต`,                      go: () => setMoreScreen("notes") },
-                { icon: FolderOpen, title: "เอกสาร", sub: `${documents.length} ไฟล์ · ตั๋ว พาสปอร์ต ประกัน`,  go: () => setMoreScreen("documents") },
-                { icon: Images,     title: "แกลเลอรี", sub: `${photos.length} รูป`,                          go: () => setMoreScreen("gallery") },
-                { icon: Receipt,    title: "จัดการค่าใช้จ่าย", sub: "หารบิล ชำระเงิน สลิป",                  href: `/trips/${trip.id}/expenses` },
-              ].map(({ icon: Icon, title, sub, go, href }) => {
-                const body = (
-                  <>
-                    <div className="flex items-start justify-between">
-                      <div className="grid h-11 w-11 place-items-center rounded-xl bg-brand-500/10">
-                        <Icon className="h-5 w-5 text-brand-600 dark:text-brand-300" />
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <h3 className="mt-4 font-semibold">{title}</h3>
-                    <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
-                  </>
-                )
-                const cls = "rounded-2xl border bg-card p-5 text-left transition hover:-translate-y-0.5 hover:shadow-md"
-                return href
-                  ? <Link key={title} href={href} className={cls}>{body}</Link>
-                  : <button key={title} onClick={go} className={cls}>{body}</button>
-              })}
+            <div className="space-y-7">
+              <div>
+                <div className="mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600 dark:text-violet-300">เตรียมเดินทาง</p>
+                  <h2 className="mt-1 text-xl font-bold">สิ่งที่ต้องพร้อมก่อนออกเดินทาง</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">รวมงานที่ต้องเตรียม จอง และตรวจสอบไว้ในหมวดเดียว</p>
+                </div>
+                <ManagementCards cards={[
+                  { icon: ListChecks, title: "Checklist", sub: `${doneChecks}/${checklist.length} เสร็จแล้ว`, go: () => setMoreScreen("checklist") },
+                  { icon: FolderOpen, title: "เอกสารและการจอง", sub: `${documents.length} ไฟล์ · ตั๋ว พาสปอร์ต ประกัน`, go: () => setMoreScreen("documents") },
+                  { icon: Receipt, title: "ค่าใช้จ่ายและการหารบิล", sub: "งบประมาณ ชำระเงิน และสลิป", href: `/trips/${trip.id}/expenses` },
+                ]} />
+              </div>
+
+              <div>
+                <div className="mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-600 dark:text-rose-300">Journey archive</p>
+                  <h2 className="mt-1 text-xl font-bold">บันทึกความทรงจำของทริป</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">เก็บภาพและโน้ตไว้ค้นหาและกลับมาใช้งานได้ง่าย</p>
+                </div>
+                <ManagementCards cards={[
+                  { icon: Images, title: "แกลเลอรี", sub: `${photos.length} รูปจากการเดินทาง`, go: () => setMoreScreen("gallery") },
+                  { icon: FileText, title: "โน้ตของทริป", sub: `${notes.length} โน้ต · ข้อมูลสำคัญและไอเดีย`, go: () => setMoreScreen("notes") },
+                ]} />
+              </div>
+
+              <div>
+                <div className="mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-600 dark:text-sky-300">ทีมและความเป็นส่วนตัว</p>
+                  <h2 className="mt-1 text-xl font-bold">ข้อมูลที่แชร์กับทีม</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">จัดการโปรไฟล์ รูป Avatar และเลือกข้อมูลที่ต้องการแชร์กับเพื่อนร่วมทริป</p>
+                </div>
+                <ManagementCards cards={[
+                  { icon: Users, title: "โปรไฟล์และ Avatar", sub: `${participants.length} คน · แก้ไขรูปและข้อมูลส่วนตัว`, href: "/profile" },
+                  { icon: MapPin, title: "ตำแหน่งและการติดต่อ", sub: "เปิดแชร์ตำแหน่งหรือคุยกับทีมจากหน้าแผนที่", go: () => setTab("map") },
+                ]} />
+              </div>
             </div>
           )}
 
@@ -1054,8 +1132,92 @@ export function TripJourneyClient({
             <DocumentsScreen documents={documents} onUpload={uploadDocument} onOpen={openDocument} onDelete={deleteDocument} />
           )}
           {moreScreen === "gallery" && <GalleryScreen photos={photos} onDelete={deletePhoto} />}
+          {moreScreen === "members" && <TripMembersPanel tripId={trip.id} />}
+          {moreScreen === "profile" && selectedCrew && (
+            <CrewProfileScreen
+              crew={selectedCrew}
+              documents={documents}
+              onOpenDocuments={() => setMoreScreen("documents")}
+              onOpenNotes={() => setMoreScreen("notes")}
+            />
+          )}
         </div>
       )}
+    </div>
+  )
+}
+
+function ManagementCards({ cards }: { cards: Array<{
+  icon: typeof MapPin
+  title: string
+  sub: string
+  go?: () => void
+  href?: string
+}> }) {
+  return (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {cards.map(({ icon: Icon, title, sub, go, href }) => {
+        const body = (
+          <>
+            <div className="flex items-start justify-between">
+              <div className="grid h-11 w-11 place-items-center rounded-xl bg-brand-500/10">
+                <Icon className="h-5 w-5 text-brand-600 dark:text-brand-300" />
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <h3 className="mt-4 font-semibold">{title}</h3>
+            <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
+          </>
+        )
+        const cls = "rounded-2xl border bg-card p-5 text-left transition hover:-translate-y-0.5 hover:shadow-md"
+        return href
+          ? <Link key={title} href={href} className={cls}>{body}</Link>
+          : <button key={title} onClick={go} className={cls}>{body}</button>
+      })}
+    </div>
+  )
+}
+
+function CrewProfileScreen({ crew, documents, onOpenDocuments, onOpenNotes }: {
+  crew: { name: string; role: string; avatar: string; participant?: JourneyParticipant }
+  documents: TripDocument[]
+  onOpenDocuments: () => void
+  onOpenNotes: () => void
+}) {
+  const sharing = crew.participant?.profile_shared_with_trip
+  return (
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,.75fr)_minmax(0,1.25fr)]">
+      <section className="relative overflow-hidden rounded-3xl border bg-card p-6">
+        <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-r from-violet-500/25 via-indigo-500/20 to-sky-500/20" />
+        <div className="relative pt-9 text-center">
+          <img src={crew.avatar} alt={`${crew.name} avatar`} className="mx-auto h-32 w-32 rounded-full border-4 border-card object-cover object-top shadow-lg" />
+          <h2 className="mt-4 text-xl font-bold">{crew.name}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{crew.role}</p>
+          <span className={cn("mt-4 inline-flex rounded-full px-3 py-1 text-xs font-semibold", sharing ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300" : "bg-muted text-muted-foreground")}>
+            {sharing ? "แชร์โปรไฟล์กับทริปแล้ว" : "ใช้ Avatar เฉพาะทริป"}
+          </span>
+        </div>
+      </section>
+      <section className="rounded-3xl border bg-card p-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600 dark:text-violet-300">Personal trip space</p>
+        <h2 className="mt-2 text-xl font-bold">จัดการข้อมูลของ {crew.name}</h2>
+        <p className="mt-2 text-sm text-muted-foreground">เอกสารและโน้ตในทริปถูกจัดการโดยสิทธิ์การแชร์ของสมาชิก เพื่อไม่ให้ข้อมูลส่วนตัวปรากฏต่อทุกคนโดยอัตโนมัติ</p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <button onClick={onOpenDocuments} className="rounded-2xl border p-4 text-left hover:bg-muted/50">
+            <FolderOpen className="h-5 w-5 text-violet-500" />
+            <p className="mt-3 font-semibold">เอกสารทริป</p>
+            <p className="mt-1 text-xs text-muted-foreground">{documents.length} ไฟล์ · อัปโหลด ตรวจสอบ และกำหนดสิทธิ์แชร์</p>
+          </button>
+          <button onClick={onOpenNotes} className="rounded-2xl border p-4 text-left hover:bg-muted/50">
+            <FileText className="h-5 w-5 text-violet-500" />
+            <p className="mt-3 font-semibold">โน้ตและลิงก์</p>
+            <p className="mt-1 text-xs text-muted-foreground">เก็บข้อมูลส่วนตัวหรือข้อมูลที่แชร์กับทีม</p>
+          </button>
+        </div>
+        <Link href="/profile" className="mt-5 inline-flex h-10 items-center rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white hover:bg-brand-600">
+          แก้ไขโปรไฟล์หลักและ Avatar
+        </Link>
+      </section>
     </div>
   )
 }

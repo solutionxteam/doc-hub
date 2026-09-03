@@ -121,6 +121,48 @@ final class TripsViewModel: ObservableObject {
         let _: String = try await db.rpc("add_friend_to_trip", params: Args(p_journey_id: journeyId, p_friend_id: friendId)).execute().value
     }
 
+    /// The travel-facing identity is intentionally stored on the trip member,
+    /// not on the account profile: a traveller can use a different role,
+    /// contact and photo for each private journey.
+    func updateTripProfile(
+        participantId: String,
+        displayName: String,
+        tripRole: String?,
+        emergencyContact: String?,
+        avatarUrl: String?,
+        profileSharedWithTrip: Bool
+    ) async throws {
+        struct Row: Encodable {
+            let display_name: String
+            let trip_role: String?
+            let emergency_contact: String?
+            let avatar_url: String?
+            let profile_shared_with_trip: Bool
+        }
+        struct RowWithoutAvatar: Encodable {
+            let display_name: String
+            let trip_role: String?
+            let emergency_contact: String?
+            let profile_shared_with_trip: Bool
+        }
+        if let avatarUrl {
+            try await db.from("trip_participants")
+                .update(Row(display_name: displayName, trip_role: tripRole,
+                            emergency_contact: emergencyContact, avatar_url: avatarUrl,
+                            profile_shared_with_trip: profileSharedWithTrip))
+                .eq("id", value: participantId)
+                .execute()
+        } else {
+            // An untouched photo is not a request to erase it.
+            try await db.from("trip_participants")
+                .update(RowWithoutAvatar(display_name: displayName, trip_role: tripRole,
+                                         emergency_contact: emergencyContact,
+                                         profile_shared_with_trip: profileSharedWithTrip))
+                .eq("id", value: participantId)
+                .execute()
+        }
+    }
+
     /// Reuses the current LIFF invitation route. Older trips get a token only
     /// after an active participant explicitly taps Share.
     func ensureShareToken(journeyId: String) async throws -> String {
