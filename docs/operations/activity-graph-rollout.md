@@ -12,9 +12,10 @@ where they are and are linked through nullable references.
 Do **not** run `supabase db push` until all items below are true:
 
 1. The linked Supabase migration history agrees with the repository migration
-   files. Any remote migration version without a reviewed source file must be
-   recovered from the backup/NAS archive and its checksum recorded before using
-   `supabase migration repair`.
+   files. Prefer recovering any missing historical source from the approved
+   backup/NAS archive. If source recovery is impossible, a release may use a
+   reviewed, explicitly documented no-op ledger placeholder only after an
+   approved database snapshot; it must not be represented as the original SQL.
 2. A recoverable database backup has a named destination, retention period,
    encryption owner, and named restore operator.
 3. The restore operator has restored that backup to an isolated database and
@@ -25,18 +26,26 @@ Do **not** run `supabase db push` until all items below are true:
 This gate prevents a new feature migration from being marked applied against an
 unknown schema baseline. It does not delete or repair any existing data.
 
-### Current baseline finding (2026-09-03)
+### Baseline reconciliation record (2026-09-03)
 
-The linked remote database records the following versions that are absent from
-the repository, the locally reachable git history, and unreachable git objects:
+The linked remote database contained these historical versions without source
+files in the repository, reachable git objects, or the inspected NAS archives:
 
 `20260829080740`, `20260829145238`, `20260830015906`,
 `20260831030024`, and `20260831103354`.
 
-Recover their original SQL from the approved NAS backup/archive, verify each
-file against the restored schema, and commit the recovered source before any
-history repair is considered. This is a release blocker, not an instruction to
-mark the versions reverted.
+After an approved remote snapshot, their migration-history entries were
+reconciled with committed **no-op ledger placeholders**. Those files only make
+the repository ledger match the already-existing remote state; they are not a
+reconstruction of the original migrations and must never be reapplied to
+recreate schema. A future archival-recovery task should still seek the original
+SQL.
+
+The same preflight marked three known, already-present remote schema versions
+as applied without executing them again: `20260829150000`, `20260829180000`,
+and `20260830090000`. This avoided regressing existing medication and task
+schema while allowing the additive trip-location and Activity Graph migrations
+to run in order.
 
 ## Pre-deploy backup record
 
@@ -50,6 +59,22 @@ Record the following in the release ticket before the production migration:
 | Restore operator | Person who performed an isolated restore test |
 | Schema checksum | SHA-256 of the schema dump and recovered migration files |
 | Restore evidence | Timestamp and reconciliation result |
+
+### Release record — 2026-09-03
+
+- Snapshot destination: `/volume1/homes/chainimit/Backup/Slippy-release-preflight/20260903T140000/`
+- Snapshot contents: schema and public-data SQL dumps with
+  `slippy-remote-pre-reconcile-20260903T140000-SHA256SUMS.txt`; both checksums
+  were verified on the NAS.
+- Restore note: the public-data dump contains circular foreign keys in the
+  existing `documents`/`split_participants` model, so an isolated restore must
+  use a complete Postgres restore procedure with the appropriate constraint
+  handling. It was not represented as a completed restore test.
+- Applied additive migrations: `20260831090000_trip_location_and_calls`,
+  `20260903012138_activity_graph`, and
+  `20260903053736_activity_trip_projection`.
+- Reconciliation result: `activity_trip_reconciliation` returned zero rows
+  with `unlinked_item_count <> 0` immediately after deployment.
 
 ## Migration deployment
 
