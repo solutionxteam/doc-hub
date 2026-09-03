@@ -96,7 +96,11 @@ export async function POST(req: NextRequest) {
     base_currency:   rest.base_currency ?? "THB",
     cover_emoji:     rest.cover_emoji ?? (trip_type === "travel" ? "✈️" : trip_type === "sport" ? "🏸" : trip_type === "food_order" ? "🍽️" : "💰"),
     notes:           rest.notes ?? null,
-    journey_type:    trip_type === "travel" ? "trip" : "event",
+    // trip_type (travel/food_order/sport/general) is only meaningful when
+    // journey_type='trip' — matches create_trip_full's RPC convention.
+    // "event"/other journey_types are created via the journeys endpoint
+    // directly, not here.
+    journey_type:    "trip",
     share_token:     generateShareToken(),
     status:          "active",
   }).select("id, share_token").single()
