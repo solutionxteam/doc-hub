@@ -25,6 +25,19 @@ Do **not** run `supabase db push` until all items below are true:
 This gate prevents a new feature migration from being marked applied against an
 unknown schema baseline. It does not delete or repair any existing data.
 
+### Current baseline finding (2026-09-03)
+
+The linked remote database records the following versions that are absent from
+the repository, the locally reachable git history, and unreachable git objects:
+
+`20260829080740`, `20260829145238`, `20260830015906`,
+`20260831030024`, and `20260831103354`.
+
+Recover their original SQL from the approved NAS backup/archive, verify each
+file against the restored schema, and commit the recovered source before any
+history repair is considered. This is a release blocker, not an instruction to
+mark the versions reverted.
+
 ## Pre-deploy backup record
 
 Record the following in the release ticket before the production migration:
