@@ -10,14 +10,18 @@
 # musl libc means it would have to compile from source, which is slower and
 # occasionally breaks on arm64 Synology models.
 
-FROM node:22-bookworm-slim AS deps
+# Node 20 is the active LTS line and is materially more reliable than Node 22
+# under the linux/amd64 emulator used by the Mac-to-NAS release pipeline.
+# Keep every stage on the same ABI to ensure Next's standalone output runs on
+# the NAS exactly as it was built.
+FROM node:20-bookworm-slim AS deps
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY web/package.json ./web/package.json
 COPY api/package.json ./api/package.json
 RUN npm ci
 
-FROM node:22-bookworm-slim AS builder
+FROM node:20-bookworm-slim AS builder
 WORKDIR /repo
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -60,7 +64,7 @@ RUN npm run build --workspace=web
 # and emit a minimal node_modules under .next/standalone, instead of shipping
 # the whole workspace-hoisted root node_modules (which includes api's
 # dependencies too) into the image.
-FROM node:22-bookworm-slim AS runner
+FROM node:20-bookworm-slim AS runner
 WORKDIR /repo/web
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
