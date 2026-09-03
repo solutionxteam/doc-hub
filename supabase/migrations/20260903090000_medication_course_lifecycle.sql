@@ -5,16 +5,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth date;
 ALTER TABLE medication_inventory ADD COLUMN IF NOT EXISTS loc_code text;
 ALTER TABLE medication_inventory ADD COLUMN IF NOT EXISTS lot_no text;
 
-CREATE TABLE medical_providers (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name text NOT NULL CHECK (btrim(name) <> ''),
-  type text NOT NULL DEFAULT 'doctor'
-    CHECK (type IN ('doctor', 'pharmacist', 'clinic', 'hospital', 'other')),
-  hn text,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
+-- medical_providers already exists (20260831030000_medication_tracking_expansion.sql,
+-- type CHECK IN ('hospital','clinic','pharmacy') — that's the enum the web/iOS
+-- provider picker UI is built against, kept as canonical). Only add what this
+-- migration's trigger needs.
+ALTER TABLE medical_providers ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
 CREATE TABLE medication_courses (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -110,13 +105,12 @@ ALTER TABLE medication_logs DROP CONSTRAINT IF EXISTS medication_logs_status_che
 ALTER TABLE medication_logs ADD CONSTRAINT medication_logs_status_check
   CHECK (status IN ('taken', 'skipped', 'late', 'missed', 'pending', 'cancelled'));
 
-ALTER TABLE medical_providers ENABLE ROW LEVEL SECURITY;
+-- medical_providers already has RLS enabled + an owner policy
+-- (medical_providers_own, from 20260831030000) — not repeated here.
 ALTER TABLE medication_courses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE medication_dose_slots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE medication_course_events ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY medical_providers_owner ON medical_providers FOR ALL
-  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
 CREATE POLICY medication_courses_owner ON medication_courses FOR ALL
   USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
 CREATE POLICY medication_dose_slots_owner ON medication_dose_slots FOR ALL

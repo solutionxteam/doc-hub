@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient }       from "@/lib/supabase/server"
 import { createAdminClient }  from "@/lib/supabase/admin"
 
-// GET — list medications with schedules + inventory
+// GET — identity, current course, stable dose slots, inventory and today's doses.
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -15,7 +15,13 @@ export async function GET(req: NextRequest) {
         category, purpose, is_chronic, is_active, color, notes, image_url, created_at,
         provider_id, doctor_instructions, prescribed_by,
         provider:medical_providers(id, name, type, hn),
-        medication_schedules(id, times, days_of_week, dose_qty, meal_relation, meal_note, reminder_enabled, is_active, is_bedtime),
+        medication_courses(
+          id, status, start_date, planned_end_date, actual_end_at, prescribed_by,
+          doctor_instructions, instruction_source, resume_review_at,
+          medication_dose_slots(id, time_value, period_label, dose_qty, meal_relation, meal_note, sort_order, reminder_enabled, is_active),
+          medication_course_events(id, action, from_status, to_status, effective_at, reason, confirmed_by, created_at)
+        ),
+        medication_schedules(id, course_id, times, days_of_week, dose_qty, meal_relation, meal_note, reminder_enabled, is_active, is_bedtime),
         medication_inventory(id, qty_remaining, qty_unit, qty_per_pack, low_stock_alert, expiry_date, price_per_unit, loc_code, lot_no)
       `)
       .eq("user_id", user.id)
@@ -24,7 +30,7 @@ export async function GET(req: NextRequest) {
 
     // Today's logs
     supabase.from("medication_logs")
-      .select("id, medication_id, scheduled_at, taken_at, status, dose_taken")
+      .select("id, medication_id, course_id, slot_id, scheduled_at, taken_at, status, dose_taken")
       .eq("user_id", user.id)
       .gte("scheduled_at", new Date().toISOString().slice(0, 10) + "T00:00:00+07:00")
       .lte("scheduled_at", new Date().toISOString().slice(0, 10) + "T23:59:59+07:00")
@@ -53,10 +59,11 @@ export async function POST(req: NextRequest) {
     purpose?:      string
     is_chronic?:   boolean
     notes?:        string
+    doctor_instructions?: string
+    instruction_source?: "label" | "doctor" | "pharmacist" | "user"
+    prescribed_by?: string
     color?:        string
     provider_id?:  string
-    doctor_instructions?: string
-    prescribed_by?: string
     // Schedule
     times:         string[]
     days_of_week?: number[] | null
@@ -67,6 +74,7 @@ export async function POST(req: NextRequest) {
     reminder_minutes?: number
     start_date?:   string
     is_bedtime?:   boolean
+    planned_end_date?: string | null
     // Inventory
     qty_total:     number
     qty_unit?:     string
@@ -100,9 +108,26 @@ export async function POST(req: NextRequest) {
 
   if (medErr || !med) return NextResponse.json({ error: medErr?.message }, { status: 500 })
 
-  // 2. Create schedule
-  await admin.from("medication_schedules").insert({
+  // 2. Create the treatment course. Label OCR is kept verbatim here while
+  // `medications.notes` remains the person's own note.
+  const { data: course, error: courseErr } = await admin.from("medication_courses").insert({
+    medication_id: med.id,
+    user_id: user.id,
+    status: "active",
+    start_date: body.start_date ?? new Date().toISOString().slice(0, 10),
+    planned_end_date: body.planned_end_date ?? null,
+    prescribed_by: body.prescribed_by ?? null,
+    doctor_instructions: body.doctor_instructions ?? null,
+    instruction_source: body.instruction_source ?? "user",
+  }).select("id").single()
+  if (courseErr || !course) {
+    await admin.from("medications").delete().eq("id", med.id).eq("user_id", user.id)
+    return NextResponse.json({ error: courseErr?.message }, { status: 500 })
+  }
+
+  const { data: schedule, error: scheduleErr } = await admin.from("medication_schedules").insert({
     medication_id:    med.id,
+    course_id:        course.id,
     user_id:          user.id,
     times:            body.times ?? ["08:00"],
     days_of_week:     body.days_of_week ?? null,
@@ -114,10 +139,23 @@ export async function POST(req: NextRequest) {
     start_date:       body.start_date ?? new Date().toISOString().slice(0, 10),
     is_bedtime:       body.is_bedtime ?? false,
     is_active:        true,
-  })
+  }).select("id").single()
+
+  const slotRows = (body.times ?? ["08:00"]).map((time, index) => ({
+    course_id: course.id,
+    user_id: user.id,
+    time_value: time,
+    period_label: time >= "21:00" ? "bedtime" : time < "11:00" ? "morning" : time < "16:00" ? "midday" : "evening",
+    dose_qty: body.dose_qty ?? 1,
+    meal_relation: body.meal_relation ?? "any",
+    meal_note: body.meal_note ?? null,
+    sort_order: index,
+    reminder_enabled: body.reminder_enabled ?? true,
+  }))
+  const { error: slotErr } = await admin.from("medication_dose_slots").insert(slotRows)
 
   // 3. Create inventory
-  await admin.from("medication_inventory").insert({
+  const { error: inventoryErr } = await admin.from("medication_inventory").insert({
     medication_id:  med.id,
     user_id:        user.id,
     qty_remaining:  body.qty_total ?? 0,
@@ -132,7 +170,16 @@ export async function POST(req: NextRequest) {
     last_purchased_qty: body.qty_total ?? 0,
   })
 
-  return NextResponse.json({ medicationId: med.id })
+  if (scheduleErr || slotErr || inventoryErr || !schedule) {
+    // The medication was not visible to callers before this request. Removing
+    // this newly-created course/root compensates dependent inserts. This path
+    // only applies before a course can have user-visible history.
+    await admin.from("medication_courses").delete().eq("id", course.id).eq("user_id", user.id)
+    await admin.from("medications").delete().eq("id", med.id).eq("user_id", user.id)
+    return NextResponse.json({ error: scheduleErr?.message ?? slotErr?.message ?? inventoryErr?.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ medicationId: med.id, courseId: course.id })
 }
 
 // PATCH — update log status (taken/skipped)
