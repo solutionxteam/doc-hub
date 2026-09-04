@@ -22,10 +22,16 @@ final class TripsViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
+            // journey_type='trip' scopes this to actual bill-splitting trips —
+            // without it, every plain Life Graph entry (event/experience/
+            // milestone/business, created via the web app's /life/journey page)
+            // shows up here too, with no participants/expenses. Mirrors the same
+            // fix in web/src/app/api/trips/route.ts.
             trips = try await db
                 .from("life_journeys")
                 .select(Self.tripSelect)
                 .eq("organization_id", value: orgId)
+                .eq("journey_type", value: "trip")
                 .order("created_at", ascending: false)
                 .execute()
                 .value
