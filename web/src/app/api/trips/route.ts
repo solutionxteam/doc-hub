@@ -26,7 +26,16 @@ export async function GET(req: NextRequest) {
       trip_participants(id, display_name, amount_owed, amount_paid, is_host, promptpay_type, qr_image_url)
     `)
     .eq("organization_id", orgId)
-    .not("trip_type", "is", null)
+    // trip_type defaults to 'general' (never actually null), so the old
+    // `.not("trip_type", "is", null)` filter matched every life_journeys
+    // row regardless of type — including plain Life Graph entries (event/
+    // experience/milestone/business) created via /api/life/journeys, which
+    // showed up here as phantom zero-participant "general" trips. trip_type
+    // is only meaningful when journey_type='trip' (enforced by the
+    // life_journeys_trip_type_requires_trip_journey CHECK constraint) —
+    // filtering on journey_type directly is the correct, and only correct, way to
+    // scope this list to actual bill-splitting trips.
+    .eq("journey_type", "trip")
     .order("created_at", { ascending: false })
 
   const enriched = (trips ?? []).map(t => ({
