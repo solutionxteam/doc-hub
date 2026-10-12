@@ -33,14 +33,14 @@ This project is designed for Synology Container Manager or SSH-based Docker Comp
 Recommended NAS path:
 
 ```sh
-/volume1/docker/solutionx
+/volume1/docker/slippy
 ```
 
 From your Mac:
 
 ```sh
-cd /Users/chainimitsakhorn/Documents/SolutionX/Synology/Container
-NAS_SSH=chainimit@192.168.1.200 NAS_PATH=/volume1/docker/solutionx sh scripts/deploy-to-nas.sh
+cd /Users/chainimitsakhorn/Documents/Project/Slippy/synology-container-stack
+NAS_SSH=chainimit@192.168.1.200 NAS_PATH=/volume1/docker/slippy sh scripts/deploy-to-nas.sh
 ```
 
 Or copy the folder manually with Synology File Station.
@@ -51,7 +51,7 @@ SSH into Synology:
 
 ```sh
 ssh chainimit@192.168.1.200
-cd /volume1/docker/solutionx/synology-container-stack
+cd /volume1/docker/slippy/synology-container-stack
 cp .env.example .env
 cp web.env.example web.env
 cp api.env.example api.env
@@ -144,11 +144,11 @@ tunnel is a long-lived, named resource tied to your own domain.
    run --token <TOKEN>` command — copy just the token into this stack's
    `.env` as `CLOUDFLARE_TUNNEL_TOKEN`.
 3. Still in that tunnel's settings, add two **Public Hostnames**:
-   - `staging.yourdomain.com` → Service `HTTP`, URL `web:3000`
-   - `api-staging.yourdomain.com` → Service `HTTP`, URL `api:4000`
+   - `dev.yourdomain.com` → Service `HTTP`, URL `web:3000`
+   - `api.yourdomain.com` → Service `HTTP`, URL `api:4000`
 4. Set `NEXT_PUBLIC_APP_URL`/`NEXT_PUBLIC_API_URL` in `.env` to those same
    hostnames (with `https://`), then rebuild: `docker compose up -d --build web`.
-5. Register `https://api-staging.yourdomain.com/webhooks/line` as the LINE
+5. Register `https://api.yourdomain.com/webhooks/line` as the LINE
    webhook URL in the LINE Developers Console — that's handled by `api`
    directly (`api/src/routes/line.ts`), not proxied through `web`.
 6. Restart `cloudflared`: `docker compose up -d cloudflared`.
@@ -161,7 +161,7 @@ In Synology DSM:
 2. Go to Project.
 3. Create.
 4. Select `Create docker-compose.yml`.
-5. Project path: `/volume1/docker/solutionx/synology-container-stack`.
+5. Project path: `/volume1/docker/slippy/synology-container-stack`.
 6. Use the existing `docker-compose.yml`.
 7. Build and start.
 
