@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getOrCreateDirectConversation, validateCreateConversation } from "@/lib/chat-access"
 
 // GET /api/conversations — list my conversations with last message
 export async function GET() {
@@ -63,37 +64,49 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const { type = "direct", memberIds, name }: { type: string; memberIds: string[]; name?: string } = await req.json()
-  if (!memberIds?.length) return NextResponse.json({ error: "memberIds required" }, { status: 400 })
+  let payload: unknown
+  try { payload = await req.json() } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }) }
+  const parsed = validateCreateConversation(payload, user.id)
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+  const { type, memberIds, name } = parsed
 
   const admin = createAdminClient()
 
-  if (type === "direct" && memberIds.length === 1) {
-    const otherId = memberIds[0]
-    const { data: myConvs } = await admin.from("conversation_members")
-      .select("conversation_id").eq("user_id", user.id)
-    const myIds = (myConvs ?? []).map((r: any) => r.conversation_id)
-    if (myIds.length > 0) {
-      const { data: shared } = await admin.from("conversation_members")
-        .select("conversation_id").eq("user_id", otherId).in("conversation_id", myIds).limit(1).maybeSingle()
-      if (shared) {
-        const { data: conv } = await admin.from("conversations").select("*").eq("id", (shared as any).conversation_id).single()
-        return NextResponse.json({ conversation: conv, existed: true })
-      }
+  if (type === "direct") {
+    // The direct room of exactly these two people, or a new one. A shared GROUP (or a trip room) is never reused as a
+    // "direct" chat, a failed lookup creates nothing, and the database refuses a second direct room for the same pair
+    // (conversations.direct_pair_key), so two simultaneous requests end up in the same room. See chat-access.ts.
+    const room = await getOrCreateDirectConversation(admin, user.id, memberIds[0], { name })
+    if (!room.ok) {
+      console.error("[conversations] could not get or create the direct room")
+      return NextResponse.json({ error: "Could not create conversation" }, { status: 500 })
     }
+    if (room.created) return NextResponse.json({ conversation: { id: room.id, type, name }, existed: false })
+    const { data: existing } = await admin.from("conversations").select("*").eq("id", room.id).maybeSingle()
+    return NextResponse.json({ conversation: existing ?? { id: room.id, type, name: null }, existed: true })
   }
 
-  const { data: conv } = await admin.from("conversations")
-    .insert({ type, name: name ?? null, created_by: user.id }).select("id").single()
+  const { data: conv, error: convError } = await admin.from("conversations")
+    .insert({ type, name, created_by: user.id }).select("id").single()
+  if (convError || !conv) {
+    console.error("[conversations] create failed:", convError?.message)
+    return NextResponse.json({ error: "Could not create conversation" }, { status: 500 })
+  }
 
-  const allIds = [user.id, ...memberIds.filter((id: string) => id !== user.id)]
-  await admin.from("conversation_members").insert(
+  const allIds = [user.id, ...memberIds]
+  const { error: membersError } = await admin.from("conversation_members").insert(
     allIds.map((uid: string) => ({
-      conversation_id: conv!.id,
+      conversation_id: conv.id,
       user_id: uid,
       role: uid === user.id ? "admin" : "member",
     }))
   )
+  if (membersError) {
+    // Do not leave an empty room behind.
+    console.error("[conversations] adding members failed:", membersError.message)
+    await admin.from("conversations").delete().eq("id", conv.id)
+    return NextResponse.json({ error: "Could not create conversation" }, { status: 500 })
+  }
 
-  return NextResponse.json({ conversation: { id: conv!.id, type, name }, existed: false })
+  return NextResponse.json({ conversation: { id: conv.id, type, name }, existed: false })
 }

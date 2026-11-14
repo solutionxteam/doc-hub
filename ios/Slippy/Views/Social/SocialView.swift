@@ -7,6 +7,8 @@ struct SocialView: View {
     @State private var selectedTab = 0
     @State private var showPlayDashboard = false
     @State private var showAddFriend = false
+    @StateObject private var balanceVM = BalanceViewModel()
+    @State private var balanceFriend: UserProfile?
 
     private var userId: String { authVM.session?.user.id.uuidString ?? "" }
 
@@ -63,6 +65,10 @@ struct SocialView: View {
         .task {
             guard !userId.isEmpty else { return }
             await vm.load(userId: userId)
+            await balanceVM.load()
+        }
+        .sheet(item: $balanceFriend) { friend in
+            BalanceDetailView(friendId: friend.id, friendName: friend.displayName, vm: balanceVM)
         }
         .sheet(isPresented: $showPlayDashboard) {
             PlayDashboardView()
@@ -107,16 +113,16 @@ struct SocialView: View {
         ScrollView {
             LazyVStack(spacing: 16) {
                 // Search bar
-                searchBar
+                FriendSearchBar(vm: vm, isActive: !showAddFriend)
 
                 // Search results
                 if !vm.searchResults.isEmpty {
-                    searchResultsSection
+                    FriendSearchResults(vm: vm, userId: userId)
                 }
 
                 // Pending requests
                 if !vm.pendingRequests.isEmpty {
-                    pendingSection
+                    FriendRequestList(vm: vm, userId: userId)
                 }
 
                 // Friends list
@@ -127,152 +133,10 @@ struct SocialView: View {
         }
         .refreshable {
             await vm.load(userId: userId)
+            await balanceVM.load()
         }
     }
 
-    private var searchBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(Color.textSecondary)
-                .font(.system(size: 16))
-            TextField("ค้นหาเพื่อนด้วยชื่อ", text: $vm.searchQuery)
-                .foregroundColor(Color.textPrimary)
-                .font(.system(size: 15))
-                .onSubmit {
-                    Task { await vm.searchUsers(query: vm.searchQuery) }
-                }
-                .onChange(of: vm.searchQuery) { _, newVal in
-                    if newVal.isEmpty {
-                        vm.searchResults = []
-                    } else {
-                        Task { await vm.searchUsers(query: newVal) }
-                    }
-                }
-            if !vm.searchQuery.isEmpty {
-                Button {
-                    vm.searchQuery = ""
-                    vm.searchResults = []
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(Color.textSecondary)
-                }
-            }
-        }
-        .padding(12)
-        .background(Color.surface)
-        .cornerRadius(12)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.border, lineWidth: 1))
-    }
-
-    private var searchResultsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("ผลการค้นหา")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.textSecondary)
-
-            ForEach(vm.searchResults) { user in
-                HStack(spacing: 12) {
-                    initialsView(name: user.displayName)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(user.displayName)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(Color.textPrimary)
-                        Text(user.email)
-                            .font(.system(size: 12))
-                            .foregroundColor(Color.textSecondary)
-                    }
-                    Spacer()
-                    // Don't show "add" button for self or existing friends
-                    if user.id != userId && !vm.friends.contains(where: { $0.id == user.id }) {
-                        Button {
-                            hapticLight()
-                            Task {
-                                try? await vm.sendFriendRequest(fromUserId: userId, toUserId: user.id)
-                                hapticSuccess()
-                                vm.searchQuery = ""
-                                vm.searchResults = []
-                            }
-                        } label: {
-                            Text("เพิ่มเพื่อน")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(Color.brand500)
-                                .clipShape(Capsule())
-                        }
-                    }
-                }
-                .padding(12)
-                .background(Color.surface)
-                .cornerRadius(12)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.border, lineWidth: 1))
-            }
-        }
-    }
-
-    private var pendingSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("คำขอเป็นเพื่อน")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.textSecondary)
-
-            ForEach(vm.pendingRequests) { request in
-                let name = request.friend?.displayName ?? "ผู้ใช้"
-                HStack(spacing: 12) {
-                    initialsView(name: name)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(name) ส่งคำขอเป็นเพื่อน")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color.textPrimary)
-                        if let email = request.friend?.email {
-                            Text(email)
-                                .font(.system(size: 12))
-                                .foregroundColor(Color.textSecondary)
-                        }
-                    }
-                    Spacer()
-                    HStack(spacing: 8) {
-                        Button {
-                            hapticLight()
-                            Task {
-                                try? await vm.acceptRequest(friendshipId: request.id)
-                                hapticSuccess()
-                                await vm.load(userId: userId)
-                            }
-                        } label: {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 32, height: 32)
-                                .background(Color.brand500)
-                                .clipShape(Circle())
-                        }
-                        Button {
-                            hapticLight()
-                            Task {
-                                try? await vm.removeFriend(friendshipId: request.id)
-                                await vm.load(userId: userId)
-                            }
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(Color.textSecondary)
-                                .frame(width: 32, height: 32)
-                                .background(Color.surface)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.border, lineWidth: 1))
-                        }
-                    }
-                }
-                .padding(12)
-                .background(Color.surface)
-                .cornerRadius(12)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.border, lineWidth: 1))
-                .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
-            }
-        }
-    }
 
     private var friendsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -282,25 +146,14 @@ struct SocialView: View {
                     .foregroundColor(Color.textSecondary)
 
                 ForEach(vm.friends) { friend in
-                    HStack(spacing: 12) {
-                        initialsView(name: friend.displayName)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(friend.displayName)
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(Color.textPrimary)
-                            Text(friend.email)
-                                .font(.system(size: 12))
-                                .foregroundColor(Color.textSecondary)
-                        }
-                        Spacer()
-                        Image(systemName: "person.fill.checkmark")
-                            .foregroundColor(Color.brand500.opacity(0.7))
-                            .font(.system(size: 16))
+                    Button {
+                        hapticLight()
+                        balanceFriend = friend
+                    } label: {
+                        FriendRow(friend: friend,
+                                  net: balanceVM.loadFailed ? nil : balanceVM.summary(for: friend.id)?.net)
                     }
-                    .padding(12)
-                    .background(Color.surface)
-                    .cornerRadius(12)
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.border, lineWidth: 1))
+                    .buttonStyle(.plain)
                 }
             } else if vm.searchQuery.isEmpty && !vm.isLoading {
                 emptyFriendsState
@@ -427,15 +280,7 @@ struct SocialView: View {
 
     // MARK: – Initials avatar helper
     private func initialsView(name: String, size: CGFloat = 40) -> some View {
-        let initials = name.prefix(1).uppercased()
-        return Circle()
-            .fill(Color.brand500.opacity(0.15))
-            .frame(width: size, height: size)
-            .overlay(
-                Text(initials)
-                    .font(.system(size: size * 0.4, weight: .bold))
-                    .foregroundColor(Color.brand500)
-            )
+        InitialsCircle(name: name, size: size)
     }
 }
 

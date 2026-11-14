@@ -1,0 +1,160 @@
+#if DEBUG
+import SwiftUI
+
+// Synthetic data for simulator screenshots of the chat screens
+// (SLIPPY_APPEARANCE_PREVIEW=chat-list-test | chat-room-test | add-friend-test).
+// Nothing here talks to the network: MessagesViewModel.isFixture short-circuits
+// its loads and sends, and the Social view model is only given preset values
+// (an invite token is preset so the sheet never tries to mint one).
+
+extension MessagesViewModel {
+    static let fixtureMyId = "fx-me"
+    static let fixtureFriendId = "fx-friend"
+    static let fixtureConversationId = "fx-conv-1"
+
+    private static func iso(daysAgo: Int, hour: Int, minute: Int) -> String {
+        let calendar = Calendar.current
+        let day = calendar.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+        let date = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? day
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    static func chatFixture() -> MessagesViewModel {
+        let vm = MessagesViewModel()
+        vm.isFixture = true
+        vm.conversations = [
+            ChatConversation(id: "fx-conv-1", type: "direct", displayName: "พลอย", displayAvatarUrl: nil,
+                             updatedAt: iso(daysAgo: 0, hour: 9, minute: 5),
+                             lastMessageBody: "20:00 เจอกัน 👍", lastMessageType: "text"),
+            ChatConversation(id: "fx-conv-2", type: "direct", displayName: "กอล์ฟ", displayAvatarUrl: nil,
+                             updatedAt: iso(daysAgo: 1, hour: 21, minute: 30),
+                             lastMessageBody: nil, lastMessageType: "image"),
+            ChatConversation(id: "fx-conv-3", type: "direct", displayName: "นุ่น", displayAvatarUrl: nil,
+                             updatedAt: iso(daysAgo: 3, hour: 14, minute: 2),
+                             lastMessageBody: "ขอบคุณนะ เดี๋ยวโอนให้", lastMessageType: "text"),
+            ChatConversation(id: "fx-conv-4", type: "direct", displayName: "ต้น", displayAvatarUrl: nil,
+                             updatedAt: iso(daysAgo: 20, hour: 10, minute: 0),
+                             lastMessageBody: nil, lastMessageType: "file"),
+            ChatConversation(id: "fx-conv-5", type: "direct", displayName: "เอ", displayAvatarUrl: nil,
+                             updatedAt: iso(daysAgo: 400, hour: 18, minute: 45),
+                             lastMessageBody: "โอเคเลย", lastMessageType: "text"),
+        ]
+        func message(_ id: String, _ sender: String, _ body: String, _ daysAgo: Int, _ hour: Int, _ minute: Int) -> FriendMessage {
+            FriendMessage(id: id, conversationId: fixtureConversationId, senderId: sender, body: body,
+                          msgType: "text", attachmentUrl: nil, createdAt: iso(daysAgo: daysAgo, hour: hour, minute: minute))
+        }
+        func file(_ id: String, _ sender: String, _ name: String, _ size: Int, _ daysAgo: Int, _ hour: Int, _ minute: Int,
+                  type: String = "file") -> FriendMessage {
+            // A path-shaped value, as the app stores now. Fixtures never touch the network, so signing fails and an image shows its failure placeholder.
+            FriendMessage(id: id, conversationId: fixtureConversationId, senderId: sender, body: name,
+                          msgType: type, attachmentUrl: "chat/00000000-0000-4000-8000-000000000001/\(id.filter(\.isNumber)).\(type == "image" ? "heic" : "pdf")", createdAt: iso(daysAgo: daysAgo, hour: hour, minute: minute),
+                          meta: FriendMessageMeta(fileName: name, fileSize: size))
+        }
+        vm.messages = [
+            message("m1", fixtureFriendId, "คืนนี้กินอะไรดี หิวมาก", 1, 19, 2),
+            message("m2", fixtureFriendId, "อยากกินชาบู", 1, 19, 3),
+            message("m3", fixtureMyId, "ชาบูไหม ร้านเดิมที่ทองหล่อ", 1, 19, 4),
+            message("m4", fixtureFriendId, "เอา! ถึงกี่โมง 😆", 1, 19, 5),
+            message("m5", fixtureMyId, "20:00 เจอกัน 👍", 0, 8, 30),
+            message("m6", fixtureFriendId, "ได้เลย เดี๋ยวจองโต๊ะไว้ให้ ที่นั่งริมหน้าต่างนะ จะได้เห็นวิวสวยๆ ตอนกินข้าว", 0, 9, 5),
+            message("m7", fixtureMyId, "ขอบคุณนะ", 0, 9, 6),
+            file("m8", fixtureFriendId, "ใบเสนอราคา-ทริปเกาะสมุย.pdf", 2_411_000, 0, 9, 10),
+            file("m9", fixtureMyId, "งบประมาณ.xlsx", 86_000, 0, 9, 12),
+            file("m10", fixtureMyId, "รูปภาพ-20261113-091500.heic", 3_100_000, 0, 9, 15, type: "image"),
+        ]
+        return vm
+    }
+}
+
+extension SocialViewModel {
+    static func friendsFixture() -> SocialViewModel {
+        let vm = SocialViewModel()
+        vm.inviteToken = "fixture-token"
+        vm.friends = [
+            UserProfile(id: "fx-friend", email: "ploy@example.invalid", fullName: "พลอย", avatarUrl: nil),
+            UserProfile(id: "fx-golf", email: "golf@example.invalid", fullName: "กอล์ฟ", avatarUrl: nil),
+        ]
+        vm.pendingRequests = [
+            Friendship(id: "fx-req-1", requesterId: "fx-mint", addresseeId: MessagesViewModel.fixtureMyId,
+                       status: "pending", createdAt: "2026-11-09T00:00:00Z",
+                       friend: UserProfile(id: "fx-mint", email: "mint@example.invalid", fullName: "มิ้นท์", avatarUrl: nil)),
+            Friendship(id: "fx-req-2", requesterId: "fx-ton", addresseeId: MessagesViewModel.fixtureMyId,
+                       status: "pending", createdAt: "2026-11-09T00:00:00Z",
+                       friend: UserProfile(id: "fx-ton", email: "ton@example.invalid", fullName: "ต้น", avatarUrl: nil)),
+        ]
+        return vm
+    }
+}
+
+struct ChatListFixtureScreen: View {
+    @StateObject private var messages = MessagesViewModel.chatFixture()
+    @StateObject private var social = SocialViewModel.friendsFixture()
+    var body: some View { FriendChatListView(viewModel: messages, socialViewModel: social) }
+}
+
+struct ChatRoomFixtureScreen: View {
+    @StateObject private var messages = MessagesViewModel.chatFixture()
+    @StateObject private var balances = BalanceViewModel.fixture()
+    var body: some View {
+        NavigationStack {
+            FriendChatRoomView(
+                vm: messages,
+                conversationId: MessagesViewModel.fixtureConversationId,
+                // Upper-case on purpose: the real app's id is `UUID.uuidString` (upper-case) while Postgres returns
+                // `sender_id` lower-case, which is exactly what put every bubble on the left.
+                currentUserId: MessagesViewModel.fixtureMyId.uppercased(),
+                friendName: "พลอย", friendAvatarUrl: nil, showsAvatars: true,
+                friendUserId: MessagesViewModel.fixtureFriendId,
+                balanceViewModel: balances)
+        }
+    }
+}
+
+extension MessagesViewModel {
+    /// A long chat: fourteen older messages wait behind "โหลดข้อความก่อนหน้า" (SLIPPY_APPEARANCE_PREVIEW=chat-room-paging-test).
+    /// Enough of them that the page is taller than the screen, so "the reader stays where they were" is observable.
+    static func pagingFixture() -> MessagesViewModel {
+        let vm = chatFixture()
+        vm.fixtureOlder = (1...14).map { i in
+            FriendMessage(id: "old\(i)", conversationId: fixtureConversationId,
+                          senderId: i % 2 == 0 ? fixtureMyId : fixtureFriendId,
+                          body: "ข้อความเก่า \(i)", msgType: "text", attachmentUrl: nil,
+                          createdAt: iso(daysAgo: 7, hour: 18, minute: i))
+        }
+        // Plus a screenful of NEWER messages, so the page has more content below the first message than fits on
+        // screen: only then can "the reader stays on the message they were reading" be told apart from "scrolled
+        // to the bottom".
+        vm.messages += (1...12).map { i in
+            FriendMessage(id: "new\(i)", conversationId: fixtureConversationId,
+                          senderId: i % 2 == 0 ? fixtureMyId : fixtureFriendId,
+                          body: "ข้อความใหม่ \(i)", msgType: "text", attachmentUrl: nil,
+                          createdAt: iso(daysAgo: 0, hour: 10, minute: i))
+        }
+        vm.fixtureMarkHasOlder(fixtureConversationId)
+        return vm
+    }
+}
+
+struct ChatRoomPagingFixtureScreen: View {
+    @StateObject private var messages = MessagesViewModel.pagingFixture()
+    @StateObject private var balances = BalanceViewModel.fixture()
+    var body: some View {
+        NavigationStack {
+            FriendChatRoomView(
+                vm: messages,
+                conversationId: MessagesViewModel.fixtureConversationId,
+                currentUserId: MessagesViewModel.fixtureMyId,
+                friendName: "พลอย", friendAvatarUrl: nil, showsAvatars: true,
+                friendUserId: MessagesViewModel.fixtureFriendId,
+                balanceViewModel: balances)
+        }
+    }
+}
+
+struct AddFriendFixtureScreen: View {
+    @StateObject private var social = SocialViewModel.friendsFixture()
+    var body: some View { SocialAddFriendSheet(vm: social) }
+}
+#endif

@@ -15,6 +15,9 @@ import {
   verifyLineAccessToken,
 } from "@/lib/liff-auth"
 import { checkRateLimit } from "@/lib/rate-limit"
+import { isPublicInviteLanding } from "@/lib/friend-invite"
+import { loginPathFor } from "@/lib/invite-next"
+import { continuesToRoute, drainRequestBody } from "@/lib/middleware-body"
 
 const PUBLIC_LIFF_API_PATHS = new Set([
   "/api/liff/bill-info",
@@ -26,7 +29,19 @@ const PUBLIC_LIFF_API_PATHS = new Set([
 // in-app browser, not a human clicking around — never throttle them.
 const RATE_LIMIT_EXEMPT_PREFIXES = ["/api/webhooks/", "/api/liff/"]
 
+/**
+ * Every request goes through `handleRequest`; when it lets the request on to a route handler, the request body is read to
+ * its end first. Without that, Next 15.5 (Node.js runtime middleware) hands a body that is still arriving to the route
+ * "already read" and uploads that take longer than the middleware fail with an HTML 500 (see lib/middleware-body.ts).
+ * Redirects, 401s and 429s return at once, as before.
+ */
 export async function middleware(request: NextRequest) {
+  const response = await handleRequest(request)
+  if (continuesToRoute(response.headers)) await drainRequestBody(request)
+  return response
+}
+
+async function handleRequest(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   if (pathname.startsWith("/api/") && !RATE_LIMIT_EXEMPT_PREFIXES.some(p => pathname.startsWith(p))) {
@@ -127,10 +142,12 @@ export async function middleware(request: NextRequest) {
     || pathname.startsWith("/api/errors")     // client_error_logs — explicitly allows anon insert (route comment:
                                                  // "user might not be logged in yet"), but was missing here, so it
                                                  // was actually hitting this same redirect-instead-of-save bug
+    || isPublicInviteLanding(pathname, request.nextUrl.searchParams)  // static LINE landing for /friends/join/<token>?src=line — no DB, no session needed; the plain link stays behind login
     || pathname === "/"
 
   if (!user && !isPublic) {
-    const loginUrl = new URL("/login", request.url)
+    // keeps a friend-invite token across the login (lib/invite-next.ts); every other path goes to a bare /login
+    const loginUrl = new URL(loginPathFor(pathname), request.url)
     return NextResponse.redirect(loginUrl)
   }
 

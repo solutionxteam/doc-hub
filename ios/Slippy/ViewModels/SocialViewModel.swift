@@ -4,6 +4,7 @@ import Supabase
 @MainActor
 final class SocialViewModel: ObservableObject {
     @Published var friends: [UserProfile] = []
+    @Published var acceptedFriendships: [Friendship] = []
     @Published var pendingRequests: [Friendship] = []
     @Published var isLoading = false
     @Published var searchResults: [UserProfile] = []
@@ -98,22 +99,24 @@ final class SocialViewModel: ObservableObject {
                 .execute()
                 .value
 
+            // `userId` usually comes from `UUID.uuidString` (UPPERCASE) while Postgres
+            // returns lowercase uuids, so compare case-insensitively. A plain `==`
+            // never matched: the user was treated as the "other side" of their own
+            // requests and incoming requests were missed.
+            let me = userId.lowercased()
             let accepted = rows.filter { $0.status == "accepted" }
-            let incoming = rows.filter { $0.status == "pending" && $0.addresseeId == userId }
+            let incoming = rows.filter { $0.status == "pending" && $0.addresseeId.lowercased() == me }
 
             // Collect friend IDs from accepted friendships
             let friendIds = accepted.map { row in
-                row.requesterId == userId ? row.addresseeId : row.requesterId
+                row.requesterId.lowercased() == me ? row.addresseeId : row.requesterId
             }
 
             if !friendIds.isEmpty {
-                let profiles: [UserProfile] = try await db
-                    .from("users")
-                    .select("id, email, full_name, avatar_url")
-                    .in("id", values: friendIds)
-                    .execute()
-                    .value
-                friends = profiles
+                // Not a select on `users`: RLS lets a user read only their own row there, so that always came back
+                // empty. The RPC returns the profiles of people related to the caller (see ProfileDirectory).
+                let profiles = try await ProfileDirectory.fetch(ids: friendIds)
+                friends = friendIds.compactMap { profiles[$0.lowercased()] }
             } else {
                 friends = []
             }
@@ -122,20 +125,15 @@ final class SocialViewModel: ObservableObject {
             let requesterIds = incoming.map { $0.requesterId }
             var pendingWithProfiles = incoming
             if !requesterIds.isEmpty {
-                let requesterProfiles: [UserProfile] = try await db
-                    .from("users")
-                    .select("id, email, full_name, avatar_url")
-                    .in("id", values: requesterIds)
-                    .execute()
-                    .value
-                let profileMap = Dictionary(uniqueKeysWithValues: requesterProfiles.map { ($0.id, $0) })
+                let profileMap = try await ProfileDirectory.fetch(ids: requesterIds)
                 pendingWithProfiles = incoming.map { f in
                     var copy = f
-                    copy.friend = profileMap[f.requesterId]
+                    copy.friend = profileMap[f.requesterId.lowercased()]
                     return copy
                 }
             }
             pendingRequests = pendingWithProfiles
+            acceptedFriendships = accepted
 
         } catch {
             errorMessage = error.localizedDescription

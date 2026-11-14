@@ -43,6 +43,19 @@ struct DocumentDetailContentView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirmAction: String?
     @State private var isActing = false
+    @State private var showSplit = false
+    @StateObject private var splitVM = SplitViewModel()
+    #if DEBUG
+    private var previewLineItems: [EditableLineItem]? = nil
+    #endif
+
+    private var isPreviewDocument: Bool {
+        #if DEBUG
+        return previewLineItems != nil
+        #else
+        return false
+        #endif
+    }
 
     // ── Receipt image viewer ───────────────────────────────────────────────
     @State private var showImageViewer  = false
@@ -50,10 +63,21 @@ struct DocumentDetailContentView: View {
     @State private var isLoadingImage   = false
     @State private var imageLoadError: String?
 
+    // ── Footer actions: download / share the stored file, report a problem ──
+    /// Which footer button is fetching the file right now (the others are disabled meanwhile).
+    @State private var preparingFileFor: FooterFileAction?
+    @State private var shareRequest: ShareRequest?
+    @State private var fileActionError: String?
+    @State private var showReportSheet = false
+    @State private var reportNotice: String?
+
+    enum FooterFileAction { case download, share }
+
     // ── Edit mode ───────────────────────────────────────────────────────────
     @State private var isEditing       = false
     @State private var isSaving        = false
     @State private var isLoadingItems  = true
+    @State private var itemsLoadError: String?
     @State private var saveError: String?
     @State private var saveSuccess     = false
 
@@ -100,11 +124,37 @@ struct DocumentDetailContentView: View {
         _doc = State(initialValue: doc)
     }
 
+    #if DEBUG
+    init(previewDocument: SlippyDocument, items: [EditableLineItem]) {
+        _doc = State(initialValue: previewDocument)
+        previewLineItems = items
+        _lineItems = State(initialValue: items)
+        _isLoadingItems = State(initialValue: false)
+    }
+    #endif
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 headerCard
                 primaryButtonsRow
+                if !isEditing {
+                    if let itemsLoadError {
+                        Text(itemsLoadError).font(.caption).foregroundStyle(Color.statusFailed)
+                        Button { Task { await loadLineItems() } } label: {
+                            Label("โหลดรายการอีกครั้ง", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(isLoadingItems)
+                    }
+                    Button { showSplit = true } label: {
+                        Label("หารบิลจากใบเสร็จนี้", systemImage: "person.2.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity).padding(.vertical, 13)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("document.split")
+                    .disabled(isLoadingItems || itemsLoadError != nil || authVM.org?.id == nil)
+                }
 
                 infoCard
                 if !lineItems.isEmpty || isEditing { itemsCard }
@@ -116,8 +166,10 @@ struct DocumentDetailContentView: View {
                     // pre-upload review screen, i.e. before anyone knew what
                     // the document was. They belong where the document is
                     // actually looked at.
-                    DocumentTagsShareSection(documentId: doc.id)
-                        .environmentObject(authVM)
+                    if !isPreviewDocument {
+                        DocumentTagsShareSection(documentId: doc.id)
+                            .environmentObject(authVM)
+                    }
 
                     footerActionBar
                     statusActionButtons
@@ -130,6 +182,7 @@ struct DocumentDetailContentView: View {
         .navigationTitle("รายละเอียดเอกสาร")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            guard !isPreviewDocument else { return }
             await loadLineItems()
             if let orgId = authVM.org?.id { await categoriesVM.load(orgId: orgId) }
             await loadRepeatCount()
@@ -141,6 +194,40 @@ struct DocumentDetailContentView: View {
                 onSaveRotation: { newRotation in await saveRotation(newRotation) }
                 // returns Bool now — success/failure surfaced in the viewer's UI
             )
+        }
+        .sheet(item: $shareRequest) { request in
+            ActivityShareSheet(items: request.items) {
+                DocumentFileDownloader.discard(request.file)
+                shareRequest = nil
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showReportSheet) {
+            DocumentReportSheet(
+                documentTitle: "\(doc.vendorName ?? "เอกสาร") — \(fmtTHB(doc.totalAmount ?? 0))",
+                makeInsert: { category, note in makeReportInsert(category: category, note: note) },
+                onFinished: { outcome in
+                    reportNotice = outcome == .sent
+                        ? "ส่งรายงานแล้ว ขอบคุณที่แจ้งให้ทราบ ทีมงานจะตรวจสอบเอกสารนี้"
+                        : "คุณรายงานปัญหาประเภทนี้ของเอกสารนี้ไว้แล้ว ทีมงานกำลังตรวจสอบ"
+                }
+            )
+        }
+        .alert("ไม่สามารถดำเนินการได้", isPresented: Binding(
+            get: { fileActionError != nil },
+            set: { if !$0 { fileActionError = nil } }
+        )) {
+            Button("ตกลง", role: .cancel) { fileActionError = nil }
+        } message: { Text(fileActionError ?? "") }
+        .alert("รายงานปัญหา", isPresented: Binding(
+            get: { reportNotice != nil },
+            set: { if !$0 { reportNotice = nil } }
+        )) {
+            Button("ตกลง", role: .cancel) { reportNotice = nil }
+        } message: { Text(reportNotice ?? "") }
+        .sheet(isPresented: $showSplit) {
+            CreateSplitView(vm: splitVM, initialReceipt: splitExtraction, sourceDocumentID: doc.id)
+                .environmentObject(authVM)
         }
         .alert("ยืนยันการดำเนินการ", isPresented: Binding(
             get: { confirmAction != nil },
@@ -216,7 +303,7 @@ struct DocumentDetailContentView: View {
             // Document glyph tile
             ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(LinearGradient(colors: [Color(hex: "#8b83f7"), Color(hex: "#6366f1")],
+                    .fill(LinearGradient(colors: [Color(hex: "#8b83f7"), Color.brand500],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 68, height: 78)
                 Image(systemName: "doc.text.fill")
@@ -239,7 +326,7 @@ struct DocumentDetailContentView: View {
                     if let type = docTypeLabel {
                         Text(type)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(Color(hex: "#6366f1"))
+                            .foregroundColor(Color.accent)
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(Color.brand500.opacity(0.12))
                             .clipShape(Capsule())
@@ -252,7 +339,7 @@ struct DocumentDetailContentView: View {
                         Text("ซื้อร้านนี้มาแล้ว \(n) ครั้ง")
                             .font(.system(size: 11, weight: .semibold))
                     }
-                    .foregroundColor(Color(hex: "#059669"))
+                    .foregroundColor(Color.successText)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Color(hex: "#059669").opacity(0.12))
                     .clipShape(Capsule())
@@ -301,6 +388,23 @@ struct DocumentDetailContentView: View {
     }
 
     // MARK: – View original receipt photo
+
+    private var splitExtraction: SlipExtraction {
+        SlipExtraction(
+            vendorName: doc.vendorName,
+            totalAmount: doc.totalAmount,
+            subtotal: doc.subtotalAmount,
+            vatAmount: doc.vatAmount,
+            whtAmount: doc.whtAmount,
+            docDate: doc.docDate,
+            docNumber: doc.invoiceNumber,
+            lineItems: lineItems.map {
+                LineItem(name: $0.description, qty: Double($0.qty), unitPrice: Double($0.unitPrice),
+                         amount: Double($0.amount) ?? 0)
+            },
+            confidence: doc.overallConfidence ?? 0
+        )
+    }
 
     private var primaryButtonsRow: some View {
         VStack(spacing: 8) {
@@ -628,7 +732,7 @@ struct DocumentDetailContentView: View {
                 HStack {
                     TextField("ชื่อรายการ", text: item.description)
                         .font(.system(size: 13))
-                        .foregroundColor(Color(hex: "#1e1b4b"))
+                        .foregroundColor(Color.textPrimary)
                         .padding(8)
                         .background(Color.inputBg)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -674,7 +778,7 @@ struct DocumentDetailContentView: View {
             TextField("0", text: text)
                 .keyboardType(isInteger ? .numberPad : .decimalPad)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(Color(hex: "#1e1b4b"))
+                .foregroundColor(Color.textPrimary)
                 .onChange(of: text.wrappedValue) { _, newValue in
                     if isInteger {
                         let digitsOnly = newValue.filter(\.isNumber)
@@ -755,7 +859,7 @@ struct DocumentDetailContentView: View {
                 editAmountField("หัก ณ ที่จ่าย (WHT)", text: $whtText) { recalcTotal() }
                 if !lineItems.isEmpty {
                     Text("* ยอดก่อนภาษีคำนวณจากรายการสินค้าอัตโนมัติ")
-                        .font(.system(size: 10)).foregroundColor(Color(hex: "#9ca3af"))
+                        .font(.system(size: 10)).foregroundColor(Color.textSecondary)
                 }
             } else {
                 summaryRow("ราคาก่อนภาษี (Subtotal)", value: fmtTHB(Double(subtotalText) ?? 0))
@@ -776,7 +880,7 @@ struct DocumentDetailContentView: View {
                 Spacer()
                 Text(fmtTHB(Double(totalText) ?? 0))
                     .font(.system(size: 22, weight: .black, design: .rounded))
-                    .foregroundColor(Color(hex: "#059669"))
+                    .foregroundColor(Color.successText)
                     .lineLimit(1).minimumScaleFactor(0.6)
             }
         }
@@ -791,19 +895,77 @@ struct DocumentDetailContentView: View {
 
     private var footerActionBar: some View {
         HStack(spacing: 0) {
-            footerAction("ดาวน์โหลด", "square.and.arrow.down") {
-                hapticLight(); showImageViewer = true; Task { await loadSignedImageURL() }
-            }
+            footerFileAction("ดาวน์โหลด", "square.and.arrow.down", .download)
             footerDivider
-            ShareLink(item: shareSummaryText) { footerActionLabel("แชร์", "square.and.arrow.up") }
+            footerFileAction("แชร์", "square.and.arrow.up", .share)
             footerDivider
             footerAction("เพิ่มแท็ก", "tag") {
                 hapticLight(); saveSuccess = false; isEditing = true
             }
             footerDivider
-            ShareLink(item: reportText) { footerActionLabel("รายงานปัญหา", "flag") }
+            footerAction("รายงานปัญหา", "flag") {
+                hapticLight(); showReportSheet = true
+            }
         }
         .sectionCard()
+    }
+
+    /// ดาวน์โหลด / แชร์: fetch the stored file, then hand it to the system share sheet (ดาวน์โหลด = the file alone, so the
+    /// sheet's "Save to Files / Save Image" is what the user reaches for; แชร์ = the file plus the summary text).
+    private func footerFileAction(_ label: String, _ icon: String, _ kind: FooterFileAction) -> some View {
+        Button {
+            hapticLight()
+            Task { await prepareFile(for: kind) }
+        } label: {
+            if preparingFileFor == kind {
+                VStack(spacing: 5) {
+                    ProgressView().frame(height: 20)
+                    Text("กำลังโหลด…").font(.system(size: 10.5, weight: .medium))
+                }
+                .foregroundColor(Color.brand500)
+                .frame(maxWidth: .infinity)
+            } else {
+                footerActionLabel(label, icon)
+            }
+        }
+        .disabled(preparingFileFor != nil)
+        .accessibilityLabel(preparingFileFor == kind ? "\(label) กำลังโหลดไฟล์" : label)
+    }
+
+    private func prepareFile(for kind: FooterFileAction) async {
+        guard preparingFileFor == nil else { return }
+        guard !isPreviewDocument else {
+            fileActionError = "เอกสารตัวอย่างไม่มีไฟล์จริงให้ดาวน์โหลด"
+            return
+        }
+        preparingFileFor = kind
+        defer { preparingFileFor = nil }
+        do {
+            // A fresh, short-lived link each time (the cached one used by the image viewer may have expired).
+            let signed = try await SupabaseManager.shared.client
+                .storage.from(Config.storageBucket)
+                .createSignedURL(path: doc.filePath, expiresIn: 600)
+            let file = try await DocumentFileDownloader.download(from: signed, filePath: doc.filePath, documentId: doc.id)
+            shareRequest = ShareRequest(file: file, text: kind == .share ? shareSummaryText : nil)
+        } catch {
+            fileActionError = "ดาวน์โหลดไฟล์ไม่สำเร็จ: \(error.localizedDescription)"
+        }
+    }
+
+    /// The row for "รายงานปัญหา", or `nil` when there is no signed-in user.
+    private func makeReportInsert(category: DocumentReportCategory, note: String) -> DocumentReport.Insert? {
+        guard let reporterId = authVM.session?.user.id.uuidString.lowercased() else { return nil }
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? Config.appVersion
+        return DocumentReport.makeInsert(
+            documentId: doc.id.lowercased(),
+            organizationId: doc.organizationId.lowercased(),
+            reporterId: reporterId,
+            category: category,
+            note: note,
+            appVersion: version,
+            context: DocumentReport.makeContext(
+                vendorName: doc.vendorName, totalAmount: doc.totalAmount, status: doc.status,
+                source: doc.source, docType: doc.docType, validationIssues: doc.validationIssues ?? []))
     }
 
     private var footerDivider: some View {
@@ -830,10 +992,6 @@ struct DocumentDetailContentView: View {
         return lines.joined(separator: "\n")
     }
 
-    private var reportText: String {
-        "รายงานปัญหาเอกสาร\nร้าน: \(doc.vendorName ?? "-")\nยอดรวม: \(fmtTHB(doc.totalAmount ?? 0))\nรหัสเอกสาร: \(doc.id)"
-    }
-
     @ViewBuilder
     private var statusActionButtons: some View {
         if doc.status == "reviewing" {
@@ -854,7 +1012,7 @@ struct DocumentDetailContentView: View {
             if isEditing {
                 TextEditor(text: $notesText)
                     .font(.system(size: 13))
-                    .foregroundColor(Color(hex: "#1e1b4b"))
+                    .foregroundColor(Color.textPrimary)
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 80)
                     .padding(8)
@@ -892,10 +1050,10 @@ struct DocumentDetailContentView: View {
 
     private func editField(_ label: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.system(size: 10)).foregroundColor(Color(hex: "#6b7280"))
+            Text(label).font(.system(size: 10)).foregroundColor(Color.textSecondary)
             TextField(label, text: text)
                 .font(.system(size: 13))
-                .foregroundColor(Color(hex: "#1e1b4b"))
+                .foregroundColor(Color.textPrimary)
                 .padding(8)
                 .background(Color.inputBg)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -909,11 +1067,11 @@ struct DocumentDetailContentView: View {
     /// classification and gets overwritten on reprocessing.)
     private var categoryPickerRow: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("หมวดหมู่").font(.system(size: 10)).foregroundColor(Color(hex: "#6b7280"))
+            Text("หมวดหมู่").font(.system(size: 10)).foregroundColor(Color.textSecondary)
             HStack(spacing: 8) {
                 TextField("หมวดหมู่", text: $categoryText)
                     .font(.system(size: 13))
-                    .foregroundColor(Color(hex: "#1e1b4b"))
+                    .foregroundColor(Color.textPrimary)
                     .padding(8)
                     .background(Color.inputBg)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -957,7 +1115,7 @@ struct DocumentDetailContentView: View {
     private func editDateField(_ label: String, date: Binding<Date>,
                                 onChange: @escaping (Date) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.system(size: 10)).foregroundColor(Color(hex: "#6b7280"))
+            Text(label).font(.system(size: 10)).foregroundColor(Color.textSecondary)
             DatePicker("", selection: date, displayedComponents: .date)
                 .datePickerStyle(.compact)
                 .labelsHidden()
@@ -974,16 +1132,16 @@ struct DocumentDetailContentView: View {
     private func editAmountField(_ label: String, text: Binding<String>, disabled: Bool = false,
                                   onChange: @escaping () -> Void) -> some View {
         HStack {
-            Text(label).font(.system(size: 12)).foregroundColor(Color(hex: "#6b7280"))
+            Text(label).font(.system(size: 12)).foregroundColor(Color.textSecondary)
             Spacer()
             TextField("0", text: text)
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color(hex: "#1e1b4b"))
+                .foregroundColor(Color.textPrimary)
                 .frame(width: 110)
                 .padding(8)
-                .background(disabled ? Color(hex: "#f3f4f6") : Color(hex: "#f9fafb"))
+                .background(disabled ? Color.surfaceMuted : Color.inputBg)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .disabled(disabled)
                 .onChange(of: text.wrappedValue) { _, _ in onChange() }
@@ -992,7 +1150,7 @@ struct DocumentDetailContentView: View {
 
     private func summaryRow(_ label: String, value: String, valueColor: Color = Color.textPrimary) -> some View {
         HStack {
-            Text(label).font(.system(size: 12)).foregroundColor(Color(hex: "#6b7280"))
+            Text(label).font(.system(size: 12)).foregroundColor(Color.textSecondary)
             Spacer()
             Text(value).font(.system(size: 13, weight: .semibold)).foregroundColor(valueColor)
         }
@@ -1069,6 +1227,7 @@ struct DocumentDetailContentView: View {
 
     private func loadLineItems() async {
         isLoadingItems = true
+        itemsLoadError = nil
         vendorName  = doc.vendorName ?? ""
         companyName = doc.companyName ?? ""
         docDateText = doc.docDate ?? ""
@@ -1101,7 +1260,7 @@ struct DocumentDetailContentView: View {
                 EditableLineItem(
                     id: $0.id,
                     description: $0.description ?? "",
-                    qty: $0.quantity.map { String(Int($0.rounded())) } ?? "1",
+                    qty: $0.quantity.map { String($0) } ?? "1",
                     unitPrice: $0.unit_price.map { String(format: "%.2f", $0) } ?? "0",
                     amount: $0.amount.map { String(format: "%.2f", $0) } ?? "0",
                     isNew: false
@@ -1109,6 +1268,7 @@ struct DocumentDetailContentView: View {
             }
         } catch {
             lineItems = []
+            itemsLoadError = "โหลดรายการใบเสร็จไม่สำเร็จ กรุณาลองอีกครั้งก่อนหารบิล"
         }
         originalItemDescriptions = lineItems.map(\.description)
         isLoadingItems = false
